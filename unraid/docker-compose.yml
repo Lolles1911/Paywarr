@@ -1,0 +1,81 @@
+# Paymenter on Unraid.
+#
+# Same stack as Paymenter's own docker-compose.example.yml (MariaDB + Redis +
+# Paymenter), changed only where Unraid needs it:
+#   - port 8085 instead of 80, which the Unraid web UI already uses
+#   - data under /mnt/user/appdata/paymenter instead of next to this file
+#
+# Use it with the "Docker Compose Manager" plugin (Community Apps), or from a
+# terminal:  docker compose -f docker-compose.yml up -d
+#
+# BEFORE THE FIRST START: change both passwords below.
+
+x-common:
+  database: &db-environment
+    # Keep the "&db-password" anchor: Paymenter's own service reuses it below.
+    MYSQL_PASSWORD: &db-password "CHANGE_ME"
+    MYSQL_ROOT_PASSWORD: "CHANGE_ME_TOO"
+
+services:
+  database:
+    image: mariadb:lts
+    container_name: paymenter-db
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      # If your appdata share lives on a cache pool, /mnt/cache/appdata/... is
+      # the safer path for a database than the /mnt/user FUSE mount.
+      - "/mnt/user/appdata/paymenter/database:/var/lib/mysql"
+    environment:
+      <<: *db-environment
+      MYSQL_DATABASE: "paymenter"
+      MYSQL_USER: "paymenter"
+    networks:
+      - paymenter_nw
+
+  cache:
+    image: redis:alpine
+    container_name: paymenter-redis
+    restart: unless-stopped
+    networks:
+      - paymenter_nw
+
+  paymenter:
+    image: ghcr.io/paymenter/paymenter:latest
+    container_name: paymenter
+    restart: unless-stopped
+    depends_on:
+      - database
+      - cache
+    ports:
+      - "8085:80"
+    volumes:
+      - "/mnt/user/appdata/paymenter/var:/app/var/"
+      - "/mnt/user/appdata/paymenter/storage/logs:/app/storage/logs"
+      - "/mnt/user/appdata/paymenter/storage/public:/app/storage/app/public"
+      - "/mnt/user/appdata/paymenter/themes:/app/themes"
+      # The Wizarr extension goes in here - but only AFTER the first start.
+      # Paymenter copies its built-in extensions (Stripe among them) into this
+      # folder only when it is empty. See README.
+      - "/mnt/user/appdata/paymenter/extensions:/app/extensions"
+      - "app:/app"
+    environment:
+      DB_PASSWORD: *db-password
+      APP_ENV: "production"
+      CACHE_STORE: "redis"
+      REDIS_HOST: "cache"
+      DB_CONNECTION: "mariadb"
+      DB_HOST: "database"
+      DB_PORT: "3306"
+      # "false": built-in themes and extensions are refreshed on every start.
+      # Extensions that are not built in (like Wizarr) are left alone.
+      PAYMENTER_SKIP_DEFAULT: "false"
+    networks:
+      - paymenter_nw
+
+networks:
+  paymenter_nw:
+    driver: bridge
+
+volumes:
+  app:

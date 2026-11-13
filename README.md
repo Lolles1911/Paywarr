@@ -1,0 +1,688 @@
+# Paywarr
+
+**Sell access to your media library with Paymenter and Wizarr.**
+
+Paywarr is a server extension for [Paymenter](https://paymenter.org) that turns a paid
+subscription into access through [Wizarr](https://github.com/wizarrrr/wizarr)
+automatically, and takes the access away again when payments stop.
+
+```
+Customer buys a subscription in Paymenter ──pays via PayPal/Stripe──▶ invoice paid
+        │
+        ▼
+Paymenter calls the extension ──POST /api/invitations──▶ Wizarr
+        │                                                  │
+        │◀─────────── one-time invitation /j/<code> ───────┘
+        ▼
+"Service activated" email with the link  +  a button in the customer's client area
+```
+
+Everything customers see (the box at the bottom of the page, buttons,
+notices, the Discord page) follows the language Paymenter shows; see
+[Languages](#languages).
+
+## Who does what
+
+Paymenter decides **when**; the extension translates that into Wizarr:
+
+| Happens in Paymenter | The extension |
+|---|---|
+| First invoice paid | Creates a one-time invitation; the link goes into the email and the client area |
+| Renewal paid on time | Nothing. Paymenter just moves the due date and the user carries on |
+| Invoice overdue (default: 2 days) | Disables the user. If the link was never used, it is revoked |
+| Paid while suspended | Re-enables the same user, or sends a new invitation if that isn't possible |
+| Cancelled, or unpaid for too long (default: 14 days) | Deletes the user and the invitation |
+| The customer let the link expire | Button in the client area: "Get a new invitation link" |
+| Right after payment | Box at the bottom of every page: "Your access is ready – Create your user" (see below) |
+| The customer forgot their password | Button in the client area: "Reset password" (see below) |
+| Suspension/cancellation failed (Wizarr down) | Retried every hour until it goes through (see below) |
+| The product requires Discord | Only members of your Discord server can buy (see below) |
+| The shop is Discord-only | Only members can see categories, products and the cart (see below) |
+| Subscription active / ended | The customer gets / loses a Discord role, e.g. "Paid user" or "Trial" |
+| The "Seerr" add-on bought / ended | The customer gets / loses access to Seerr (requests) |
+| Trial ended | The user is disabled; if the customer buys, the same user is re-enabled (see below) |
+| You delete the customer in Paymenter | Access is removed everywhere first; otherwise the customer isn't deleted |
+
+## Installation
+
+The order matters: Paymenter must be up and have run once before the extension
+is added. Paymenter only copies its built-in extensions (Stripe, PayPal …) into
+the `extensions` folder while it is empty.
+
+### 1. Paymenter
+
+**LXC or a regular install** (e.g. the Proxmox helper script, Paymenter in
+`/opt/paymenter`): follow Paymenter's own guide under *Installation* at
+<https://paymenter.org/docs>. Afterwards, check two things that otherwise cause
+`500` errors:
+
+```bash
+crontab -u www-data -l                    # should show: * * * * * php /opt/paymenter/artisan schedule:run ...
+ps -eo user,cmd | grep "queue:work"       # should run as www-data
+```
+
+The scheduler (`schedule:run`) must run as the **web server's user** (usually
+`www-data`), not as root. If it is in root's crontab, move it:
+
+```bash
+(crontab -u www-data -l 2>/dev/null; echo '* * * * * php /opt/paymenter/artisan schedule:run >> /dev/null 2>&1') | crontab -u www-data -
+crontab -l | grep -v 'artisan schedule:run' | crontab -
+chown -R www-data:www-data /opt/paymenter/storage /opt/paymenter/bootstrap/cache
+```
+
+**Docker on Unraid:** use [`unraid/docker-compose.yml`](unraid/docker-compose.yml)
+with the *Docker Compose Manager* plugin. It is Paymenter's own compose file
+with port **8085** (80 belongs to Unraid) and data in
+`/mnt/user/appdata/paymenter`. Change the two passwords at the top, start the
+stack, and run the one-time commands:
+
+```bash
+docker exec -it paymenter php artisan app:init
+docker exec -it paymenter php artisan db:seed --class=CustomPropertySeeder
+docker exec -it paymenter php artisan app:user:create
+```
+
+### 2. Get the repo
+
+```bash
+git clone https://github.com/Lolles1911/paywarr.git /tmp/paywarr
+```
+
+### 3. Install the extension
+
+```bash
+bash /tmp/paywarr/unraid/install-extension.sh /opt/paymenter
+cd /opt/paymenter && su -s /bin/bash www-data -c "php artisan optimize:clear && php artisan queue:restart"
+```
+
+On Docker: `bash .../install-extension.sh` (no path) and `docker restart paymenter`.
+
+The script copies the whole extension folder to
+`<paymenter>/extensions/Servers/Wizarr/` and replaces any earlier version.
+Never run `php artisan` as root: the log and cache then end up owned by root,
+and the web server can't write to them.
+
+Check that Paymenter has found it:
+
+```bash
+su -s /bin/bash www-data -c "php artisan route:list --path=wizarr"   # the routes under wizarr/
+su -s /bin/bash www-data -c "php artisan schedule:list"              # a line with wizarr-retry-pending
+```
+
+### 4. Theme (optional)
+
+The extension works with Paymenter's default theme. A custom theme can add
+two things; see [For theme authors](#for-theme-authors).
+
+### 5. Reverse proxy
+
+Customers must be able to reach Paymenter over HTTPS. Add the proxy's IP under
+**Admin → Settings → Security** (trusted proxies); otherwise Paymenter builds
+wrong links. `APP_URL` must be the public `https://` address.
+
+### 6. Connect Paymenter to Wizarr
+
+Create a key in Wizarr: **Settings → API Keys**. Wizarr must have a
+**verified** media server (Settings → Servers → test and save).
+
+In Paymenter: **Admin → Servers → New server**, extension **Wizarr**:
+
+| Field | Value |
+|---|---|
+| Wizarr URL (internal) | `http://<ip>:<wizarr-port>`, the address Paymenter itself uses |
+| Wizarr URL (public) | The address customers open, e.g. `https://join.yourdomain.com` |
+| API key | The key from Wizarr |
+
+Press **Test Connection**. Use IP and port as the internal address, not
+container names. The Discord and Seerr fields on the same page are optional and
+described further down.
+
+### 7. Create the product
+
+**Admin → Products → New product**
+
+1. Create a price plan of type **Recurring**, e.g. 1 month. (A "Free" or
+   "One-time" plan never renews, and the customer gets no cancel button.)
+2. Select your Wizarr server under **Server**. The extension's fields then
+   appear:
+
+| Field | What |
+|---|---|
+| Media server | Which server (Plex/Jellyfin/Emby) the product gives access to |
+| Libraries | Empty = the server's default |
+| Invitation link is valid for | How long the customer has to create their user |
+| Access expires after (days) | **Leave empty for subscriptions.** Only for one-time-paid products |
+| Where customers watch | Optional. Becomes a button in the client area |
+| Trial: days | Only on a trial product; see *Trials* |
+| Seerr included | See *Seerr as a paid add-on* |
+| Discord role while active | See *Discord roles* |
+| Require Discord membership | See *Discord membership at checkout* |
+
+3. Put the link in the email. The product's **Email template** field is merged
+   into Paymenter's "Service activated" email. Write it in your customers'
+   language:
+
+```blade
+Click here to create your user: [{{ $invite_url ?? '' }}]({{ $invite_url ?? '' }})
+
+@if(!empty($invite_valid_for))
+The link works for {{ $invite_valid_for }} and can only be used once.
+@endif
+```
+
+   `$invite_valid_for` ("7 days") is in the site's default language
+   (**Admin → Settings → General → Default Language**), because the email is sent
+   from the queue, outside the customer's visit.
+
+Without the template the customer still gets the link, in the box at the bottom
+of the page and on the subscription in the client area, but not in the email.
+Email requires SMTP under **Admin → Settings → Mail**.
+
+### 8. Payment
+
+Enable a gateway under **Admin → Gateways**.
+
+- **PayPal:** Client ID and Secret from <https://developer.paypal.com/dashboard>
+  (*Apps & Credentials*), a webhook to
+  `https://<your-paymenter-address>/extensions/paypal/webhook` with the events
+  `PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.SALE.COMPLETED`,
+  `BILLING.SUBSCRIPTION.CREATED` and `VAULT.PAYMENT-TOKEN.DELETED`, and its
+  Webhook ID. For testing: the **Sandbox** toggle on the developer site and
+  **Test Mode** in Paymenter; pay with the sandbox "Personal" account or a card
+  from the *Credit Card Generator*. Remember to switch to Live keys and turn
+  Test Mode off before going live.
+- **Stripe:** <https://paymenter.org/docs/extensions/stripe>. Paymenter sets up
+  the webhook itself.
+
+### 9. Try it
+
+1. Buy the product as a regular customer (a private window).
+2. The box at the bottom changes from "Your access is being prepared" to
+   "Your access is ready". Create the user with the button.
+3. Under **Admin → Services** you can press Suspend / Unsuspend / Terminate and
+   watch the user get disabled, re-enabled and deleted.
+
+How long it takes from due date to suspension and deletion is set under
+**Admin → Settings → Cronjob** (default 2 and 14 days).
+
+## Updating
+
+```bash
+cd /tmp/paywarr && git pull
+bash /tmp/paywarr/unraid/install-extension.sh /opt/paymenter
+cd /opt/paymenter && su -s /bin/bash www-data -c "php artisan optimize:clear && php artisan queue:restart"
+```
+
+The version is in `extensions/Servers/Wizarr/Wizarr.php` (`version:`).
+
+## Troubleshooting
+
+| Not working | Run |
+|---|---|
+| Anything Discord (login, membership, roles) | `su -s /bin/bash www-data -c "php /tmp/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"` |
+| The Seerr add-on | `su -s /bin/bash www-data -c "php /tmp/paywarr/tools/seerr-check.php /opt/paymenter customer@example.com"` |
+| Everything else | `grep -h "Wizarr" /opt/paymenter/storage/logs/laravel-$(date +%F).log \| tail -20` |
+
+Both scripts walk through the setup step by step with `OK`/`FAIL` and
+never print keys or tokens. Typical findings: a digit missing from the Discord
+server ID, the bot lacks "Manage Roles", or the option value doesn't have the
+environment variable `ja`/`yes`.
+
+## "Your access is ready"
+
+![The box in the bottom right corner](screenshots/banner.png)
+
+As long as a customer has a paid subscription with an invitation that hasn't
+been used yet, every page in the client area shows a small box at the bottom:
+
+- **Right after payment:** "Your access is being prepared". Paymenter creates the invitation in the background a few seconds
+  after payment. The box checks every 3 seconds and moves to the next step on
+  its own, without reloading the page.
+- **Ready:** "Your access is ready" with the button **Create your user**,
+  which opens the invitation link directly.
+- **Expired:** "Your invitation link has expired" with a button to the
+  subscription, where the customer can get a new link.
+- **User created:** the box disappears by itself.
+
+The customer can close it with ✕; it comes back if the message changes (e.g.
+from "ready" to "expired").
+
+Pages don't get slower: the box is drawn from what is stored on the
+subscription and asks Wizarr in the background (at most 40 times a minute per
+customer). It uses the theme's colours, so it fits the default theme and
+custom themes alike. If the queue gives up on creating the invitation, the box stops
+waiting after 15 minutes.
+
+## Forgotten login
+
+The customer has two logins:
+
+- **The Paymenter account** (where they pay): Paymenter's own "Forgot password"
+  on the login page. It just needs Paymenter to be able to send email.
+- **The Jellyfin/Emby user** (where they watch): on an active subscription the
+  client area shows the **username** and a button **"Reset password"**. The
+  button asks Wizarr for a reset link and sends the
+  customer straight to Wizarr's page, where they choose a new password. The link
+  works for 24 hours, and a new click invalidates the previous one.
+
+The button only exists while the subscription is active, and only for the
+subscription's own user. Plex has no button, because Wizarr can't change a Plex
+password. If Wizarr can't be reached, the customer gets a short message to try
+again, and the actual error is written to Paymenter's log.
+
+## Safety net: failed suspensions
+
+Paymenter marks a subscription as suspended or cancelled even if the call to
+Wizarr failed, and doesn't try again. The customer would then keep watching
+without paying.
+
+So the extension puts a marker on the subscription while it suspends or
+cancels, and removes it once that has succeeded. **Every hour** it retries the
+subscriptions that still have the marker. If the customer pays in the meantime,
+the attempt is dropped. Subscriptions where everything went fine are not
+touched.
+
+This runs through Paymenter's scheduler, which also has to run for Paymenter to
+suspend at all. It must be in the server's crontab:
+
+```bash
+crontab -l -u www-data    # the user may have another name on your system
+# expected line:  * * * * * php /opt/paymenter/artisan schedule:run
+```
+
+You can see the attempts in `storage/logs/laravel.log` ("Wizarr: finished the
+suspend ..." or "... still fails, will retry").
+
+## Discord membership at checkout
+
+Tick **Require Discord membership** on a product, and only members of your
+Discord server can buy it.
+
+**How it works for the customer:**
+
+1. Under **Account → Discord** the customer presses "Connect Discord" and logs
+   in with Discord. Paymenter only gets the Discord name and
+   ID, not the email or server list.
+2. The page shows whether they are a member. If not, they get a button to join.
+3. At checkout Paymenter checks the membership. If they aren't a member (or not
+   connected), the purchase stops with a message and nothing is created.
+
+**Built-in rules:**
+
+- One Discord account can only be connected to one customer, so one member
+  can't buy through several accounts.
+- If Discord can't answer, the purchase waits ("try again in a moment") instead
+  of slipping through. The reason is in the log.
+- Also applies to free products, so a trial also requires membership.
+- The check only happens at purchase. Leaving Discord afterwards doesn't stop
+  the subscription.
+- A service you create for a customer yourself in admin isn't blocked.
+
+**Setup (once):**
+
+1. Go to <https://discord.com/developers/applications> → **New Application**,
+   and give it a name (e.g. the name of your shop).
+2. **OAuth2**: copy the **Client ID** and **Client Secret**. Under **Redirects**
+   add `https://<your-paymenter-address>/wizarr/discord/callback`.
+3. **Bot**: press **Reset Token** and copy it. Turn on **Server Members Intent**
+   in the same place. Discord doesn't say clearly whether the lookup needs it,
+   so turn it on to be safe.
+4. **OAuth2 → URL Generator**: choose the scope `bot`, no permissions. Open the
+   link and add the bot to your server.
+5. Find the server ID: Discord → Settings → Advanced → turn on
+   **Developer Mode**. Right-click the server → **Copy Server ID**.
+6. Create an invite link to the server that never expires.
+7. In Paymenter: **Admin → Servers → your Wizarr server**. Fill in the five
+   Discord fields and press **Test Connection**. It now also checks that the
+   bot is in your server.
+8. Tick **Require Discord membership** on the product.
+
+The menu item **Account → Discord** appears once all the Discord fields are
+filled in.
+
+## Log in with Discord
+
+When the Discord fields are filled in, the login page shows the button
+**"Log in or create an account with Discord"** below the regular form. The
+register page shows **"Create an account with Discord"** only with a theme that
+offers the `auth.register` hook (see [For theme authors](#for-theme-authors)):
+Paymenter's default theme has no place on the register page where an extension
+can insert it.
+
+| The customer | What happens |
+|---|---|
+| Has connected Discord before | Logged in (with two-factor if they have turned it on) |
+| New, Discord email verified and not used in Paymenter | The account is created and logged in, with Discord already connected |
+| The Discord email already exists in Paymenter | Refused: "log in with your password and connect Discord" |
+| No verified email on Discord | Refused |
+| "Disable User Registration" is on in Paymenter | Only existing connected accounts can log in |
+
+- **Never links on email.** Otherwise whoever took over a Discord account could
+  get into someone else's Paymenter account with the same email.
+- New accounts get their name from the Discord display name, a random password
+  ("Forgot password" sets a real one) and the email marked as verified.
+  Address, phone and other custom fields aren't asked for: Paymenter doesn't
+  require them at checkout, and the customer can fill them in under Account.
+- If you have set a link to terms of service in Paymenter, the text below the
+  button says that creating an account means accepting them.
+- Nothing needs to change in Discord: login and connecting use the same
+  redirect address (`/wizarr/discord/callback`).
+- If you have also turned on Paymenter's own **Discord login** (Settings →
+  Social Login), turn it off. It doesn't create accounts and doesn't know about
+  the connection, so there would be two different Discord buttons.
+
+## Shop for Discord members only
+
+Tick **Only Discord members can see the shop** on the Wizarr server. Categories,
+products and the cart then require the customer to be logged in, have
+connected Discord, and be a member of your server:
+
+| The customer is | Sent to |
+|---|---|
+| Not logged in | Login (and back afterwards) |
+| Logged in, no Discord | The Discord page: "Connect your Discord account" |
+| Connected, not a member | The Discord page with the button "Join our Discord" |
+| A member | The shop |
+| Admin | Always let in |
+
+- The home page, login, the account and the Discord page stay open.
+- Membership is remembered for 10 minutes. "I have joined – check again" on the
+  Discord page checks right away.
+- If Discord can't answer, the shop is closed ("try again in a moment") instead
+  of opened.
+- The **default theme** still shows the category names on the home page and
+  in the "Shop" menu; customers just can't open them. A custom theme can hide
+  them (see [For theme authors](#for-theme-authors)).
+
+## Discord roles
+
+Choose a role under **Discord role while active** on each product, e.g. "Paid
+user" on the paid one and "Trial" on the trial product. The list is fetched
+from your server.
+
+- The role is given at first payment, taken at suspension, given again at
+  payment, and taken at cancellation.
+- If the customer connects Discord later, they get the role right away. If they
+  remove the connection, the role is taken.
+- **Roles you have given yourself are not touched.** The extension remembers
+  which roles it has given and only takes those back.
+- If a call to Discord fails, the hourly run fixes it.
+- A role error never stops a payment or an invitation; it is written to the
+  log.
+
+If you run the trial as a coupon on the paid product, the customer gets "Paid
+user" from the start. If "Trial" should be a role of its own, make the trial a
+separate free product.
+
+**The bot needs permission:** Server Settings → Roles:
+
+1. Give the bot's role the **Manage Roles** permission.
+2. Drag the bot's role **above** "Paid user" and "Trial" in the list. A bot can
+   only give roles that are below its own.
+
+If either is missing, the log says: *"The bot may not give or take that
+role"*. Discord answers 50001 ("Missing Access") when the bot lacks Manage
+Roles, and 50013 when its role is too low.
+
+If you invited the bot "without permissions" as in the setup above, **Manage
+Roles** must be turned on for the **bot's own role** (the one with the same
+name as the bot), not on another role the bot also has.
+
+**If the roles don't work**, run the check script. It walks through the setup
+step by step, shows Discord's own replies, and runs the role update for one
+customer:
+
+```bash
+su -s /bin/bash www-data -c "php /tmp/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"
+```
+
+## Deleting a customer
+
+Paymenter's **Delete** on a user deletes the subscriptions directly in the
+database without telling the extension. So the extension listens for the
+deletion and removes the customer's access first: the Jellyfin/Wizarr user,
+unused invitations, the Seerr account and Discord roles.
+
+If the access can't be removed (e.g. because Wizarr is down), **the customer
+isn't deleted**, and admin shows "The user was not deleted" with the reason. Try again when Wizarr answers. That way there is
+never a Jellyfin user left behind without a customer in Paymenter.
+
+## Trials
+
+A free trial product that the extension manages from start to finish:
+
+| Happens | The extension |
+|---|---|
+| The customer creates their Jellyfin user | The trial starts (the time is fetched from Wizarr) |
+| During the trial | The client area shows "5 days left – ends …" and "Continue with a subscription"; the box at the bottom of the page shows the time left and "See subscriptions" (can be closed) |
+| The trial ends | The user is disabled (not deleted), the trial is closed, the "Trial" role is removed |
+| The customer buys a subscription, before or after the end | **The same user** is re-enabled and moved over: history and "continue watching" are kept. No new invitation |
+| Not bought 30 days after the end | The user is deleted |
+
+- The box at the bottom of the page says "Your trial has ended – See
+  subscriptions" for 14 days after the end, if the customer hasn't bought.
+- **New customers only:** checkout refuses a trial if the customer has had a
+  trial or a subscription before (whatever its status). Together with "one
+  Discord account per customer" this makes it awkward to take several trials.
+- On Plex a disabled user can't be turned back on; if the customer buys, they
+  get a new invitation instead.
+
+**Setup:**
+
+1. Create a product, e.g. "Try for free", with a **Free** plan and your Wizarr
+   server.
+2. Under the product's Wizarr fields: **Trial: days** = number of days (e.g. 7).
+   Leave **Access expires after** empty; it is ignored on trials anyway.
+3. Choose **Discord role while active** = "Trial" if you use roles, and
+   preferably tick **Require Discord membership**.
+4. Set **Per user limit** = 1 on the product (extra safety).
+5. The paid product needs nothing new: the takeover happens by itself.
+
+## Seerr as a paid add-on
+
+Seerr (Overseerr/Jellyseerr combined) can be sold as an add-on. Only customers
+who have bought it can log in to Seerr.
+
+| Happens | Seerr |
+|---|---|
+| The add-on is bought and the customer has created their Jellyfin user | The customer is imported into Seerr with Seerr's default permissions |
+| The subscription is suspended | The account is kept but loses all permissions (Seerr keeps people logged in for 30 days) |
+| Paid again | The permissions come back |
+| Cancelled, or the add-on deselected | The Seerr account is deleted, and with it the customer's requests in Seerr |
+
+The import happens as soon as the customer has created their user and opens a
+page in the client area, otherwise at the next full hour at the latest. Only
+works with Jellyfin/Emby, not Plex.
+
+**Customers who already had a Seerr account are not touched**, not even
+deleted when the add-on ends. Clean them up once in Seerr before you start.
+
+**Setup in Seerr:**
+
+1. Settings → Users: turn **Enable New Jellyfin Sign-In** off. Then only
+   imported users can log in.
+2. Same place: set **Default Permissions** to what buyers should be able to do
+   (e.g. Request).
+3. Settings → Network: **CSRF Protection** must be off (that is the default).
+   Otherwise Seerr rejects the extension's calls.
+4. Settings → General: copy the **API Key**.
+
+**Setup in Paymenter:**
+
+5. Admin → Servers → your Wizarr server: fill in **Seerr URL (internal)**,
+   **Seerr URL (public)** and **Seerr API key**, and press Test Connection.
+6. Admin → Configurable Options → New:
+   - Type: **Select** (a checkbox can't be added later in Paymenter)
+   - **Upgradable**: on, so the customer can add or remove it later
+   - Environment Variable: **`seerr`**
+   - Products: your subscription
+   - Options: **No** (env `no`, price 0) and **Yes** (env `yes`, your price per
+     period). The Danish `nej`/`ja` work too.
+7. If a product should always include Seerr (e.g. a premium plan), tick
+   **Seerr included** on the product instead.
+
+Customers with the add-on get the button **"Request movies and shows"** in the
+client area.
+
+If it doesn't work, run `tools/seerr-check.php` (see *Troubleshooting*).
+Typically `http://` or the whole internal address is missing, or the "Yes"
+option doesn't have the environment variable `yes`/`ja`.
+
+## Languages
+
+Customer texts follow the language Paymenter shows the visitor: the language
+switch in the menu if you allow several languages (**Admin → Settings →
+General → Allowed Languages**), otherwise the site's default language.
+
+| Language | File |
+|---|---|
+| English | Built in (the texts in the code) |
+| Danish | `extensions/Servers/Wizarr/lang/da.json` |
+
+Any other language shows English. To add one, copy `da.json` to the language's
+code, e.g. `de.json`, and translate the values on the right; leave the keys on
+the left as they are. Words starting with `:` (`:count`, `:name`) are filled in
+by the extension, so keep them. The test suite checks that `da.json` has every
+text the code uses, which is a quick way to see what a new language is missing.
+
+Messages for you (the log, Test Connection, the product fields in admin) are in
+English.
+
+## For theme authors
+
+The extension works with Paymenter's default theme. A custom theme can use
+two extra things:
+
+- **Sign-up with Discord on the register page.** Paymenter only has a hook on
+  the login page. Add this to your theme's `views/auth/register.blade.php`
+  (a copy of the default theme's), where the button should go:
+
+  ```blade
+  {!! hook('auth.register') !!}
+  ```
+
+- **Hide the subscriptions while the shop is closed.** When "Only Discord
+  members can see the shop" is on, `wizarr.shopLocked` says whether the
+  current visitor is kept out:
+
+  ```blade
+  @php($shopLocked = app()->bound('wizarr.shopLocked') && app('wizarr.shopLocked'))
+  @if ($shopLocked)
+      <a href="{{ route('extensions.wizarr.discord') }}">Log in / connect Discord to see the subscriptions</a>
+  @else
+      {{-- the product list --}}
+  @endif
+  ```
+
+  The binding only exists while the gate is on, hence the `bound()` check.
+
+- **Where "See subscriptions" lands.** The trial buttons link to the home page
+  at `#subscriptions`. Give your product list `id="subscriptions"` and the
+  page scrolls straight to it; without it, the visitor just lands on the home
+  page.
+
+## What you need to know about Plex and Jellyfin
+
+The two behave differently, and that is up to Wizarr, not the extension:
+
+- **Jellyfin/Emby** can disable a user. Suspension is a pause: same user, same
+  history when payment resumes.
+- **Plex** has no "disabled" state. Wizarr removes the share, and it can't be
+  turned back on. If the customer pays after a suspension, the extension
+  deletes the old record and **emails a new invitation**.
+- **If the media server is unreachable when Wizarr needs to disable, Wizarr
+  deletes the user instead.** On Jellyfin that means lost history. The customer
+  gets a new invitation at the next payment, so the access repairs itself.
+
+## Security choices in the code
+
+- **Always one-time invitations.** Wizarr's API sets `unlimited` to `true`
+  unless told otherwise, which would turn one subscription into a link anyone
+  can use.
+- **One subscription, one seat.** If "create" runs twice, the link is reused.
+  "Get a new link" only works if the old one was never used.
+- **Never guesses who the user is.** The extension follows the invitation's own
+  `used_by` and the users it has recorded itself, not the email address. If the
+  customer already has an account, it isn't touched.
+- **Doesn't trust a user ID alone.** IDs can be reused in Wizarr's database, so
+  both ID and username must match.
+- **Invitations are never created twice on network errors.** Everything else is
+  retried up to three times on short outages.
+- **Fails loudly.** If Wizarr can't be reached, the job fails instead of
+  pretending the access is closed.
+
+## Limitations
+
+- **If a suspension fails,** the safety net fixes it within an hour once Wizarr
+  answers again. Until then the user still has access.
+- **Refunds and chargebacks** haven't been looked into; expect to close the
+  access manually.
+- **The customer needs an account in Paymenter** to buy, created either with
+  email and password, or with one click through "Log in with Discord".
+- Wizarr returns `used_by` as `<User 12>`, although its documentation says
+  username. The extension understands both.
+
+## Tests
+
+```bash
+tests/run.sh      # requires php 8.3+, python3, curl
+```
+
+139 scenarios run the extension through the whole lifecycle against
+`tests/stub_wizarr.py` (which also plays Discord, including role permissions,
+and Seerr): first payment, the Seerr add-on through purchase, suspension,
+upgrade and cancellation, the shop gate, Discord roles through the whole
+subscription, the "your access is ready" box, the client area, an expired link,
+password reset, suspension and reopening on both Jellyfin and Plex,
+cancellation, the safety net, the Discord check at checkout, outages at Wizarr
+and Discord, that other users are not touched, and the languages (English,
+Danish, and that every text in the code has a Danish translation).
+
+`tests/banner/run.sh` runs the box's script in a real browser (Chromium):
+"being prepared" → "ready" without reloading, disappears when the user is
+created, can be closed, and keeps going after failed lookups. Requires Node and
+Playwright.
+
+Booting (routes, menu item, checkout check and the hourly run) is tested
+against small stand-ins whose methods are copied from Laravel 13.40, the
+version Paymenter v1.5.9 uses. If the code calls a method that doesn't exist
+there, the test fails. Not covered: what the Discord page looks like, and the
+Discord login itself.
+
+After installation you can check that everything is registered:
+
+```bash
+su -s /bin/bash www-data -c "php artisan route:list --path=wizarr"   # five routes
+su -s /bin/bash www-data -c "php artisan schedule:list"              # a line with wizarr-retry-pending
+```
+
+**What the tests prove, and what they don't.** The stub is written from
+Wizarr's source code (v2026.10), and Paymenter is replaced by small stand-ins
+in `tests/shims.php`, written from Paymenter's source code. The tests alone
+don't prove it works against a real Paymenter and Wizarr; step 9 above (*Try
+it*) does. Run it before you take on paying customers.
+
+## Files
+
+| File | Contents |
+|---|---|
+| `extensions/Servers/Wizarr/Wizarr.php` | The extension: configuration, the hooks, the client area |
+| `extensions/Servers/Wizarr/WizarrClient.php` | The calls to Wizarr's API |
+| `extensions/Servers/Wizarr/WizarrException.php` | Error type |
+| `extensions/Servers/Wizarr/DiscordClient.php` | Membership and role calls to Discord's API |
+| `extensions/Servers/Wizarr/DiscordException.php` | Error type |
+| `extensions/Servers/Wizarr/ShopGate.php` | The gatekeeper in front of the shop |
+| `extensions/Servers/Wizarr/SeerrClient.php` | The calls to Seerr (import, permissions, deletion) |
+| `extensions/Servers/Wizarr/SeerrException.php` | Error type |
+| `tools/discord-check.php` | Checks the Discord setup step by step |
+| `tools/seerr-check.php` | Checks the Seerr add-on for one customer |
+| `extensions/Servers/Wizarr/routes.php` | The pages under `/wizarr/discord` and the status lookup `/wizarr/status` |
+| `extensions/Servers/Wizarr/resources/views/discord.blade.php` | The customer's Discord page |
+| `extensions/Servers/Wizarr/lang/da.json` | Danish translation of everything customers see |
+| `unraid/docker-compose.yml` | The Paymenter stack adapted for Unraid |
+| `unraid/install-extension.sh` | Copies the extension into Paymenter |
+| `tests/` | Stub, stand-ins and scenarios |
+
+## License
+
+[MIT](LICENSE). Paymenter and Wizarr are separate projects with their own licenses.
