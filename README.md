@@ -51,10 +51,12 @@ the `extensions` folder while it is empty.
 
 ### 1. Paymenter
 
-**LXC or a regular install** (e.g. the Proxmox helper script, Paymenter in
-`/opt/paymenter`): follow Paymenter's own guide under *Installation* at
-<https://paymenter.org/docs>. Afterwards, check two things that otherwise cause
-`500` errors:
+Install Paymenter with its own guide under *Installation* at
+<https://paymenter.org/docs>, on a server, in a container (LXC) or with Docker.
+Paywarr works with all of them.
+
+**Regular install or LXC** (Paymenter in e.g. `/opt/paymenter`): check two
+things afterwards that otherwise cause `500` errors:
 
 ```bash
 crontab -u www-data -l                    # should show: * * * * * php /opt/paymenter/artisan schedule:run ...
@@ -70,17 +72,9 @@ crontab -l | grep -v 'artisan schedule:run' | crontab -
 chown -R www-data:www-data /opt/paymenter/storage /opt/paymenter/bootstrap/cache
 ```
 
-**Docker on Unraid:** use [`unraid/docker-compose.yml`](unraid/docker-compose.yml)
-with the *Docker Compose Manager* plugin. It is Paymenter's own compose file
-with port **8085** (80 belongs to Unraid) and data in
-`/mnt/user/appdata/paymenter`. Change the two passwords at the top, start the
-stack, and run the one-time commands:
-
-```bash
-docker exec -it paymenter php artisan app:init
-docker exec -it paymenter php artisan db:seed --class=CustomPropertySeeder
-docker exec -it paymenter php artisan app:user:create
-```
+**Docker:** use Paymenter's own `docker-compose.yml`. It keeps the extensions
+in an `extensions` folder next to the compose file, and that is the folder
+Paywarr goes into.
 
 ### 2. Get the repo
 
@@ -90,19 +84,27 @@ git clone https://github.com/Lolles1911/paywarr.git /tmp/paywarr
 
 ### 3. Install the extension
 
+Give the script the folder that holds Paymenter's `extensions` folder:
+
 ```bash
-bash /tmp/paywarr/unraid/install-extension.sh /opt/paymenter
-cd /opt/paymenter && su -s /bin/bash www-data -c "php artisan optimize:clear && php artisan queue:restart"
+bash /tmp/paywarr/install.sh /opt/paymenter          # regular install or LXC
+bash /tmp/paywarr/install.sh /path/to/compose-folder  # Docker
 ```
 
-On Docker: `bash .../install-extension.sh` (no path) and `docker restart paymenter`.
+The script copies the extension to `<folder>/extensions/Servers/Wizarr/` and
+replaces any earlier version.
 
-The script copies the whole extension folder to
-`<paymenter>/extensions/Servers/Wizarr/` and replaces any earlier version.
+- **Regular install or LXC:** it also reloads Paymenter (clears the caches and
+  restarts the queue workers) as the owner of `storage/`, usually `www-data`.
+- **Docker:** restart Paymenter afterwards, from the compose folder:
+  `docker compose restart paymenter`.
+
 Never run `php artisan` as root: the log and cache then end up owned by root,
 and the web server can't write to them.
 
-Check that Paymenter has found it:
+Check that Paymenter has found it (on Docker, replace `su -s /bin/bash www-data -c`
+with `docker compose exec -u nginx paymenter`, the web server's user in
+Paymenter's image):
 
 ```bash
 su -s /bin/bash www-data -c "php artisan route:list --path=wizarr"   # the routes under wizarr/
@@ -209,9 +211,10 @@ How long it takes from due date to suspension and deletion is set under
 
 ```bash
 cd /tmp/paywarr && git pull
-bash /tmp/paywarr/unraid/install-extension.sh /opt/paymenter
-cd /opt/paymenter && su -s /bin/bash www-data -c "php artisan optimize:clear && php artisan queue:restart"
+bash /tmp/paywarr/install.sh /opt/paymenter          # or your compose folder
 ```
+
+On Docker, then `docker compose restart paymenter`.
 
 The version is in `extensions/Servers/Wizarr/Wizarr.php` (`version:`).
 
@@ -222,6 +225,14 @@ The version is in `extensions/Servers/Wizarr/Wizarr.php` (`version:`).
 | Anything Discord (login, membership, roles) | `su -s /bin/bash www-data -c "php /tmp/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"` |
 | The Seerr add-on | `su -s /bin/bash www-data -c "php /tmp/paywarr/tools/seerr-check.php /opt/paymenter customer@example.com"` |
 | Everything else | `grep -h "Wizarr" /opt/paymenter/storage/logs/laravel-$(date +%F).log \| tail -20` |
+
+On Docker, copy the scripts into the container and run them there (Paymenter
+is in `/app` inside it), from the compose folder:
+
+```bash
+docker compose cp /tmp/paywarr/tools paymenter:/tmp/paywarr-tools
+docker compose exec -u nginx paymenter php /tmp/paywarr-tools/discord-check.php /app customer@example.com
+```
 
 Both scripts walk through the setup step by step with `OK`/`FAIL` and
 never print keys or tokens. Typical findings: a digit missing from the Discord
@@ -679,8 +690,7 @@ it*) does. Run it before you take on paying customers.
 | `extensions/Servers/Wizarr/routes.php` | The pages under `/wizarr/discord` and the status lookup `/wizarr/status` |
 | `extensions/Servers/Wizarr/resources/views/discord.blade.php` | The customer's Discord page |
 | `extensions/Servers/Wizarr/lang/da.json` | Danish translation of everything customers see |
-| `unraid/docker-compose.yml` | The Paymenter stack adapted for Unraid |
-| `unraid/install-extension.sh` | Copies the extension into Paymenter |
+| `install.sh` | Copies the extension into Paymenter and reloads it |
 | `tests/` | Stub, stand-ins and scenarios |
 
 ## License

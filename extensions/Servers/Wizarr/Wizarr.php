@@ -130,7 +130,7 @@ class Wizarr extends Server
                 'type' => 'text',
                 'required' => true,
                 'placeholder' => 'http://192.168.1.10:5690',
-                'description' => 'How Paymenter reaches Wizarr. On Unraid: http://<server IP>:<Wizarr port>. Never shown to customers.',
+                'description' => 'How Paymenter reaches Wizarr. E.g. http://<server IP>:<Wizarr port>. Never shown to customers.',
             ],
             [
                 'name' => 'public_url',
