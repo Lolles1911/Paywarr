@@ -4,11 +4,19 @@
 
 [![Tests](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml/badge.svg)](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml)
 
-**Sell access to your media library with Paymenter and Wizarr.**
+**Subscriptions and access management for your media server, with Paymenter and Wizarr.**
 
-Paywarr is a server extension for [Paymenter](https://paymenter.org) that turns a paid
+Paywarr is a server extension for [Paymenter](https://paymenter.org) that turns a
 subscription into access through [Wizarr](https://github.com/wizarrrr/wizarr)
-automatically, and takes the access away again when payments stop.
+automatically, and takes the access away again when it ends.
+
+**What it is for:** sharing the running costs of a server with family and
+friends, a club or community server, or content you own or have the rights
+to share (your own videos and productions, licensed material). Paywarr only
+automates who has access and for how long; it gives no right to charge for
+content you don't have the rights to. Check your media server's terms as
+well: Plex, for example, does not allow charging others for access. What you
+offer, and to whom, is your responsibility.
 
 ```
 Customer buys a subscription in Paymenter ──pays via PayPal/Stripe──▶ invoice paid
