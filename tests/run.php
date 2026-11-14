@@ -984,6 +984,7 @@ function freshBoot(bool $scheduleAlreadyResolved): \Illuminate\Foundation\FakeAp
     \Illuminate\Support\Facades\View::$namespaces = [];
     // A new request is a new PHP process: nothing registered yet.
     (new ReflectionProperty(Wizarr::class, 'refundListener'))->setValue(null, false);
+    (new ReflectionProperty(Wizarr::class, 'seerrGuardListener'))->setValue(null, false);
     if ($scheduleAlreadyResolved) {
         $app->make(\Illuminate\Console\Scheduling\Schedule::class);
     }
@@ -1019,6 +1020,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
     ok(in_array('auth.register', $events, true), 'and on the sign-up page');
     ok(count(\App\Models\User::$deleting) > 0, 'listens for customers being deleted');
     ok(in_array(\App\Events\InvoiceTransaction\Updated::class, $events, true), 'listens for refunds');
+    ok(in_array(\App\Events\InvoiceItem\Creating::class, $events, true) && in_array(\App\Events\ServiceUpgrade\Updated::class, $events, true), 'checks Requests at order and upgrade');
 
     // The scheduler is created later, when schedule:run starts.
     $schedule = $app->make(\Illuminate\Console\Scheduling\Schedule::class);
@@ -1527,6 +1529,110 @@ test('seerr packages: a suspended customer keeps the limit, and it is not sent a
     seerrSync($service, 'active');
     same(1, quotaPosts(), 'one call in all');
     same(5, seerrUser((int) $service->propertyArray()['seerr_user_id'])['movieQuotaLimit'], 'still 5');
+});
+
+/* ---------- Requests only with the media server Seerr is connected to ---------- */
+
+/** Product with Jellyfin (1), Plex (2) and Emby (4). */
+function allServers(array $overrides = []): array
+{
+    return settings($overrides + ['server_ids' => ['1', '2', '4'], 'library_ids' => '']);
+}
+
+/** Runs the check; returns the refusal shown to the customer, or null when allowed. */
+function seerrRefusal(array $properties, ?string $seerrType = 'jellyfin', array $product = []): ?string
+{
+    try {
+        ext(seerrSettings())->checkSeerrServer(allServers($product), $properties, $seerrType);
+
+        return null;
+    } catch (DisplayException $e) {
+        return $e->getMessage();
+    }
+}
+
+test('requests need Seerr\'s media server: allowed with it, refused without it', function () {
+    same(null, seerrRefusal(['media_server' => 'jellyfin', 'seerr' => 'yes']), 'Jellyfin');
+    same(null, seerrRefusal(['media_server' => 'jellyfin,emby', 'seerr' => '5']), 'Both includes Jellyfin');
+    same(null, seerrRefusal(['media_server' => 'all', 'seerr' => 'unlimited']), 'All');
+    same(null, seerrRefusal(['media_server' => 'emby', 'seerr' => 'no']), 'Emby without Requests');
+    same('Requests need Jellyfin. Choose a media server with Jellyfin, or remove Requests.', seerrRefusal(['media_server' => 'emby', 'seerr' => 'yes']), 'Emby only');
+    ok(seerrRefusal(['media_server' => 'plex', 'seerr' => '5']) !== null, 'Plex only');
+    ok(seerrRefusal(['media_server' => 'emby,plex', 'seerr' => 'yes']) !== null, 'Emby + Plex');
+    ok(seerrRefusal(['media_server' => 'emby'], 'jellyfin', ['seerr_included' => true]) !== null, 'Seerr included in the product counts too');
+});
+
+test('requests: Seerr connected to Emby turns it around', function () {
+    same(null, seerrRefusal(['media_server' => 'emby', 'seerr' => 'yes'], 'emby'), 'Emby');
+    same('Requests need Emby. Choose a media server with Emby, or remove Requests.', seerrRefusal(['media_server' => 'jellyfin', 'seerr' => 'yes'], 'emby'), 'Jellyfin only');
+    same('Anmodninger kræver Emby. Vælg en medieserver med Emby, eller fjern Anmodninger.', inLocale('da', fn () => seerrRefusal(['media_server' => 'jellyfin', 'seerr' => 'yes'], 'emby')), 'in Danish');
+});
+
+test('requests: asks Seerr what it is connected to, and lets the sale through if Seerr cannot answer', function () {
+    \Illuminate\Support\Facades\Cache::$store = [];
+    stub('/_test/set', ['seerr' => ['media' => 'emby']]);
+    same(null, seerrRefusal(['media_server' => 'emby', 'seerr' => 'yes'], null), 'Seerr says Emby');
+
+    \Illuminate\Support\Facades\Cache::$store = [];
+    Log::$warnings = [];
+    try {
+        ext(seerrSettings(['seerr_url' => 'http://127.0.0.1:1']))->checkSeerrServer(allServers(), ['media_server' => 'emby', 'seerr' => 'yes']);
+        $refused = false;
+    } catch (DisplayException $e) {
+        $refused = true;
+    }
+    same([false, 1], [$refused, count(Log::$warnings)], 'Seerr down: allowed, and logged');
+});
+
+test('requests: checked on the order\'s invoice line and on an upgrade, never when a paid upgrade completes', function () {
+    $service = service(60);
+    $service->configs = ['media_server' => 'emby', 'seerr' => 'yes'];
+    global $STUB;
+    $serverSettings = seerrSettings(['host' => $STUB . '/', 'api_key' => 'stub-key', 'public_url' => 'https://join.example.com/']);
+    $service->product = (object) ['server' => (object) ['extension' => 'Wizarr', 'settings' => $serverSettings], 'settings' => allServers()];
+    $item = (object) ['reference_type' => \App\Models\Service::class, 'reference' => $service];
+    $refused = fn (callable $fn) => (function () use ($fn) {
+        try {
+            $fn();
+
+            return false;
+        } catch (DisplayException $e) {
+            return true;
+        }
+    })();
+    \Illuminate\Support\Facades\Cache::$store = ['wizarr:seerr-media-type' => 'jellyfin'];
+    ok($refused(fn () => ext()->guardSeerrForItem($item)), 'order refused');
+
+    $upgrade = new class
+    {
+        public $status = 'pending';
+
+        public $invoice_id = 5;
+
+        public $service;
+
+        public $product;
+
+        public array $configs = [];
+
+        public array $changed = ['invoice_id'];
+
+        public function wasChanged($attribute): bool
+        {
+            return in_array($attribute, $this->changed, true);
+        }
+    };
+    $upgrade->service = service(61);
+    $upgrade->service->configs = ['media_server' => 'jellyfin', 'seerr' => 'yes'];
+    $upgrade->product = $service->product;
+    $upgrade->configs = [(object) ['configOption' => (object) ['env_variable' => 'media_server'], 'configValue' => (object) ['env_variable' => 'emby']]];
+    ok($refused(fn () => ext()->guardSeerrForUpgrade($upgrade)), 'switching to Emby only, keeping Requests: refused');
+
+    $upgrade->status = 'completed';
+    $upgrade->changed = ['status'];
+    ok(!$refused(fn () => ext()->guardSeerrForUpgrade($upgrade)), 'a paid upgrade completing is never stopped');
+    $upgrade->invoice_id = null;
+    ok($refused(fn () => ext()->guardSeerrForUpgrade($upgrade)), 'a free change completing at once is checked');
 });
 
 /* ---------- Jellyfin, Emby or both: one invitation per server ---------- */

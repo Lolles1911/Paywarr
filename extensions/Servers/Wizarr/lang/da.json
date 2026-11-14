@@ -44,6 +44,7 @@
     "Please reload the page and try again.": "Genindlæs siden, og prøv igen.",
     "Request movies and shows": "Anmod om film og serier",
     "Requests": "Anmodninger",
+    "Requests need :server. Choose a media server with :server, or remove Requests.": "Anmodninger kræver :server. Vælg en medieserver med :server, eller fjern Anmodninger.",
     "Reset password": "Nulstil adgangskode",
     "Reset password on :server": "Nulstil adgangskode på :server",
     "See subscriptions": "Se abonnementer",

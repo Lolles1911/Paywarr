@@ -262,6 +262,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "GET" and path == "/status":
             return self.send_json(200, {"version": "3.5.1"})
+        if method == "GET" and path == "/settings/main":
+            # server/constants/server.ts: PLEX = 1, JELLYFIN = 2, EMBY = 3
+            return self.send_json(200, {"mediaServerType": {"plex": 1, "jellyfin": 2, "emby": 3}.get(st["media"], 4), "applicationTitle": "Seerr"})
         if method == "GET" and path == "/settings/jellyfin/users":
             jf = [{"id": f"jf-{u['username']}", "username": u["username"]} for u in STATE["users"] if server_by_id(u["server_id"])["server_type"] == st["media"]]
             return self.send_json(200, [{"id": "jf-owner", "username": "owner"}] + jf)

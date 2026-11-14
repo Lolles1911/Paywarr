@@ -5,7 +5,9 @@ namespace Paymenter\Extensions\Servers\Wizarr;
 use App\Attributes\ExtensionMeta;
 use App\Classes\Extension\Server;
 use App\Events\Service\Created as ServiceCreated;
+use App\Events\InvoiceItem\Creating as InvoiceItemCreating;
 use App\Events\InvoiceTransaction\Updated as TransactionUpdated;
+use App\Events\ServiceUpgrade\Updated as ServiceUpgradeUpdated;
 use App\Jobs\Server\SuspendJob;
 use App\Exceptions\DisplayException;
 use App\Helpers\ExtensionHelper;
@@ -57,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.12.1',
+    version: '1.13.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -456,6 +458,14 @@ class Wizarr extends Server
             Event::listen(TransactionUpdated::class, function (TransactionUpdated $event) {
                 $this->afterRefund($event->invoiceTransaction);
             });
+        }
+
+        // Requests (Seerr) only with a media server Seerr knows: checked when
+        // the order's or upgrade's invoice is made, so nothing is charged.
+        if (!self::$seerrGuardListener) {
+            self::$seerrGuardListener = true;
+            Event::listen(InvoiceItemCreating::class, fn (InvoiceItemCreating $event) => $this->guardSeerrForItem($event->invoiceItem));
+            Event::listen(ServiceUpgradeUpdated::class, fn (ServiceUpgradeUpdated $event) => $this->guardSeerrForUpgrade($event->serviceUpgrade));
         }
 
         // "Your access is ready" banner on every page of the client area.
@@ -1977,6 +1987,76 @@ HTML;
             $state = ['active' => 'active', 'suspended' => 'suspended', 'cancelled' => 'ended'][$service->status];
             $this->syncSeerrQuietly($service, $state);
         }
+    }
+
+    private static bool $seerrGuardListener = false;
+
+    /**
+     * Refuses Requests (Seerr) for a choice of media servers that Seerr is
+     * not connected to: Seerr only imports users of its own media server, so
+     * the customer would pay for something they cannot use. If Seerr or
+     * Wizarr cannot be asked, the purchase goes ahead (and is logged).
+     *
+     * @param  string|null  $seerrType  for tests; asked from Seerr otherwise
+     */
+    public function checkSeerrServer(array $productSettings, array $properties, ?string $seerrType = null): void
+    {
+        if (!$this->seerrConfigured() || !$this->wantsSeerr($productSettings, $properties)) {
+            return;
+        }
+        try {
+            $seerrType ??= Cache::remember('wizarr:seerr-media-type', 3600, fn () => $this->seerr()->mediaServerType());
+            if ($seerrType === null) {
+                return;
+            }
+            $types = array_map(fn ($id) => $this->serverInfo()[$id]['type'] ?? '', $this->chosenServerIds($productSettings, $properties));
+        } catch (Throwable $e) {
+            Log::warning('Wizarr: could not check that Requests fit the chosen media server; the purchase goes ahead: ' . $e->getMessage());
+
+            return;
+        }
+        if (!in_array($seerrType, $types, true)) {
+            $name = ['jellyfin' => 'Jellyfin', 'emby' => 'Emby', 'plex' => 'Plex'][$seerrType] ?? $seerrType;
+
+            throw new DisplayException(self::t('Requests need :server. Choose a media server with :server, or remove Requests.', ['server' => $name]));
+        }
+    }
+
+    /** InvoiceItem "creating": an order's line, after its options are saved. */
+    public function guardSeerrForItem($item): void
+    {
+        if (($item->reference_type ?? null) !== Service::class || !($service = $item->reference)) {
+            return;
+        }
+        $server = $service->product?->server;
+        if ($server?->extension !== 'Wizarr') {
+            return;
+        }
+        (new static(ExtensionHelper::settingsToArray($server->settings)))
+            ->checkSeerrServer(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service));
+    }
+
+    /**
+     * ServiceUpgrade "updated", after the new options are saved: when its
+     * invoice is attached, or when a free change is completed at once. Never
+     * when a paid upgrade completes after payment.
+     */
+    public function guardSeerrForUpgrade($upgrade): void
+    {
+        $invoiceAttached = $upgrade->status === 'pending' && $upgrade->wasChanged('invoice_id');
+        $freeCompleted = $upgrade->status === 'completed' && $upgrade->wasChanged('status') && empty($upgrade->invoice_id);
+        $server = $upgrade->product?->server;
+        if ((!$invoiceAttached && !$freeCompleted) || $server?->extension !== 'Wizarr') {
+            return;
+        }
+
+        // The service's options, with the upgrade's new choices on top.
+        $properties = ExtensionHelper::getServiceProperties($upgrade->service);
+        foreach ($upgrade->configs as $config) {
+            $properties[$config->configOption->env_variable] = $config->configValue->env_variable ?? $config->configValue->name;
+        }
+        (new static(ExtensionHelper::settingsToArray($server->settings)))
+            ->checkSeerrServer(ExtensionHelper::settingsToArray($upgrade->product->settings), $properties);
     }
 
     private function seerrConfigured(): bool

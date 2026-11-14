@@ -661,6 +661,20 @@ deleted when the add-on ends. Clean them up once in Seerr before you start.
 Customers with the add-on get the button **"Request movies and shows"** in the
 client area.
 
+### Requests need Seerr's media server
+
+Seerr is connected to one media server (Jellyfin, Emby or Plex) and can only
+give accounts to that server's users. So a customer who picks Requests must
+also have that server: with Seerr on Jellyfin, "Emby" plus Requests is
+refused at checkout ("Requests need Jellyfin. Choose a media server with
+Jellyfin, or remove Requests."), while "Jellyfin" or "Both" is fine. The same
+check runs when a customer changes their choice later. Nothing is created or
+charged when it refuses.
+
+Paywarr asks Seerr which server it is connected to (and remembers it for an
+hour). If Seerr can't be reached, the purchase goes ahead and the log says
+why, so an outage never blocks sales.
+
 ### Request packages
 
 Instead of a plain Yes, the `seerr` option can sell packages with a limit on
@@ -791,7 +805,12 @@ gets every server on the product.
 
 Suspension, paying again and cancelling apply to every server. **Seerr** is
 connected to one media server: the customer's user on that one gets the
-Seerr account.
+Seerr account (see *Requests need Seerr's media server*).
+
+**Plex** works the same way: add it in Wizarr, select it on the product, and
+add an option with env `plex` (or `all` for every server on the product).
+Plex shares your library with the customer's own Plex account instead of
+creating a user; see *What you need to know about Plex, Jellyfin and Emby*.
 
 **Subscriptions from before version 1.11** keep their single invitation as it
 is. If such a customer adds Emby later, they get an invitation for Emby, and
@@ -846,7 +865,7 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-171 scenarios run the extension through the whole lifecycle against
+175 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole

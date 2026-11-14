@@ -79,6 +79,14 @@ class SeerrClient
         $this->call('post', '/user/' . $id . '/settings/permissions', ['permissions' => $permissions]);
     }
 
+    /** The media server Seerr is connected to: 'plex', 'jellyfin', 'emby', or null when none is set up. */
+    public function mediaServerType(): ?string
+    {
+        $type = (int) (($this->call('get', '/settings/main') ?? [])['mediaServerType'] ?? 0);
+
+        return [1 => 'plex', 2 => 'jellyfin', 3 => 'emby'][$type] ?? null;
+    }
+
     /**
      * The user's own request limits: [limit, days], each null when Seerr's
      * defaults apply. Movies and TV are set alike, so the movie values are read.
