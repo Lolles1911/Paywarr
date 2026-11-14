@@ -773,10 +773,11 @@ translation).
 created, can be closed, and keeps going after failed lookups. Requires Node and
 Playwright.
 
-GitHub runs both on every push and pull request
-([Actions](https://github.com/Lolles1911/paywarr/actions)). A release is made
-by pushing a tag such as `v1.10.0`: it must match the version in `Wizarr.php`,
-and the tests must pass.
+The tests are in the repository, not in the downloads on the Releases page;
+clone the repository to run them. GitHub runs both on every push and pull request
+([Actions](https://github.com/Lolles1911/paywarr/actions)). A release gets a
+tag such as `v1.10.0`, pushed or made with **Draft a new release** on GitHub:
+the tag must match the version in `Wizarr.php`, and the tests must pass.
 
 Booting (routes, menu item, checkout check and the hourly run) is tested
 against small stand-ins whose methods are copied from Laravel 13.40, the
