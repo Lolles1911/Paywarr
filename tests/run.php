@@ -695,7 +695,7 @@ test('a suspension that failed is finished by the hourly retry', function () {
 
     stub('/_test/set', ['fail_next' => 0]);             // Wizarr is back
     $result = ext()->retryPending([$service], hookRunner(settings()));
-    same(['retried' => 1, 'failed' => 0], $result, 'retried once');
+    same(['retried' => 1, 'failed' => 0, 'errors' => []], $result, 'retried once');
     same(true, state()['users'][0]['is_disabled'], 'access closed');
     ok(!isset($service->propertyArray()['wizarr_pending']), 'marker cleared');
 });
@@ -752,7 +752,7 @@ test('a retry that still fails is logged and kept for the next hour', function (
     $service->status = 'suspended';
 
     $result = ext()->retryPending([$service], hookRunner(settings()));
-    same(['retried' => 0, 'failed' => 1], $result, 'counted as failed');
+    same([1, 0, [1]], [$result['failed'], $result['retried'], array_keys($result['errors'])], 'counted as failed, with the reason');
     same('suspend', $service->propertyArray()['wizarr_pending'] ?? null, 'marker kept');
     same(1, count(Log::$warnings), 'logged');
     stub('/_test/set', ['fail_next' => 0]);
@@ -1460,6 +1460,83 @@ test('refund: Paymenter\'s status enum is understood, and cents do not count as 
     ok(ext()->fullyRefunded([transaction(10.10, 10.1)]), 'float rounding');
     ok(!ext()->fullyRefunded([transaction(10.10, 10.09)]), 'a cent kept is a partial refund');
     ok(!ext()->fullyRefunded([]), 'no payments');
+});
+
+/* ---------- alerts ---------- */
+
+/** A paid Wizarr subscription that got $age seconds ago and has no invitation yet. */
+function waitingService(int $id, int $age): \App\Models\Service
+{
+    $service = wizarrService($id);
+    $service->updated_at = new DateTimeImmutable('@' . (time() - $age));
+
+    return $service;
+}
+
+/** Records what reportHealth() sends instead of sending it. */
+function recorder(array &$sent, bool $fail = false): Closure
+{
+    return function (string $method, string $url, array $body) use (&$sent, $fail) {
+        $sent[] = [$method, $url, $body];
+        if ($fail) {
+            throw new RuntimeException('Discord said no');
+        }
+    };
+}
+
+const WEBHOOK = 'https://discord.com/api/webhooks/1/abc';
+
+test('alerts: all well -> nothing posted, but the heartbeat is opened', function () {
+    \Illuminate\Support\Facades\Cache::$store = [];
+    $sent = [];
+    $posted = ext(['alert_webhook' => WEBHOOK, 'heartbeat_url' => 'https://kuma.example.com/api/push/x'])
+        ->reportHealth(['failed' => 0, 'errors' => []], [subscribed(settings())], recorder($sent));
+    same(null, $posted, 'nothing to say');
+    same([['get', 'https://kuma.example.com/api/push/x', []]], $sent, 'only the heartbeat');
+});
+
+test('alerts: an invitation stuck for over 15 minutes points at the queue', function () {
+    $problems = ext()->healthProblems([], [waitingService(51, 20 * 60), waitingService(52, 5 * 60), wizarrService(53, [], 'Pterodactyl')]);
+    same(1, count($problems), 'one problem: ' . json_encode($problems));
+    ok(str_contains($problems[0], '#51') && !str_contains($problems[0], '#52') && !str_contains($problems[0], '#53'), 'only the old one of ours');
+    ok(str_contains($problems[0], 'queue worker'), 'says where to look');
+});
+
+test('alerts: failing suspensions and an unreachable Wizarr are reported', function () {
+    $problems = ext()->healthProblems(['failed' => 1, 'errors' => [7 => 'Wizarr answered 503']], []);
+    ok(str_contains($problems[0] ?? '', '#7') && str_contains($problems[0], 'still have access') && str_contains($problems[0], '503'), 'failing suspension: ' . json_encode($problems));
+    $down = ext(['host' => 'http://127.0.0.1:1'])->healthProblems([], []);
+    ok(count($down) === 1 && str_starts_with($down[0], 'Wizarr cannot be reached'), 'Wizarr down: ' . json_encode($down));
+    $many = ext()->healthProblems(['errors' => array_fill_keys(range(1, 8), 'x')], []);
+    ok(str_contains($many[0], '#1, #2, #3, #4, #5 and 3 more'), 'long lists are cut: ' . $many[0]);
+});
+
+test('alerts: posted once, again only when it changes or a day later, and "all good" once', function () {
+    \Illuminate\Support\Facades\Cache::$store = [];
+    $sent = [];
+    $w = ext(['alert_webhook' => WEBHOOK]);
+    $stuck = [waitingService(54, 3600)];
+    $t = time();
+
+    ok($w->reportHealth([], $stuck, recorder($sent), $t) !== null, 'first time: posted');
+    same(null, $w->reportHealth([], $stuck, recorder($sent), $t + 3600), 'an hour later: quiet');
+    ok($w->reportHealth(['errors' => [9 => 'x']], $stuck, recorder($sent), $t + 7200) !== null, 'a new problem: posted');
+    ok($w->reportHealth(['errors' => [9 => 'x']], $stuck, recorder($sent), $t + 7200 + 86400) !== null, 'a day later: reminded');
+    same('**Paywarr: all good again.** The problems reported earlier are gone.', $w->reportHealth([], [], recorder($sent), $t + 90000 + 7200), 'recovered');
+    same(null, $w->reportHealth([], [], recorder($sent), $t + 90000 + 10800), 'and then quiet');
+    same(4, count($sent), 'four messages in all');
+    same(['parse' => []], $sent[0][2]['allowed_mentions'] ?? null, 'never pings anyone');
+    same(WEBHOOK, $sent[0][1], 'to the webhook');
+});
+
+test('alerts: a broken webhook never breaks the hourly run', function () {
+    \Illuminate\Support\Facades\Cache::$store = [];
+    Log::$warnings = [];
+    $sent = [];
+    ext(['alert_webhook' => WEBHOOK, 'heartbeat_url' => 'https://kuma.example.com/x'])
+        ->reportHealth([], [waitingService(55, 3600)], recorder($sent, fail: true));
+    same(2, count($sent), 'webhook and heartbeat both tried');
+    same(2, count(Log::$warnings), 'both failures logged');
 });
 
 /* ---------- languages ---------- */

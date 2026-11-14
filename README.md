@@ -1,5 +1,7 @@
 # Paywarr
 
+[![Tests](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml/badge.svg)](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml)
+
 **Sell access to your media library with Paymenter and Wizarr.**
 
 Paywarr is a server extension for [Paymenter](https://paymenter.org) that turns a paid
@@ -210,6 +212,9 @@ How long it takes from due date to suspension and deletion is set under
 
 ## Updating
 
+What changed in each version is on the
+[Releases](https://github.com/Lolles1911/paywarr/releases) page.
+
 ```bash
 cd /opt/paywarr && git pull
 bash /opt/paywarr/install.sh /opt/paymenter          # or your compose folder
@@ -274,6 +279,62 @@ docker compose exec -T database sh -c 'mariadb-dump --single-transaction -u "$MY
   folder in your container backups.
 - **Restore:** unpack the archive, load `database.sql` with
   `mariadb <database> < database.sql`, and put `env` back as `.env`.
+
+### Alerts
+
+Paywarr can tell you on Discord when something needs you. Once an hour it
+checks for:
+
+- **Suspensions or cancellations that keep failing.** Those customers still
+  have access (see *Safety net* below).
+- **Wizarr not answering.**
+- **Paid subscriptions with no invitation after 15 minutes.** That almost
+  always means Paymenter's queue worker isn't running, so nobody gets an
+  invitation until it is fixed.
+
+A problem is posted once, again when it changes or after a day if it is still
+there, and you get an "all good again" when it's gone. The messages never
+mention anyone.
+
+1. In Discord, open the settings of a private channel → **Integrations** →
+   **Webhooks** → **New Webhook** → **Copy Webhook URL**.
+2. Paste it into **Alerts: Discord webhook** on the Wizarr server in Paymenter.
+
+**The hourly run itself can stop** (the scheduler's cron line is gone, or the
+machine is down), and then nothing above is checked. To hear about that, use
+an uptime monitor such as [Uptime Kuma](https://github.com/louislam/uptime-kuma):
+
+1. Add a monitor of type **Push**, with a heartbeat interval of 7200 seconds,
+   and copy its push URL.
+2. Paste it into **Alerts: heartbeat URL**. Paywarr opens it after every hourly
+   run; when it stops, Uptime Kuma warns you.
+
+While you are in Uptime Kuma, add **HTTP** monitors for the public addresses of
+Paymenter, Wizarr and Jellyfin, with a Discord notification.
+
+### Email that arrives
+
+Invitations go out by email, and mail from a domain without SPF and DKIM
+often lands in spam. Check the address under **Admin → Settings → Mail**
+(the *From* address) and set up its domain with your mail provider:
+
+| Record | Where | What |
+|---|---|---|
+| SPF | `TXT` on your domain | Which servers may send for it, e.g. `v=spf1 include:<your provider> ~all`. Only one SPF record per domain: add to the existing one |
+| DKIM | `TXT` or `CNAME`, name given by the provider | A signature key. Your mail provider gives you the exact record |
+| DMARC | `TXT` on `_dmarc.<your domain>` | What to do with mail that fails. Start with `v=DMARC1; p=none` |
+
+Check what is published (replace the domain):
+
+```bash
+dig +short TXT example.com            # should include v=spf1 ...
+dig +short TXT _dmarc.example.com     # should start with v=DMARC1
+```
+
+Then buy a test subscription with an address at Gmail or Outlook and see that
+the "Service activated" mail lands in the inbox. Sending through a personal
+Gmail account works too, but the *From* address must then be that Gmail
+address.
 
 ## "Your access is ready"
 
@@ -696,20 +757,26 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-139 scenarios run the extension through the whole lifecycle against
+148 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
 subscription, the "your access is ready" box, the client area, an expired link,
 password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
-and Discord, that other users are not touched, and the languages (English,
-Danish, and that every text in the code has a Danish translation).
+and Discord, that other users are not touched, refunds, the alerts, and the
+languages (English, Danish, and that every text in the code has a Danish
+translation).
 
 `tests/banner/run.sh` runs the box's script in a real browser (Chromium):
 "being prepared" → "ready" without reloading, disappears when the user is
 created, can be closed, and keeps going after failed lookups. Requires Node and
 Playwright.
+
+GitHub runs both on every push and pull request
+([Actions](https://github.com/Lolles1911/paywarr/actions)). A release is made
+by pushing a tag such as `v1.10.0`: it must match the version in `Wizarr.php`,
+and the tests must pass.
 
 Booting (routes, menu item, checkout check and the hourly run) is tested
 against small stand-ins whose methods are copied from Laravel 13.40, the
@@ -750,6 +817,7 @@ it*) does. Run it before you take on paying customers.
 | `extensions/Servers/Wizarr/lang/da.json` | Danish translation of everything customers see |
 | `install.sh` | Copies the extension into Paymenter and reloads it |
 | `tests/` | Stub, stand-ins and scenarios |
+| `.github/workflows/` | Tests on every push, releases from tags |
 
 ## License
 

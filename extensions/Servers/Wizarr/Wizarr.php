@@ -162,6 +162,22 @@ class Wizarr extends Server
                 ],
                 'description' => 'Refunds made with the Refund button on an invoice in Paymenter. Partial refunds never change anything.',
             ],
+            [
+                'name' => 'alert_webhook',
+                'label' => 'Alerts: Discord webhook',
+                'type' => 'password',
+                'required' => false,
+                'encrypted' => true,
+                'description' => 'Optional. Paywarr posts here when something needs you: suspensions that keep failing, Wizarr down, invitations stuck in the queue. Discord: channel settings -> Integrations -> Webhooks.',
+            ],
+            [
+                'name' => 'heartbeat_url',
+                'label' => 'Alerts: heartbeat URL',
+                'type' => 'text',
+                'required' => false,
+                'placeholder' => 'https://status.example.com/api/push/abc123',
+                'description' => 'Optional. Opened after every hourly run, e.g. an Uptime Kuma push monitor. It warns you when the hourly run stops (scheduler or server down).',
+            ],
 
             // Optional: Seerr as a paid add-on.
             [
@@ -446,10 +462,11 @@ class Wizarr extends Server
         // created, or right away if it already exists.
         $register = function (Schedule $schedule) {
             $schedule->call(function () {
-                $this->retryPending();
+                $retry = $this->retryPending();
                 $this->reconcileDiscordRoles();
                 $this->reconcileSeerr();
                 $this->processTrials();
+                $this->reportHealth($retry);
             })
                 ->hourly()
                 ->name('wizarr-retry-pending')
@@ -1623,6 +1640,7 @@ HTML;
 
         $retried = 0;
         $failed = 0;
+        $errors = [];
 
         foreach ($services as $service) {
             $pending = $this->propertyValue($service, self::PROP_PENDING);
@@ -1646,11 +1664,134 @@ HTML;
                 Log::info('Wizarr: finished the ' . $pending . ' of service ' . $service->id . ' on retry.');
             } catch (Throwable $e) {
                 $failed++;
+                $errors[$service->id] = $e->getMessage();
                 Log::warning('Wizarr: ' . $pending . ' of service ' . $service->id . ' still fails, will retry: ' . $e->getMessage());
             }
         }
 
-        return ['retried' => $retried, 'failed' => $failed];
+        return ['retried' => $retried, 'failed' => $failed, 'errors' => $errors];
+    }
+
+    /* ------------------------------------------------------------------
+     | Alerts
+     * ----------------------------------------------------------------- */
+
+    /** The same alert is repeated once a day while it lasts, not every hour. */
+    private const ALERT_REPEAT_SECONDS = 86400;
+
+    /**
+     * What needs a person, from the hourly run. Empty when all is well.
+     *
+     * @param  array{failed?: int, errors?: array<int, string>}  $retry  retryPending()'s result
+     * @param  iterable<Service>|null  $active  active services; defaults to all of them
+     * @return string[]
+     */
+    public function healthProblems(array $retry, ?iterable $active = null, ?int $now = null): array
+    {
+        $now ??= time();
+        $problems = [];
+
+        $errors = $retry['errors'] ?? [];
+        if ($errors) {
+            $problems[] = count($errors) . ' suspension(s) or cancellation(s) keep failing (service ' . $this->serviceList(array_keys($errors))
+                . '), so those customers still have access. Last error: ' . $this->shorten((string) end($errors));
+        }
+
+        try {
+            $this->client()->status();
+        } catch (Throwable $e) {
+            $problems[] = 'Wizarr cannot be reached: ' . $this->shorten($e->getMessage());
+        }
+
+        $active ??= Service::where('status', Service::STATUS_ACTIVE)->with(['properties', 'product.server'])->get();
+        $stuck = [];
+        foreach ($active as $service) {
+            if ($service->product?->server?->extension !== 'Wizarr') {
+                continue;
+            }
+            $properties = ExtensionHelper::getServiceProperties($service);
+            $since = $service->updated_at?->getTimestamp();
+            if (empty($properties[self::PROP_USERS]) && empty($properties[self::PROP_INVITE_URL])
+                && $since !== null && $now - $since > self::PREPARING_FOR_SECONDS) {
+                $stuck[] = $service->id;
+            }
+        }
+        if ($stuck) {
+            $problems[] = count($stuck) . ' paid subscription(s) have had no invitation for over 15 minutes (service ' . $this->serviceList($stuck)
+                . '). Is Paymenter\'s queue worker running? The reason is usually in Admin -> Other -> Failed Jobs, or in the log.';
+        }
+
+        return $problems;
+    }
+
+    /**
+     * Posts problems to the Discord webhook (once a day while they last, at
+     * once when they change, and once more when they are gone) and opens the
+     * heartbeat URL. Never throws: alerts must not break the hourly run.
+     *
+     * @param  callable|null  $send  for tests: fn (string $method, string $url, array $body)
+     * @return string|null  what was posted, if anything
+     */
+    public function reportHealth(array $retry, ?iterable $active = null, ?callable $send = null, ?int $now = null): ?string
+    {
+        $now ??= time();
+        $send ??= function (string $method, string $url, array $body = []) {
+            $request = \Illuminate\Support\Facades\Http::withHeaders(['User-Agent' => 'Paywarr'])->timeout(10);
+            $response = $method === 'post' ? $request->post($url, $body) : $request->get($url);
+            if (method_exists($response, 'failed') && $response->failed()) {
+                throw new \RuntimeException('HTTP ' . $response->status());
+            }
+        };
+        $posted = null;
+
+        try {
+            $problems = $this->healthProblems($retry, $active, $now);
+            $webhook = trim((string) $this->config('alert_webhook'));
+            $last = Cache::get('wizarr:alert');
+            $digest = $problems ? md5(implode("\n", array_map(fn ($p) => preg_replace('/\d+/', '#', $p), $problems))) : null;
+
+            if ($problems && (!$last || $last['digest'] !== $digest || $now - $last['at'] >= self::ALERT_REPEAT_SECONDS)) {
+                $posted = "**Paywarr needs a look**\n- " . implode("\n- ", $problems);
+                Cache::put('wizarr:alert', ['digest' => $digest, 'at' => $now], 2 * self::ALERT_REPEAT_SECONDS);
+            } elseif (!$problems && $last) {
+                $posted = '**Paywarr: all good again.** The problems reported earlier are gone.';
+                Cache::forget('wizarr:alert');
+            }
+
+            if ($posted !== null && $webhook !== '') {
+                // No pings: a customer's name in a message must not mention anyone.
+                $send('post', $webhook, ['content' => $posted, 'username' => 'Paywarr', 'allowed_mentions' => ['parse' => []]]);
+            }
+        } catch (Throwable $e) {
+            Log::warning('Wizarr: could not send the alert: ' . $e->getMessage());
+        }
+
+        $heartbeat = trim((string) $this->config('heartbeat_url'));
+        if ($heartbeat !== '') {
+            try {
+                $send('get', $heartbeat, []);
+            } catch (Throwable $e) {
+                Log::warning('Wizarr: heartbeat URL did not answer: ' . $e->getMessage());
+            }
+        }
+
+        return $posted;
+    }
+
+    /** "#3, #7, #9 and 2 more" */
+    private function serviceList(array $ids): string
+    {
+        $shown = array_map(fn ($id) => '#' . $id, array_slice($ids, 0, 5));
+        $more = count($ids) - count($shown);
+
+        return implode(', ', $shown) . ($more > 0 ? ' and ' . $more . ' more' : '');
+    }
+
+    private function shorten(string $text): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text));
+
+        return mb_strlen($text) > 300 ? mb_substr($text, 0, 297) . '...' : $text;
     }
 
     /* ------------------------------------------------------------------

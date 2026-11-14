@@ -1,0 +1,42 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Scenarios (extension against the Wizarr, Discord and Seerr stub)
+        run: bash tests/run.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Browser test of the access box
+        working-directory: tests/banner
+        run: |
+          npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+          bash run.sh
+
+      - name: Scripts parse
+        run: |
+          bash -n install.sh
+          bash -n tools/backup-paymenter.sh
+          php -l tools/discord-check.php
+          php -l tools/seerr-check.php

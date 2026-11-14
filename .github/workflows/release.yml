@@ -1,0 +1,38 @@
+name: Release
+
+# Push a tag like v1.10.0 to publish a release. The tag must match the
+# version in extensions/Servers/Wizarr/Wizarr.php, and the tests must pass.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the extension's version
+        run: |
+          version="$(grep -oP "version: '\K[^']+" extensions/Servers/Wizarr/Wizarr.php)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag is $GITHUB_REF_NAME, but Wizarr.php says version $version." >&2
+            exit 1
+          fi
+
+  tests:
+    needs: version
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "Paywarr $GITHUB_REF_NAME" --generate-notes --verify-tag
