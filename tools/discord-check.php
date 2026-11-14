@@ -5,7 +5,7 @@
  * shows Discord's own answers. Changes nothing, except step 6 when an e-mail
  * is given: that runs the normal role update for that customer.
  *
- *   su -s /bin/bash www-data -c "php /tmp/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"
+ *   su -s /bin/bash www-data -c "php /opt/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"
  *
  * The e-mail is optional. Never prints the bot token or client secret.
  */

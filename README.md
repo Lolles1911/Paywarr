@@ -80,7 +80,7 @@ Paywarr goes into.
 ### 2. Get the repo
 
 ```bash
-git clone https://github.com/Lolles1911/paywarr.git /tmp/paywarr
+git clone https://github.com/Lolles1911/paywarr.git /opt/paywarr
 ```
 
 ### 3. Install the extension
@@ -88,8 +88,8 @@ git clone https://github.com/Lolles1911/paywarr.git /tmp/paywarr
 Give the script the folder that holds Paymenter's `extensions` folder:
 
 ```bash
-bash /tmp/paywarr/install.sh /opt/paymenter          # regular install or LXC
-bash /tmp/paywarr/install.sh /path/to/compose-folder  # Docker
+bash /opt/paywarr/install.sh /opt/paymenter          # regular install or LXC
+bash /opt/paywarr/install.sh /path/to/compose-folder  # Docker
 ```
 
 The script copies the extension to `<folder>/extensions/Servers/Wizarr/` and
@@ -211,8 +211,8 @@ How long it takes from due date to suspension and deletion is set under
 ## Updating
 
 ```bash
-cd /tmp/paywarr && git pull
-bash /tmp/paywarr/install.sh /opt/paymenter          # or your compose folder
+cd /opt/paywarr && git pull
+bash /opt/paywarr/install.sh /opt/paymenter          # or your compose folder
 ```
 
 On Docker, then `docker compose restart paymenter`.
@@ -223,15 +223,15 @@ The version is in `extensions/Servers/Wizarr/Wizarr.php` (`version:`).
 
 | Not working | Run |
 |---|---|
-| Anything Discord (login, membership, roles) | `su -s /bin/bash www-data -c "php /tmp/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"` |
-| The Seerr add-on | `su -s /bin/bash www-data -c "php /tmp/paywarr/tools/seerr-check.php /opt/paymenter customer@example.com"` |
+| Anything Discord (login, membership, roles) | `su -s /bin/bash www-data -c "php /opt/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"` |
+| The Seerr add-on | `su -s /bin/bash www-data -c "php /opt/paywarr/tools/seerr-check.php /opt/paymenter customer@example.com"` |
 | Everything else | `grep -h "Wizarr" /opt/paymenter/storage/logs/laravel-$(date +%F).log \| tail -20` |
 
 On Docker, copy the scripts into the container and run them there (Paymenter
 is in `/app` inside it), from the compose folder:
 
 ```bash
-docker compose cp /tmp/paywarr/tools paymenter:/tmp/paywarr-tools
+docker compose cp /opt/paywarr/tools paymenter:/tmp/paywarr-tools
 docker compose exec -u nginx paymenter php /tmp/paywarr-tools/discord-check.php /app customer@example.com
 ```
 
@@ -239,6 +239,41 @@ Both scripts walk through the setup step by step with `OK`/`FAIL` and
 never print keys or tokens. Typical findings: a digit missing from the Discord
 server ID, the bot lacks "Manage Roles", or the option value doesn't have the
 environment variable `ja`/`yes`.
+
+## Running it for real
+
+### Backups
+
+`tools/backup-paymenter.sh` makes one archive with Paymenter's database, its
+`.env` and the uploaded files. Keep `.env` safe: its `APP_KEY` decrypts the
+API keys and passwords Paymenter stores, so a database without it is of
+little use. The archive is readable by root only.
+
+Nightly at 03:17, keeping 14 days, as root on the Paymenter machine:
+
+```bash
+install -m 700 /opt/paywarr/tools/backup-paymenter.sh /usr/local/sbin/backup-paymenter
+(crontab -l 2>/dev/null; echo '17 3 * * * /usr/local/sbin/backup-paymenter /opt/paymenter /var/backups/paymenter 14 >> /var/log/backup-paymenter.log 2>&1') | crontab -
+```
+
+Run it once by hand to see that it works: `/usr/local/sbin/backup-paymenter`.
+It supports MariaDB/MySQL and SQLite.
+
+On Docker, back up the compose folder (it holds `.env`, `extensions` and
+`themes`) and dump the database from its container, from the compose folder:
+
+```bash
+docker compose exec -T database sh -c 'mariadb-dump --single-transaction -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' > paymenter.sql
+```
+
+- **Copy the backups off the machine.** A backup on the same disk is gone when
+  the disk is. Copy `/var/backups/paymenter` to a NAS or another server, e.g.
+  with `rsync` in the same crontab.
+- **Back up Wizarr too.** Its database (which invitation became which user) is
+  in Wizarr's data folder, `/data/database` inside its container. Include that
+  folder in your container backups.
+- **Restore:** unpack the archive, load `database.sql` with
+  `mariadb <database> < database.sql`, and put `env` back as `.env`.
 
 ## "Your access is ready"
 
@@ -445,7 +480,7 @@ step by step, shows Discord's own replies, and runs the role update for one
 customer:
 
 ```bash
-su -s /bin/bash www-data -c "php /tmp/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"
+su -s /bin/bash www-data -c "php /opt/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"
 ```
 
 ## Refunds
@@ -709,6 +744,7 @@ it*) does. Run it before you take on paying customers.
 | `extensions/Servers/Wizarr/SeerrException.php` | Error type |
 | `tools/discord-check.php` | Checks the Discord setup step by step |
 | `tools/seerr-check.php` | Checks the Seerr add-on for one customer |
+| `tools/backup-paymenter.sh` | Backs up Paymenter's database, `.env` and uploads |
 | `extensions/Servers/Wizarr/routes.php` | The pages under `/wizarr/discord` and the status lookup `/wizarr/status` |
 | `extensions/Servers/Wizarr/resources/views/discord.blade.php` | The customer's Discord page |
 | `extensions/Servers/Wizarr/lang/da.json` | Danish translation of everything customers see |

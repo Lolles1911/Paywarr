@@ -4,7 +4,7 @@
  * Checks the Seerr add-on of the Wizarr extension for one customer, step by
  * step, and then runs the normal Seerr update for their subscriptions.
  *
- *   su -s /bin/bash www-data -c "php /tmp/paywarr/tools/seerr-check.php /opt/paymenter customer@example.com"
+ *   su -s /bin/bash www-data -c "php /opt/paywarr/tools/seerr-check.php /opt/paymenter customer@example.com"
  *
  * Never prints the API key.
  */
