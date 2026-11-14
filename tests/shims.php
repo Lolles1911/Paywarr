@@ -284,6 +284,27 @@ namespace Illuminate\Support\Facades {
         }
     }
 
+    /** Auth::check/id/user, as Laravel's facade offers them. */
+    class Auth
+    {
+        public static $user = null;
+
+        public static function check(): bool
+        {
+            return self::$user !== null;
+        }
+
+        public static function id()
+        {
+            return self::$user?->id;
+        }
+
+        public static function user()
+        {
+            return self::$user;
+        }
+    }
+
     /** Cache::get/put/forget/remember, as Laravel's facade offers them; in memory. */
     class Cache
     {
