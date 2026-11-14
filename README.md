@@ -855,7 +855,10 @@ their existing user is not touched.
 
 ## What you need to know about Plex, Jellyfin and Emby
 
-The two behave differently, and that is up to Wizarr, not the extension:
+Plex is supported, but less tested than Jellyfin and Emby: the tests cover
+it, a real Plex server hasn't run it yet. Feedback is very welcome.
+
+They behave differently, and that is up to Wizarr, not the extension:
 
 - **Jellyfin and Emby** can disable a user. Suspension is a pause: same user, same
   history when payment resumes.
