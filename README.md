@@ -29,7 +29,7 @@ Paymenter decides **when**; the extension translates that into Wizarr:
 
 | Happens in Paymenter | The extension |
 |---|---|
-| First invoice paid | Creates a one-time invitation; the link goes into the email and the client area |
+| First invoice paid | Creates a one-time invitation per media server (Jellyfin, Emby or both, as the customer chose); the links go into the email and the client area |
 | Renewal paid on time | Nothing. Paymenter just moves the due date and the user carries on |
 | Invoice overdue (default: 2 days) | Disables the user. If the link was never used, it is revoked |
 | Paid while suspended | Re-enables the same user, or sends a new invitation if that isn't possible |
@@ -153,7 +153,7 @@ described further down.
 
 | Field | What |
 |---|---|
-| Media server | Which server (Plex/Jellyfin/Emby) the product gives access to |
+| Media server | Which server(s) (Plex/Jellyfin/Emby) the product gives access to. Each gets its own invitation. To let the customer choose, see *Jellyfin, Emby or both* |
 | Libraries | Empty = the server's default |
 | Invitation link is valid for | How long the customer has to create their user |
 | Access expires after (days) | **Leave empty for subscriptions.** Only for one-time-paid products |
@@ -168,12 +168,19 @@ described further down.
    language:
 
 ```blade
-Click here to create your user: [{{ $invite_url ?? '' }}]({{ $invite_url ?? '' }})
+@foreach(($invites ?? []) as $invite)
+Create your user{{ $invite['server'] !== '' ? ' on ' . $invite['server'] : '' }}: [{{ $invite['url'] }}]({{ $invite['url'] }})
 
+@endforeach
 @if(!empty($invite_valid_for))
-The link works for {{ $invite_valid_for }} and can only be used once.
+Each link works for {{ $invite_valid_for }} and can only be used once.
 @endif
 ```
+
+   `$invites` has one link per media server. `$invite_url` is the first one,
+   which is all a product with one server needs: a template written for an
+   older version keeps working there, but only shows one link when there are
+   two.
 
    `$invite_valid_for` ("7 days") is in the site's default language
    (**Admin → Settings → General → Default Language**), because the email is sent
@@ -710,11 +717,61 @@ two extra things:
   page scrolls straight to it; without it, the visitor just lands on the home
   page.
 
-## What you need to know about Plex and Jellyfin
+## Jellyfin, Emby or both
+
+The customer can pick the media server at checkout, and change it later.
+Every server gets **its own invitation** (one invitation for several servers
+does not work well in Wizarr), so with both they create two users, each from
+its own link.
+
+**Setup:**
+
+1. Add and verify both servers in Wizarr (**Settings → Servers**).
+2. On the product, select both under **Media server**. Choose libraries of
+   both under **Libraries** if you like: each invitation only takes its own
+   server's.
+3. **Admin → Configurable Options → New:**
+   - Type: **Select**
+   - **Upgradable**: on, so the customer can change it later
+   - Environment Variable: **`media_server`**
+   - Products: your subscription
+   - Options, e.g. **Jellyfin** (env `jellyfin`), **Emby** (env `emby`) and
+     **Both** (env `jellyfin,emby`), each with its own price
+4. Use the email template from step 7, which lists every link.
+
+An option's environment variable can be server types (`jellyfin`, `emby`,
+`plex`), server names or Wizarr server IDs, separated by commas; `both` or
+`all` means every server on the product. Without the option, the customer
+gets every server on the product.
+
+**What the customer sees with both:**
+
+- The email and the client area have a link per server ("Create your user on
+  Emby"), and the box at the bottom of the page shows the next one still
+  waiting.
+- Once the users exist: a **Reset password on …** button per server.
+- An expired link is renewed for that server only.
+
+**Changing later** (upgrade/downgrade in the client area):
+
+| Change | Happens |
+|---|---|
+| A server added | Its invitation is created and emailed |
+| A server removed | The user on that server is deleted, with its history there |
+
+Suspension, paying again and cancelling apply to every server. **Seerr** is
+connected to one media server: the customer's user on that one gets the
+Seerr account.
+
+**Subscriptions from before version 1.11** keep their single invitation as it
+is. If such a customer adds Emby later, they get an invitation for Emby, and
+their existing user is not touched.
+
+## What you need to know about Plex, Jellyfin and Emby
 
 The two behave differently, and that is up to Wizarr, not the extension:
 
-- **Jellyfin/Emby** can disable a user. Suspension is a pause: same user, same
+- **Jellyfin and Emby** can disable a user. Suspension is a pause: same user, same
   history when payment resumes.
 - **Plex** has no "disabled" state. Wizarr removes the share, and it can't be
   turned back on. If the customer pays after a suspension, the extension
@@ -748,6 +805,8 @@ The two behave differently, and that is up to Wizarr, not the extension:
   suspend those yourself (see *Refunds*).
 - **The customer needs an account in Paymenter** to buy, created either with
   email and password, or with one click through "Log in with Discord".
+- **Up to four media servers** per subscription get their own buttons in the
+  client area.
 - Wizarr returns `used_by` as `<User 12>`, although its documentation says
   username. The extension understands both.
 
@@ -757,14 +816,15 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-148 scenarios run the extension through the whole lifecycle against
+163 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
 subscription, the "your access is ready" box, the client area, an expired link,
 password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
-and Discord, that other users are not touched, refunds, the alerts, and the
+and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
+Emby or both with one invitation each (including switching later), and the
 languages (English, Danish, and that every text in the code has a Danish
 translation).
 

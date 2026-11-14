@@ -215,6 +215,48 @@ function subscribed(array $settings, string $username = 'mette', ?Service $servi
     return $service;
 }
 
+/**
+ * A property of the first media server: subscriptions made since 1.11 keep
+ * one invitation per server ("wizarr_invite_code:1"), older ones one without
+ * a suffix.
+ */
+function grantProp($serviceOrProperties, string $name): ?string
+{
+    $props = is_array($serviceOrProperties) ? $serviceOrProperties : $serviceOrProperties->propertyArray();
+    if (isset($props[$name])) {
+        return $props[$name];
+    }
+    foreach ($props as $key => $value) {
+        if (str_starts_with((string) $key, $name . ':')) {
+            return $value;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * A subscription as versions before 1.11 made it: one invitation for all of
+ * the product's servers, stored without a server suffix, already redeemed.
+ */
+function legacySubscription(array $settings, string $username = 'mette', int $id = 1): Service
+{
+    global $STUB;
+    $invitation = (new \Paymenter\Extensions\Servers\Wizarr\WizarrClient($STUB . '/', 'stub-key'))->createInvitation([
+        'server_ids' => array_map('intval', is_array($settings['server_ids']) ? $settings['server_ids'] : explode(',', $settings['server_ids'])),
+        'duration' => 'unlimited',
+        'unlimited' => false,
+    ]);
+    $service = service($id);
+    foreach (['wizarr_invitation_id' => (string) $invitation['id'], 'wizarr_invite_code' => $invitation['code'], 'wizarr_invite_url' => 'https://join.example.com/j/' . $invitation['code']] as $key => $value) {
+        $service->properties()->updateOrCreate(['key' => $key], ['name' => $key, 'value' => $value]);
+    }
+    redeem($invitation['code'], $username, $service->user->email);
+    ext()->getActions($service, $settings, $service->propertyArray()); // records the users, as a page view did
+
+    return $service;
+}
+
 function labels(array $actions): array
 {
     return array_map(fn ($a) => $a['type'] . ':' . ($a['label'] ?? '') . (isset($a['text']) ? '=' . $a['text'] : ''), $actions);
@@ -241,9 +283,9 @@ test('testConfig explains an unreachable host instead of throwing', function () 
 test('product config offers only verified servers', function () {
     $fields = array_column(ext()->getProductConfig(), null, 'name');
     same('select', $fields['server_ids']['type'], 'server field type');
-    same(['1', '2'], array_column($fields['server_ids']['options'], 'value'), 'server options');
+    same(['1', '2', '4'], array_column($fields['server_ids']['options'], 'value'), 'server options');
     same(true, $fields['server_ids']['multiple'], 'multi select');
-    same(['10', '11', '20'], array_column($fields['library_ids']['options'], 'value'), 'library options');
+    same(['10', '11', '20', '40'], array_column($fields['library_ids']['options'], 'value'), 'library options');
 });
 
 test('product page still renders when Wizarr is down', function () {
@@ -273,8 +315,8 @@ test('first payment creates one single-use invitation and returns the link for t
     same('7 days', $data['invite_valid_for'], 'validity text');
 
     $props = $service->propertyArray();
-    same((string) $inv['id'], $props['wizarr_invitation_id'], 'invitation id stored');
-    same($data['invite_url'], $props['wizarr_invite_url'], 'link stored');
+    same((string) $inv['id'], grantProp($props, 'wizarr_invitation_id'), 'invitation id stored');
+    same($data['invite_url'], grantProp($props, 'wizarr_invite_url'), 'link stored');
 });
 
 test('running create twice does not hand out a second seat', function () {
@@ -312,9 +354,11 @@ test('server ids are understood as array, JSON or typed text', function () {
     foreach ([['1', '2'], '[1,2]', '1, 2', '1;2'] as $i => $shape) {
         ext()->createServer(service(10 + $i), settings(['server_ids' => $shape, 'library_ids' => '']), []);
     }
-    foreach (state()['invitations'] as $inv) {
-        same([1, 2], $inv['server_ids'], 'server ids');
-        same([], $inv['library_ids'], 'no libraries');
+    $invitations = state()['invitations'];
+    same(8, count($invitations), 'one invitation per server, for each of the four');
+    foreach (array_chunk($invitations, 2) as $pair) {
+        same([[1], [2]], array_column($pair, 'server_ids'), 'server ids');
+        same([[], []], array_column($pair, 'library_ids'), 'no libraries');
     }
 });
 
@@ -343,7 +387,7 @@ test('client area switches to "active" once redeemed, and then stops calling Wiz
 
     $actions = ext()->getActions($service, settings(), $service->propertyArray());
     same(['text:Status=Active', 'text:Username=mette', 'button:Reset password', 'button:Open the media library'], labels($actions), 'actions');
-    same('1:mette:jellyfin', $service->propertyArray()['wizarr_users'], 'user recorded with its server type');
+    same('1:mette:jellyfin', grantProp($service, 'wizarr_users'), 'user recorded with its server type');
 
     stub('/_test/clear-requests');
     ext()->getActions($service, settings(), $service->propertyArray());
@@ -372,7 +416,7 @@ test('an expired link can be renewed by the customer', function () {
     same(1, count($invitations), 'old one removed, one new');
     ok($invitations[0]['code'] !== $old['invite_code'], 'a different code');
     same('https://join.example.com/j/' . $invitations[0]['code'], $url, 'redirect target');
-    same($url, $service->propertyArray()['wizarr_invite_url'], 'new link stored');
+    same($url, grantProp($service, 'wizarr_invite_url'), 'new link stored');
 });
 
 test('renewing cannot be used to get a second seat', function () {
@@ -401,7 +445,7 @@ test('Jellyfin: overdue disables the user, paying enables the same user again', 
 test('Plex: paying after a suspension sends a new invitation, because Plex cannot re-enable', function () {
     $plex = settings(['server_ids' => ['2'], 'library_ids' => ['20'], 'login_url' => 'https://app.plex.tv']);
     $service = subscribed($plex);
-    $firstCode = $service->propertyArray()['wizarr_invite_code'];
+    $firstCode = grantProp($service, 'wizarr_invite_code');
 
     ext()->suspendServer($service, $plex, $service->propertyArray());
     same(true, state()['users'][0]['plex_share_removed'], 'share removed');
@@ -424,7 +468,7 @@ test('media server offline during suspension: Wizarr deletes the user, paying re
 
     ext()->suspendServer($service, settings(), $service->propertyArray());
     same(0, count(state()['users']), 'Wizarr fell back to deleting');
-    ok(!isset($service->propertyArray()['wizarr_users']), 'deleted user is not remembered');
+    ok(grantProp($service, 'wizarr_users') === null, 'deleted user is not remembered');
 
     stub('/_test/set', ['server_id' => 1, 'offline' => false]);
     ext()->unsuspendServer($service, settings(), $service->propertyArray());
@@ -439,7 +483,7 @@ test('overdue before ever signing up withdraws the link; paying issues a new one
 
     ext()->suspendServer($service, settings(), $service->propertyArray());
     same(0, count(state()['invitations']), 'link withdrawn');
-    same([], $service->propertyArray(), 'nothing left on the service');
+    same(['wizarr_servers' => '1'], $service->propertyArray(), 'nothing left on the service but which server it has');
     ok(isset(redeem($data['invite_code'], 'mette')['error']), 'old link no longer works');
 
     ext()->unsuspendServer($service, settings(), $service->propertyArray());
@@ -465,7 +509,7 @@ test('a mail failure on re-invite does not fail the job', function () {
     NotificationHelper::$fail = true;
     same(true, ext()->unsuspendServer($service, settings(), $service->propertyArray()), 'unsuspend succeeds');
     same(1, count(state()['invitations']), 'invitation exists');
-    ok(isset($service->propertyArray()['wizarr_invite_url']), 'link is in the client area');
+    ok(grantProp($service, 'wizarr_invite_url') !== null, 'link is in the client area');
     same(1, count(Log::$warnings), 'problem is logged');
 });
 
@@ -506,9 +550,9 @@ test('cancelling a suspended subscription still finds the disabled user', functi
     same(0, count(state()['users']), 'deleted');
 });
 
-test('an invitation for two servers removes the user from both', function () {
+test('a pre-1.11 invitation for two servers removes the user from both', function () {
     $both = settings(['server_ids' => ['1', '2'], 'library_ids' => '']);
-    $service = subscribed($both);
+    $service = legacySubscription($both);
     same(2, count(state()['users']), 'one user per server');
 
     ext()->terminateServer($service, $both, $service->propertyArray());
@@ -654,7 +698,7 @@ test('a product on Jellyfin and Plex shows the name once and resets the Jellyfin
 });
 
 test('records stored by version 1.0.0 still get the button and work', function () {
-    $service = subscribed(settings());
+    $service = legacySubscription(settings());
     $service->properties()->updateOrCreate(['key' => 'wizarr_users'], ['name' => 'Wizarr users', 'value' => '1:mette']);
 
     $actions = ext()->getActions($service, settings(), $service->propertyArray());
@@ -863,7 +907,7 @@ test('banner: invitation created -> "ready" with the link, no call to Wizarr', f
 test('banner: the expiry is stored, and an expired link says so', function () {
     $service = service();
     ext()->createServer($service, settings(), []);
-    $expires = $service->propertyArray()['wizarr_invite_expires'] ?? null;
+    $expires = grantProp($service, 'wizarr_invite_expires');
     ok($expires !== null, 'expiry stored');
 
     same('expired', bannerFor($service, strtotime($expires) + 1)['state'], 'after expiry');
@@ -873,7 +917,7 @@ test('banner: the expiry is stored, and an expired link says so', function () {
 test('banner: a link that never expires stays "ready"', function () {
     $service = service();
     ext()->createServer($service, settings(['link_lifetime' => 'never']), []);
-    ok(!isset($service->propertyArray()['wizarr_invite_expires']), 'nothing stored');
+    ok(grantProp($service, 'wizarr_invite_expires') === null, 'nothing stored');
     same('ready', bannerFor($service, time() + 86400 * 365)['state'], 'still ready a year later');
 });
 
@@ -887,7 +931,7 @@ test('banner: withdrawing the link (suspension) also clears the stored expiry', 
     $service = service();
     ext()->createServer($service, settings(), []);
     ext()->suspendServer($service, settings(), $service->propertyArray());
-    ok(!isset($service->propertyArray()['wizarr_invite_expires']), 'cleared');
+    ok(grantProp($service, 'wizarr_invite_expires') === null, 'cleared');
 });
 
 test('live check: notices that the link was used, records the user and hides the banner', function () {
@@ -897,7 +941,7 @@ test('live check: notices that the link was used, records the user and hides the
 
     redeem($data['invite_code'], 'mette');
     same('done', ext()->liveBannerState($service, $service->propertyArray())['state'], 'after signing up');
-    same('1:mette:jellyfin', $service->propertyArray()['wizarr_users'] ?? null, 'user recorded');
+    same('1:mette:jellyfin', grantProp($service, 'wizarr_users'), 'user recorded');
     same(null, bannerFor($service), 'no banner on the next page');
 });
 
@@ -1158,7 +1202,7 @@ test('roles follow the subscription: paid, overdue, paid again, cancelled', func
     same(['500'], memberRoles(), 'first payment gives the role');
     same('500', $service->user->properties()->where('key', 'discord_roles_granted')->value('value'), 'recorded on the customer');
 
-    redeem($service->propertyArray()['wizarr_invite_code'], 'mette');
+    redeem(grantProp($service, 'wizarr_invite_code'), 'mette');
     $hooks->suspendServer($service, $s, $service->propertyArray());
     same([], memberRoles(), 'overdue takes it back');
 
@@ -1386,6 +1430,269 @@ test('discord login: the button escapes what it prints and shows the terms when 
     ok(str_contains($html, '>terms</a>'), 'terms');
     ok(!str_contains($html, '"><script>'), 'escaped');
     ok(!str_contains(ext()->discordLoginButton('https://x/login', ''), 'terms'), 'no terms line without a terms URL');
+});
+
+/* ---------- Jellyfin, Emby or both: one invitation per server ---------- */
+
+/** A product with Jellyfin (1) and Emby (4), each with a library chosen. */
+function mediaSettings(array $overrides = []): array
+{
+    return settings($overrides + ['server_ids' => ['1', '4'], 'library_ids' => ['10', '40']]);
+}
+
+/** A service where the customer picked $choice in the "media_server" option. */
+function chosen(string $choice, int $id = 1): Service
+{
+    $service = service($id, "customer$id@example.com");
+    $service->configs = $choice === '' ? [] : [Wizarr::MEDIA_OPTION => $choice];
+    $service->product = (object) ['server' => (object) ['extension' => 'Wizarr', 'settings' => []], 'settings' => mediaSettings()];
+
+    return $service;
+}
+
+function props(Service $service): array
+{
+    return $service->propertyArray() + $service->configs;
+}
+
+function userOn(int $serverId): ?array
+{
+    foreach (state()['users'] as $user) {
+        if ($user['server_id'] === $serverId) {
+            return $user;
+        }
+    }
+
+    return null;
+}
+
+test('media: the customer picks Jellyfin, Emby or both, and gets one invitation per server', function () {
+    $cases = ['jellyfin' => ['Jellyfin'], 'emby' => ['Emby'], 'both' => ['Jellyfin', 'Emby'], 'jellyfin,emby' => ['Jellyfin', 'Emby'], '4' => ['Emby'], '' => ['Jellyfin', 'Emby']];
+    $id = 1;
+    foreach ($cases as $choice => $servers) {
+        $service = chosen((string) $choice, $id++);
+        $data = ext()->createServer($service, mediaSettings(), props($service));
+        same($servers, array_column($data['invites'], 'server'), "choice \"$choice\"");
+    }
+    foreach (state()['invitations'] as $invitation) {
+        same(1, count($invitation['server_ids']), 'every invitation is for one server');
+        same($invitation['server_ids'] === [4] ? [40] : [10], $invitation['library_ids'], 'with that server\'s own libraries');
+    }
+});
+
+test('media: a choice that matches no server on the product is refused with the reason', function () {
+    $service = chosen('plex');
+    throws(fn () => ext()->createServer($service, mediaSettings(), props($service)), 'matches none', 'refused');
+    same(0, count(state()['invitations']), 'nothing created');
+});
+
+test('media: the mail has every link: {{ $invites }}, {{ $invite_urls }} and the first as {{ $invite_url }}', function () {
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    same(2, count($data['invites']), 'two links');
+    same($data['invites'][0]['url'], $data['invite_url'], 'invite_url is the first');
+    ok(preg_match('#^Jellyfin: https://join\.example\.com/j/\w+\nEmby: https://join\.example\.com/j/\w+$#', $data['invite_urls']) === 1, 'invite_urls: ' . $data['invite_urls']);
+    same('7 days', $data['invite_valid_for'], 'validity as before');
+});
+
+test('media: the client area shows each server\'s link, then a reset button per server', function () {
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    same([
+        'text:Jellyfin=Waiting for you to create your user', 'button:Create your user on Jellyfin',
+        'text:Emby=Waiting for you to create your user', 'button:Create your user on Emby',
+    ], labels(ext()->getActions($service, mediaSettings(), props($service))), 'both waiting');
+
+    redeem($data['invites'][0]['code'], 'mette');
+    same([
+        'text:Status=Active', 'text:Emby=Waiting for you to create your user', 'button:Create your user on Emby',
+        'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Open the media library',
+    ], labels(ext()->getActions($service, mediaSettings(), props($service))), 'Jellyfin done, Emby waiting');
+
+    redeem($data['invites'][1]['code'], 'mette');
+    $actions = ext()->getActions($service, mediaSettings(), props($service));
+    same([
+        'text:Status=Active', 'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Reset password on Emby', 'button:Open the media library',
+    ], labels($actions), 'both done');
+    same(['resetPassword1', 'resetPassword2'], array_values(array_filter(array_column($actions, 'function'))), 'numbered buttons');
+
+    ext()->resetPassword2($service, mediaSettings(), props($service));
+    same(userOn(4)['id'], resetTokens()[0]['user_id'], 'button 2 resets the Emby user');
+});
+
+test('media: an expired Emby link is renewed on its own; Jellyfin is untouched', function () {
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    redeem($data['invites'][0]['code'], 'mette');
+    stub('/_test/expire', ['code' => $data['invites'][1]['code']]);
+
+    $actions = ext()->getActions($service, mediaSettings(), props($service));
+    ok(in_array('text:Emby=Your invitation link has expired', labels($actions), true), json_encode(labels($actions)));
+    same(['renewInvitation2'], array_values(array_filter(array_column($actions, 'function'), fn ($f) => str_starts_with($f, 'renew'))), 'its own button');
+
+    $url = ext()->renewInvitation2($service, mediaSettings(), props($service));
+    $fresh = array_values(array_filter(state()['invitations'], fn ($i) => str_ends_with($url, $i['code'])));
+    same([[4]], array_column($fresh, 'server_ids'), 'new link for Emby');
+    ok(userOn(1) !== null, 'Jellyfin user still there');
+});
+
+test('media: Emby works like Jellyfin: paused when overdue, the same user back when paid, password reset', function () {
+    $service = chosen('emby');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    redeem($data['invite_code'], 'mette');
+    ext()->getActions($service, mediaSettings(), props($service));
+    $id = userOn(4)['id'];
+
+    ext()->suspendServer($service, mediaSettings(), props($service));
+    same(true, userOn(4)['is_disabled'], 'paused');
+    ext()->unsuspendServer($service, mediaSettings(), props($service));
+    same([false, $id], [userOn(4)['is_disabled'], userOn(4)['id']], 'same user, on again');
+
+    ext()->resetPassword($service, mediaSettings(), props($service));
+    same($id, resetTokens()[0]['user_id'], 'password reset');
+});
+
+test('media: overdue with both: users paused, an unused link withdrawn; paid: back on, and that link sent again', function () {
+    \App\Helpers\NotificationHelper::$sent = [];
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    redeem($data['invites'][0]['code'], 'mette');
+    ext()->getActions($service, mediaSettings(), props($service));
+
+    ext()->suspendServer($service, mediaSettings(), props($service));
+    same(true, userOn(1)['is_disabled'], 'Jellyfin paused');
+    same(0, count(array_filter(state()['invitations'], fn ($i) => $i['server_ids'] === [4])), 'unused Emby link withdrawn');
+
+    ext()->unsuspendServer($service, mediaSettings(), props($service));
+    same(false, userOn(1)['is_disabled'], 'Jellyfin back on');
+    same(1, count(array_filter(state()['invitations'], fn ($i) => $i['server_ids'] === [4])), 'a new Emby link');
+    same(1, count(\App\Helpers\NotificationHelper::$sent), 'mailed');
+    same(['Emby'], array_column(\App\Helpers\NotificationHelper::$sent[0]['data']['invites'], 'server'), 'with the Emby link');
+});
+
+test('media: switching later: adding Emby sends its link, dropping Jellyfin removes that user', function () {
+    \App\Helpers\NotificationHelper::$sent = [];
+    $service = chosen('jellyfin');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    redeem($data['invite_code'], 'mette');
+    ext()->getActions($service, mediaSettings(), props($service));
+
+    $service->configs = [Wizarr::MEDIA_OPTION => 'both'];
+    ext()->upgradeServer($service, mediaSettings(), props($service));
+    same(1, count(array_filter(state()['invitations'], fn ($i) => $i['server_ids'] === [4])), 'Emby invitation');
+    same(['Emby'], array_column(\App\Helpers\NotificationHelper::$sent[0]['data']['invites'] ?? [], 'server'), 'mailed');
+    ok(userOn(1) !== null && !userOn(1)['is_disabled'], 'Jellyfin untouched');
+
+    $service->configs = [Wizarr::MEDIA_OPTION => 'emby'];
+    ext()->upgradeServer($service, mediaSettings(), props($service));
+    same(null, userOn(1), 'Jellyfin user removed');
+    same(['4'], ext()->grantKeys(props($service)), 'only Emby left');
+    same(1, count(state()['invitations']), 'the Emby link is kept');
+});
+
+test('media: a pre-1.11 subscription can add Emby; its Jellyfin user stays where it is', function () {
+    $service = legacySubscription(settings());
+    $service->configs = [Wizarr::MEDIA_OPTION => 'both'];
+    ext()->upgradeServer($service, mediaSettings(), props($service));
+
+    same(['', '4'], ext()->grantKeys(props($service)), 'old grant kept, Emby added');
+    same(2, count(state()['invitations']), 'one new invitation');
+    ok(userOn(1) !== null, 'Jellyfin user kept');
+    same('1:mette:jellyfin', $service->propertyArray()['wizarr_users'] ?? null, 'still recorded the old way');
+});
+
+test('media: Emby added to the product later is not handed out for free', function () {
+    // Bought when the product only had Jellyfin; no choice made.
+    $service = chosen('');
+    $data = ext()->createServer($service, settings(), props($service));
+    redeem($data['invite_code'], 'mette');
+    ext()->getActions($service, settings(), props($service));
+    // An old subscription: one invitation, no record of its servers.
+    $old = legacySubscription(settings(), 'ole', 2);
+
+    foreach ([$service, $old] as $s) {
+        ext()->suspendServer($s, mediaSettings(), props($s));
+        ext()->unsuspendServer($s, mediaSettings(), props($s));
+        ext()->upgradeServer($s, mediaSettings(), props($s));
+    }
+    // ... and one that is only upgraded (e.g. adds Seerr), never suspended.
+    $other = legacySubscription(settings(), 'kim', 3);
+    ext()->upgradeServer($other, mediaSettings(), props($other));
+    same(0, count(array_filter(state()['invitations'], fn ($i) => in_array(4, $i['server_ids'], true))), 'no Emby invitation for either');
+});
+
+test('media: a pre-1.11 link withdrawn when overdue comes back for the same server only', function () {
+    // Never redeemed, overdue, and the product has Emby by the time they pay.
+    global $STUB;
+    $invitation = (new \Paymenter\Extensions\Servers\Wizarr\WizarrClient($STUB . '/', 'stub-key'))->createInvitation(['server_ids' => [1], 'duration' => 'unlimited', 'unlimited' => false]);
+    $service = service(3);
+    foreach (['wizarr_invitation_id' => (string) $invitation['id'], 'wizarr_invite_code' => $invitation['code'], 'wizarr_invite_url' => 'https://join.example.com/j/' . $invitation['code']] as $key => $value) {
+        $service->properties()->updateOrCreate(['key' => $key], ['name' => $key, 'value' => $value]);
+    }
+
+    ext()->suspendServer($service, mediaSettings(), props($service));
+    ext()->unsuspendServer($service, mediaSettings(), props($service));
+    same([[1]], array_column(state()['invitations'], 'server_ids'), 'a new Jellyfin link, no Emby');
+});
+
+test('media: the banner shows the first server still waiting, and moves on when it is used', function () {
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    $state = ext()->bannerState($service, props($service));
+    same(['ready', 'Jellyfin', $data['invites'][0]['url']], [$state['state'], $state['server'] ?? null, $state['inviteUrl']], 'Jellyfin first');
+    ok(str_contains(ext()->bannerHtml($state), 'Create your user on Jellyfin'), 'button names the server');
+
+    redeem($data['invites'][0]['code'], 'mette');
+    $live = ext()->liveBannerState($service, props($service));
+    same(['ready', 'Emby', $data['invites'][1]['url']], [$live['state'], $live['server'] ?? null, $live['inviteUrl']], 'then Emby');
+
+    redeem($data['invites'][1]['code'], 'mette');
+    same('done', ext()->liveBannerState($service, props($service))['state'], 'then done');
+});
+
+test('media: cancelling removes the users and links on every server', function () {
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    redeem($data['invites'][0]['code'], 'mette');
+    ext()->getActions($service, mediaSettings(), props($service));
+
+    ext()->terminateServer($service, mediaSettings(), props($service));
+    same([0, 0], [count(state()['users']), count(state()['invitations'])], 'nothing left in Wizarr');
+    same([], ext()->grantKeys(props($service)), 'nothing left on the service');
+});
+
+test('media: Seerr connected to Emby imports the customer\'s Emby user', function () {
+    stub('/_test/set', ['seerr' => ['media' => 'emby']]);
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    redeem($data['invites'][0]['code'], 'jellyuser');
+    redeem($data['invites'][1]['code'], 'embyuser');
+    ext()->getActions($service, mediaSettings(), props($service));
+
+    ext(seerrSettings())->syncSeerr($service, mediaSettings(['seerr_included' => true]), props($service), 'active');
+    same(['jf-owner', 'jf-embyuser'], array_column(seerrUsers(), 'jellyfinUserId'), 'the Emby user, the one Seerr knows');
+});
+
+test('media: a trial on both servers hands both users to the subscription bought after it', function () {
+    $trial = chosen('both');
+    $trial->product = (object) ['server' => (object) ['extension' => 'Wizarr'], 'settings' => mediaSettings(['trial_days' => '7'])];
+    $data = ext()->createServer($trial, mediaSettings(['trial_days' => '7']), props($trial));
+    redeem($data['invites'][0]['code'], 'mette');
+    redeem($data['invites'][1]['code'], 'mette');
+    $trial->user->serviceList[] = $trial;
+    ext()->getActions($trial, mediaSettings(['trial_days' => '7']), props($trial));
+
+    $paid = new Service(99, $trial->user);
+    $paid->configs = [Wizarr::MEDIA_OPTION => 'both'];
+    $paid->product = (object) ['server' => (object) ['extension' => 'Wizarr'], 'settings' => mediaSettings()];
+    $before = count(state()['invitations']);
+    ext()->createServer($paid, mediaSettings(), props($paid));
+
+    same($before, count(state()['invitations']), 'no new invitation');
+    same(['1', '4'], ext()->grantKeys(props($paid)), 'both servers moved over');
+    $left = array_filter($trial->propertyArray(), fn ($key) => str_starts_with($key, 'wizarr_users'), ARRAY_FILTER_USE_KEY);
+    same([], $left, 'the trial lets go of the users');
+    same([false, false], [userOn(1)['is_disabled'], userOn(4)['is_disabled']], 'both on');
 });
 
 /* ---------- refunds ---------- */
@@ -1710,7 +2017,7 @@ test('trial: at the end the user is disabled (not deleted) and the trial is clos
     $user = state()['users'][0];
     same(true, $user['is_disabled'], 'disabled');
     ok(isset($service->propertyArray()['trial_ended_at']), 'end recorded');
-    ok(isset($service->propertyArray()['wizarr_users']), 'user kept for a purchase');
+    ok(grantProp($service, 'wizarr_users') !== null, 'user kept for a purchase');
 });
 
 test('trial: not bought within 30 days -> the user is deleted', function () {
@@ -1729,9 +2036,9 @@ test('trial -> paid after the trial ended: same user switched back on, no new in
     ext()->createServer($paid, settings(), $paid->propertyArray());
     same($invitationsBefore, count(state()['invitations']), 'no new invitation');
     same(false, state()['users'][0]['is_disabled'], 'enabled again');
-    same('1:mette:jellyfin', $paid->propertyArray()['wizarr_users'] ?? null, 'user now on the paid subscription');
+    same('1:mette:jellyfin', grantProp($paid, 'wizarr_users'), 'user now on the paid subscription');
     same('99', $trial->propertyArray()['trial_converted_to'] ?? null, 'trial marked as bought');
-    ok(!isset($trial->propertyArray()['wizarr_users']), 'the trial lets go of the user');
+    ok(grantProp($trial, 'wizarr_users') === null, 'the trial lets go of the user');
 
     // the 30-day clean-up must never touch the bought user
     same('none', ext()->processTrial($trial, trialSettings(), $trial->propertyArray(), time() + 60 * 86400), 'no clean-up');
@@ -1797,7 +2104,7 @@ function terminateLikePaymenter(): callable
 test('deleting a customer removes their access everywhere first', function () {
     $service = customerWithRole();                                   // Discord linked, role on product
     ext(discordSettings())->createServer($service, settings(['discord_role_id' => '500']), []);
-    redeem($service->propertyArray()['wizarr_invite_code'], 'mette');
+    redeem(grantProp($service, 'wizarr_invite_code'), 'mette');
     ext()->getActions($service, settings(), $service->propertyArray());
     same(['500'], memberRoles(), 'had the role');
 
@@ -1821,7 +2128,7 @@ test('deleting a customer whose invitation was never used removes the link', fun
 test('Wizarr down: the deletion is refused and nothing is half-done', function () {
     $service = customerWithRole();
     ext(discordSettings())->createServer($service, settings(['discord_role_id' => '500']), []);
-    redeem($service->propertyArray()['wizarr_invite_code'], 'mette');
+    redeem(grantProp($service, 'wizarr_invite_code'), 'mette');
     ext()->getActions($service, settings(), $service->propertyArray());
     stub('/_test/set', ['fail_next' => 100]);
 
@@ -1854,7 +2161,8 @@ test('a short Wizarr outage is retried for calls that are safe to repeat', funct
 
 test('creating an invitation is never retried', function () {
     stub('/_test/set', ['fail_next' => 1]);
-    throws(fn () => ext()->createServer(service(), settings(), []), '503', 'surfaces the failure');
+    // No libraries chosen: the invitation is the first call to Wizarr.
+    throws(fn () => ext()->createServer(service(), settings(['library_ids' => '']), []), '503', 'surfaces the failure');
 
     $posts = array_filter(state()['requests'], fn ($r) => $r['method'] === 'POST' && $r['path'] === '/api/invitations');
     same(1, count($posts), 'exactly one attempt');

@@ -57,9 +57,9 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.10.0',
+    version: '1.11.0',
     author: 'Paywarr',
-    url: 'https://github.com/wizarrrr/wizarr',
+    url: 'https://github.com/Lolles1911/Paywarr',
 )]
 class Wizarr extends Server
 {
@@ -111,6 +111,26 @@ class Wizarr extends Server
 
     /** Paymenter configurable option (its environment variable) that buys the Seerr add-on. */
     public const SEERR_OPTION = 'seerr';
+
+    /**
+     * Environment variable of the configurable option where the customer picks
+     * the media server(s): values like "jellyfin", "emby" or "jellyfin,emby"
+     * (server types, names or Wizarr server IDs). Without it: every server
+     * selected on the product.
+     */
+    public const MEDIA_OPTION = 'media_server';
+
+    /** The servers this subscription has ("1,4"), so a server added to the product later is not handed out for free. */
+    private const PROP_SERVERS = 'wizarr_servers';
+
+    /** Per-server label ("Emby"), stored when its invitation is made. */
+    private const PROP_SERVER_LABEL = 'wizarr_server';
+
+    /** Properties that exist once per media server (grant), see key(). */
+    private const GRANT_PROPS = ['wizarr_invitation_id', 'wizarr_invite_code', 'wizarr_invite_url', 'wizarr_invite_expires', 'wizarr_users', 'wizarr_server'];
+
+    /** How many servers can have their own buttons in the client area. */
+    private const MAX_GRANT_BUTTONS = 4;
 
     /** On the Paymenter user: Discord roles this extension gave them (and may take back). */
     private const PROP_DISCORD_ROLES = 'discord_roles_granted';
@@ -326,7 +346,8 @@ class Wizarr extends Server
                 'name' => 'server_ids',
                 'label' => 'Media server',
                 'required' => true,
-                'description' => 'Which server(s) this product gives access to.',
+                'description' => 'Which server(s) this product gives access to; each gets its own invitation. '
+                    . 'To let the customer choose, add a configurable option with environment variable "media_server" (see the README).',
             ] + $serverField,
             [
                 'name' => 'library_ids',
@@ -489,40 +510,47 @@ class Wizarr extends Server
      */
     public function createServer(Service $service, $settings, $properties)
     {
-        // Already has a user (a retried job, or the user came over from a trial).
-        if (!empty($properties[self::PROP_USERS])) {
-            return $this->accessMailData($settings);
-        }
-
-        // Bought after a trial: keep the same media server user instead of
+        // Bought after a trial: keep the same media server user(s) instead of
         // inviting them again, so their history and "continue watching" stay.
-        if (!$this->isTrial($settings) && $this->adoptTrialUserQuietly($service)) {
-            $this->syncRolesQuietly($service, active: true);
-            $this->syncSeerrQuietly($service, 'active');
-
-            return $this->accessMailData($settings);
+        if (!$this->hasGrants($properties) && !$this->isTrial($settings) && $this->adoptTrialUserQuietly($service)) {
+            $properties = ExtensionHelper::getServiceProperties($service);
         }
 
-        $invitation = $this->findInvitation($properties);
-
-        // "Create" pressed twice, or a retried job: hand back what exists
-        // instead of minting a second seat for one payment.
-        if ($invitation && ($invitation['status'] ?? '') === 'pending') {
-            return $this->mailData($invitation, $settings);
-        }
-        if ($invitation && ($invitation['status'] ?? '') === 'used') {
-            $this->rememberUsers($service, $this->resolveUsers($properties, $invitation));
-            $this->syncSeerrQuietly($service, 'active');
-
-            return $this->mailData($invitation, $settings, alreadyUsed: true);
-        }
-
-        $data = $this->mailData($this->issueInvitation($service, $settings), $settings);
+        // One invitation per chosen server. Run twice (a retried job), it hands
+        // back what exists instead of minting a second seat for one payment.
+        $invitations = $this->syncGrants($service, $settings, $properties);
         $this->syncRolesQuietly($service, active: true);
         // Usually nothing yet: Seerr follows once the customer has created their user.
         $this->syncSeerrQuietly($service, 'active');
 
-        return $data;
+        return $this->mailDataFor($invitations, $settings);
+    }
+
+    /**
+     * The "Service activated" mail's data. {{ $invite_url }} is the first
+     * server's link (all a single-server product needs); {{ $invites }} lists
+     * every server's link, each with ['server', 'url', 'code'].
+     *
+     * @param  array<string, array>  $invitations  per grant, from syncGrants()
+     */
+    private function mailDataFor(array $invitations, array $settings): array
+    {
+        $invites = [];
+        $first = null;
+        foreach ($invitations as $grant => $invitation) {
+            $data = ($invitation['code'] ?? '') === ''
+                ? $this->accessMailData($settings)
+                : $this->mailData($invitation, $settings, alreadyUsed: !empty($invitation['has_user']));
+            $first ??= $data;
+            $server = $grant === '' ? '' : $this->withGrant((string) $grant, fn () => $this->grantServerName());
+            $invites[] = ['server' => $server, 'url' => $data['invite_url'], 'code' => $data['invite_code']];
+        }
+        $first ??= $this->accessMailData($settings);
+
+        return $first + [
+            'invites' => $invites,
+            'invite_urls' => implode("\n", array_map(fn ($i) => ($i['server'] !== '' ? $i['server'] . ': ' : '') . $i['url'], $invites)),
+        ];
     }
 
     /**
@@ -544,6 +572,21 @@ class Wizarr extends Server
 
     private function suspendNow(Service $service, array $settings, array $properties): array
     {
+        // An unused link is withdrawn below; remember its server, so paying
+        // again brings back that server and no other.
+        if (trim((string) ($properties[self::PROP_SERVERS] ?? '')) === '' && $this->hasGrants($properties)) {
+            $this->setProperty($service, self::PROP_SERVERS, 'Wizarr media servers', implode(',', array_keys($this->coveredServers($settings, $properties))));
+        }
+
+        foreach ($this->grantKeys($properties) as $grant) {
+            $this->withGrant($grant, fn () => $this->suspendGrant($service, $properties));
+        }
+
+        return [];
+    }
+
+    private function suspendGrant(Service $service, array $properties): void
+    {
         $invitation = $this->findInvitation($properties);
 
         // Never redeemed: withdraw the link so it cannot be used while suspended.
@@ -551,7 +594,7 @@ class Wizarr extends Server
             $this->deleteInvitationQuietly((int) $invitation['id']);
             $this->forgetInvitation($service);
 
-            return [];
+            return;
         }
 
         $remaining = [];
@@ -564,8 +607,6 @@ class Wizarr extends Server
             }
         }
         $this->rememberUsers($service, $remaining);
-
-        return [];
     }
 
     /**
@@ -587,10 +628,29 @@ class Wizarr extends Server
 
     private function unsuspendNow(Service $service, array $settings, array $properties): bool
     {
+        $before = $this->grantKeys($properties);
+        foreach ($before as $grant) {
+            $this->withGrant($grant, fn () => $this->unsuspendGrant($service, $settings, $properties));
+        }
+
+        // A server whose unused link was withdrawn at suspension (or that never
+        // got one) gets a new invitation now.
+        $after = ExtensionHelper::getServiceProperties($service);
+        foreach ($this->syncGrants($service, $settings, $after) as $grant => $invitation) {
+            if (!in_array((string) $grant, $before, true) && ($invitation['code'] ?? '') !== '' && empty($invitation['has_user'])) {
+                $this->notifyNewInvitation($service, $this->mailDataFor([$grant => $invitation], $settings));
+            }
+        }
+
+        return true;
+    }
+
+    private function unsuspendGrant(Service $service, array $settings, array $properties): void
+    {
         $invitation = $this->findInvitation($properties);
 
         if ($invitation && ($invitation['status'] ?? '') === 'pending') {
-            return true; // an unused, still valid link is all the customer needs
+            return; // an unused, still valid link is all the customer needs
         }
 
         $enabled = [];
@@ -610,16 +670,14 @@ class Wizarr extends Server
         $this->rememberUsers($service, $enabled);
 
         if ($enabled) {
-            return true;
+            return;
         }
 
         if ($invitation) {
             $this->deleteInvitationQuietly((int) $invitation['id']);
         }
         $fresh = $this->issueInvitation($service, $settings);
-        $this->notifyNewInvitation($service, $this->mailData($fresh, $settings));
-
-        return true;
+        $this->notifyNewInvitation($service, $this->mailDataFor([$this->grant => $fresh], $settings));
     }
 
     /**
@@ -629,6 +687,7 @@ class Wizarr extends Server
     {
         $this->setProperty($service, self::PROP_PENDING, 'Wizarr: unfinished action', 'terminate');
         $result = $this->terminateNow($service, $properties);
+        $this->setProperty($service, self::PROP_SERVERS, '', null);
         $this->setProperty($service, self::PROP_PENDING, '', null);
         $this->syncRolesQuietly($service, active: false);
         $this->syncSeerrQuietly($service, 'ended');
@@ -638,11 +697,18 @@ class Wizarr extends Server
 
     /**
      * Called after a paid upgrade or downgrade: another product or other
-     * options (such as the Seerr add-on). Access on the media server is
-     * unchanged; the Discord role and Seerr follow the new choice.
+     * options (the media servers, the Seerr add-on). The media servers, the
+     * Discord role and Seerr follow the new choice.
      */
     public function upgradeServer(Service $service, $settings, $properties)
     {
+        // Media servers added get an invitation (mailed); removed ones lose their user.
+        $before = $this->grantKeys($properties);
+        foreach ($this->syncGrants($service, $settings, $properties) as $grant => $invitation) {
+            if (!in_array((string) $grant, $before, true) && ($invitation['code'] ?? '') !== '' && empty($invitation['has_user'])) {
+                $this->notifyNewInvitation($service, $this->mailDataFor([$grant => $invitation], $settings));
+            }
+        }
         $this->syncRolesQuietly($service, active: true);
         $this->syncSeerrQuietly($service, 'active');
 
@@ -650,6 +716,17 @@ class Wizarr extends Server
     }
 
     private function terminateNow(Service $service, array $properties): array
+    {
+        // Inside syncGrants() this ends one grant; otherwise all of them.
+        $grants = $this->grant !== '' ? [$this->grant] : ($this->grantKeys($properties) ?: ['']);
+        foreach ($grants as $grant) {
+            $this->withGrant($grant, fn () => $this->terminateGrant($service, $properties));
+        }
+
+        return [];
+    }
+
+    private function terminateGrant(Service $service, array $properties): void
     {
         $invitation = $this->findInvitation($properties);
 
@@ -663,8 +740,9 @@ class Wizarr extends Server
 
         $this->forgetInvitation($service);
         $this->rememberUsers($service, []);
-
-        return [];
+        if ($this->grant !== '') {
+            $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), '', null);
+        }
     }
 
     /* ------------------------------------------------------------------
@@ -686,12 +764,23 @@ class Wizarr extends Server
             'target' => '_blank',
         ]];
 
+        $grants = $this->grantKeys($properties);
+        if (count($grants) > 1) {
+            return $this->actionsForGrants($service, $settings, $properties, $grants, $watch);
+        }
+
+        return $this->withGrant($grants[0] ?? '', fn () => $this->actionsForGrant($service, $settings, $this->grantView($properties), $watch));
+    }
+
+    /** The client area for a subscription with one media server (one invitation). */
+    private function actionsForGrant(Service $service, array $settings, array $properties, array $watch): array
+    {
         if (!empty($properties[self::PROP_USERS])) {
             // A trial whose user was recorded before its clock existed (or before
             // the hourly run): start the clock now, so the end date shows at once.
             if ($this->isTrial($settings) && empty($properties[self::PROP_TRIAL_ENDS])) {
                 $this->processTrialQuietly($service);
-                $properties = ExtensionHelper::getServiceProperties($service);
+                $properties = $this->grantView(ExtensionHelper::getServiceProperties($service));
             }
 
             return $this->activeActions($this->parseUsers((string) $properties[self::PROP_USERS]), $watch, $properties);
@@ -740,10 +829,163 @@ class Wizarr extends Server
     }
 
     /**
+     * The client area for a subscription with several media servers: what
+     * each server's invitation needs, then the usual "active" part for the
+     * users that exist. Buttons are numbered by grant (renewInvitation2 ...).
+     */
+    private function actionsForGrants(Service $service, array $settings, array $properties, array $grants, array $watch): array
+    {
+        $users = [];
+        $pending = [];
+        $resets = [];
+        foreach (array_slice($grants, 0, self::MAX_GRANT_BUTTONS) as $index => $grant) {
+            $number = $index + 1;
+            [$grantUsers, $entries] = $this->withGrant($grant, function () use ($service, $properties, $number) {
+                $view = $this->grantView($properties);
+                $server = $this->grantLabel($properties);
+                if (!empty($view[self::PROP_USERS])) {
+                    return [$this->parseUsers((string) $view[self::PROP_USERS]), []];
+                }
+                try {
+                    $invitation = $this->findInvitation($view);
+                } catch (Throwable $e) {
+                    $url = (string) ($view[self::PROP_INVITE_URL] ?? '');
+
+                    return [[], $url === '' ? [] : [$this->statusField(self::t('Waiting for you to create your user'), $server), $this->inviteButton($url, $server)]];
+                }
+                $status = $invitation['status'] ?? 'missing';
+                if ($status === 'used') {
+                    $found = [];
+                    try {
+                        $found = $this->resolveUsers($view, $invitation);
+                        $this->rememberUsers($service, $found);
+                        $this->syncSeerrQuietly($service, 'active');
+                        $this->processTrialQuietly($service);
+                    } catch (Throwable $e) {
+                        // Only bookkeeping; the page should render either way.
+                    }
+
+                    return [$found, []];
+                }
+                if ($status === 'pending') {
+                    return [[], [
+                        $this->statusField(self::t('Waiting for you to create your user'), $server),
+                        $this->inviteButton($this->absoluteUrl($invitation['url'] ?? null, (string) $invitation['code']), $server),
+                    ]];
+                }
+
+                return [[], [
+                    $this->statusField(self::t('Your invitation link has expired'), $server),
+                    ['type' => 'button', 'label' => self::t('Get a new invitation link for :server', ['server' => $server]), 'function' => 'renewInvitation' . $number],
+                ]];
+            });
+            $users = array_merge($users, $grantUsers);
+            $pending = array_merge($pending, $entries);
+            foreach ($grantUsers as $user) {
+                if ($user['type'] === '' || in_array($user['type'], self::RESETTABLE_SERVERS, true)) {
+                    $label = $this->withGrant($grant, fn () => $this->grantLabel($properties));
+                    $resets[] = ['type' => 'button', 'label' => self::t('Reset password on :server', ['server' => $label]), 'function' => 'resetPassword' . $number];
+
+                    break;
+                }
+            }
+        }
+
+        if (!$users) {
+            return $pending;
+        }
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $active = $this->activeActions($users, $watch, $properties, $resets);
+
+        // "Active" first, then what the other servers still need.
+        return array_merge(array_slice($active, 0, 1), $pending, array_slice($active, 1));
+    }
+
+    /** The grant behind button number $number, or null when it is gone. */
+    private function grantNumber(array $properties, int $number): ?string
+    {
+        return $this->grantKeys($properties)[$number - 1] ?? null;
+    }
+
+    public function renewInvitation1(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 1);
+    }
+
+    public function renewInvitation2(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 2);
+    }
+
+    public function renewInvitation3(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 3);
+    }
+
+    public function renewInvitation4(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 4);
+    }
+
+    public function resetPassword1(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 1);
+    }
+
+    public function resetPassword2(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 2);
+    }
+
+    public function resetPassword3(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 3);
+    }
+
+    public function resetPassword4(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 4);
+    }
+
+    private function renewInvitationFor(Service $service, array $settings, array $properties, int $number): string
+    {
+        $grant = $this->grantNumber($properties, $number);
+        if ($grant === null) {
+            throw new DisplayException(self::t('Please reload the page and try again.'));
+        }
+
+        return $this->withGrant($grant, fn () => $this->renewGrant($service, $settings, $properties));
+    }
+
+    private function resetPasswordFor(Service $service, array $properties, int $number): string
+    {
+        $grant = $this->grantNumber($properties, $number);
+        if ($grant === null) {
+            throw new DisplayException(self::t('Please reload the page and try again.'));
+        }
+
+        return $this->withGrant($grant, fn () => $this->resetGrantPassword($service, $properties));
+    }
+
+    /**
      * Button handler: Paymenter redirects the customer to whatever URL this returns.
      */
     public function renewInvitation(Service $service, $settings, $properties): string
     {
+        $grants = $this->grantKeys($properties);
+        if (!$grants) {
+            // Nothing made yet (the queue is behind): make it now.
+            $invitations = $this->syncGrants($service, $settings, $properties);
+
+            return $this->mailDataFor($invitations, $settings)['invite_url'];
+        }
+
+        return $this->withGrant($grants[0], fn () => $this->renewGrant($service, $settings, $properties));
+    }
+
+    private function renewGrant(Service $service, array $settings, array $properties): string
+    {
+        $properties = $this->grantView($properties);
         $invitation = $this->findInvitation($properties);
         $status = $invitation['status'] ?? 'missing';
 
@@ -774,6 +1016,19 @@ class Wizarr extends Server
      * back in. A DisplayException is shown to the customer as a notice.
      */
     public function resetPassword(Service $service, $settings, $properties): string
+    {
+        // The first server where a password can be reset.
+        foreach ($this->grantKeys($properties) as $grant) {
+            $types = array_column($this->withGrant($grant, fn () => $this->parseUsers((string) ($this->grantView($properties)[self::PROP_USERS] ?? ''))), 'type');
+            if (!$types || array_intersect($types, array_merge(self::RESETTABLE_SERVERS, ['']))) {
+                return $this->withGrant($grant, fn () => $this->resetGrantPassword($service, $properties));
+            }
+        }
+
+        return $this->resetGrantPassword($service, $properties);
+    }
+
+    private function resetGrantPassword(Service $service, array $properties): string
     {
         try {
             $users = $this->resolveUsers($properties, $this->findInvitation($properties));
@@ -820,21 +1075,10 @@ class Wizarr extends Server
     public function bannerState(Service $service, array $properties, ?int $now = null): ?array
     {
         $now ??= time();
-
-        if (!empty($properties[self::PROP_USERS])) {
-            // Has a user. Only a running trial still has something to say.
-            $trialEnds = strtotime((string) ($properties[self::PROP_TRIAL_ENDS] ?? '')) ?: null;
-            if ($trialEnds !== null && $trialEnds > $now) {
-                return ['state' => 'trial', 'key' => 'service-' . $service->id, 'inviteUrl' => '', 'remaining' => $this->remainingText($trialEnds - $now)];
-            }
-
-            return null;
-        }
-
-        $url = (string) ($properties[self::PROP_INVITE_URL] ?? '');
         $key = 'service-' . $service->id;
+        $grants = $this->grantKeys($properties);
 
-        if ($url === '') {
+        if (!$grants) {
             // Paid, but the queue has not created the invitation yet. Only for a
             // while: if it never comes, the banner should not spin forever.
             $since = $service->updated_at?->getTimestamp();
@@ -845,12 +1089,38 @@ class Wizarr extends Server
             return null;
         }
 
-        $expires = (string) ($properties[self::PROP_INVITE_EXPIRES] ?? '');
-        if ($expires !== '' && ($ts = strtotime($expires)) !== false && $ts <= $now) {
-            return ['state' => 'expired', 'key' => $key, 'inviteUrl' => ''];
+        // The first server whose user is not created yet.
+        foreach ($grants as $grant) {
+            $state = $this->withGrant($grant, function () use ($properties, $now, $key, $grants) {
+                $view = $this->grantView($properties);
+                if (!empty($view[self::PROP_USERS])) {
+                    return null;
+                }
+                $url = (string) ($view[self::PROP_INVITE_URL] ?? '');
+                if ($url === '') {
+                    return null;
+                }
+                $extra = count($grants) > 1 ? ['grant' => $this->grant, 'server' => $this->grantLabel($properties)] : [];
+                $key .= $this->grant === '' ? '' : '-' . $this->grant;
+                $expires = (string) ($view[self::PROP_INVITE_EXPIRES] ?? '');
+                if ($expires !== '' && ($ts = strtotime($expires)) !== false && $ts <= $now) {
+                    return ['state' => 'expired', 'key' => $key, 'inviteUrl' => ''] + $extra;
+                }
+
+                return ['state' => 'ready', 'key' => $key, 'inviteUrl' => $url] + $extra;
+            });
+            if ($state !== null) {
+                return $state;
+            }
         }
 
-        return ['state' => 'ready', 'key' => $key, 'inviteUrl' => $url];
+        // Every user exists. Only a running trial still has something to say.
+        $trialEnds = strtotime((string) ($properties[self::PROP_TRIAL_ENDS] ?? '')) ?: null;
+        if ($trialEnds !== null && $trialEnds > $now) {
+            return ['state' => 'trial', 'key' => $key, 'inviteUrl' => '', 'remaining' => $this->remainingText($trialEnds - $now)];
+        }
+
+        return null;
     }
 
     /**
@@ -866,25 +1136,40 @@ class Wizarr extends Server
             return $stored ?? ['state' => 'none', 'key' => 'service-' . $service->id, 'inviteUrl' => ''];
         }
 
+        $grant = (string) ($stored['grant'] ?? ($this->grantKeys($properties)[0] ?? ''));
         try {
-            $invitation = $this->findInvitation($properties);
-            $status = $invitation['status'] ?? 'missing';
+            $live = $this->withGrant($grant, function () use ($service, $properties, $stored) {
+                $invitation = $this->findInvitation($properties);
+                $status = $invitation['status'] ?? 'missing';
 
-            if ($status === 'used') {
-                $this->rememberUsers($service, $this->resolveUsers($properties, $invitation));
-                $this->syncSeerrQuietly($service, 'active');
-                $this->processTrialQuietly($service);
+                if ($status === 'used') {
+                    $this->rememberUsers($service, $this->resolveUsers($properties, $invitation));
+                    $this->syncSeerrQuietly($service, 'active');
+                    $this->processTrialQuietly($service);
 
-                return ['state' => 'done', 'key' => $stored['key'], 'inviteUrl' => ''];
-            }
-            if ($status === 'pending') {
-                return ['state' => 'ready', 'key' => $stored['key'], 'inviteUrl' => $this->absoluteUrl($invitation['url'] ?? null, (string) $invitation['code'])];
-            }
+                    return null;
+                }
+                if ($status === 'pending') {
+                    return ['state' => 'ready', 'inviteUrl' => $this->absoluteUrl($invitation['url'] ?? null, (string) $invitation['code'])] + $stored;
+                }
 
-            return ['state' => 'expired', 'key' => $stored['key'], 'inviteUrl' => ''];
+                return ['state' => 'expired', 'inviteUrl' => ''] + $stored;
+            });
         } catch (Throwable $e) {
             return $stored; // Wizarr unreachable: keep showing what we know
         }
+
+        if ($live !== null) {
+            return $live;
+        }
+
+        // This server's user is created: another server may still be waiting.
+        $next = $this->bannerState($service, ExtensionHelper::getServiceProperties($service));
+        if ($next !== null && in_array($next['state'], ['ready', 'expired'], true)) {
+            return $next;
+        }
+
+        return ['state' => 'done', 'key' => $stored['key'], 'inviteUrl' => ''];
     }
 
     /** "footer" hook: the banner for the logged-in customer, if any. */
@@ -1007,7 +1292,7 @@ HTML
 <div class="wb-actions">
   <span data-when="ready"><a class="wb-btn" data-invite target="_blank" rel="noopener" href="
 HTML
-            . $e($state['inviteUrl'] ?? '') . '">' . $e(self::t('Create your user')) . '</a></span>'
+            . $e($state['inviteUrl'] ?? '') . '">' . $e(($state['server'] ?? '') !== '' ? self::t('Create your user on :server', ['server' => $state['server']]) : self::t('Create your user')) . '</a></span>'
             . '<span data-when="expired"><a class="wb-btn" href="' . $e($state['serviceUrl'] ?? '') . '">' . $e(self::t('Get a new link')) . '</a></span>'
             . '<span data-when="preparing ready"><a class="wb-link" href="' . $e($state['serviceUrl'] ?? '') . '">' . $e(self::t('View subscription')) . '</a></span>'
             . '<span data-when="trial trial_over"><a class="wb-btn" href="' . $e($state['shopUrl'] ?? '') . '">' . $e(self::t('See subscriptions')) . '</a></span>'
@@ -1243,7 +1528,7 @@ HTML;
             return 'none';
         }
         $now ??= time();
-        $users = $this->parseUsers((string) ($properties[self::PROP_USERS] ?? ''));
+        $users = $this->allUsers($properties, resolve: false);
 
         if ($service->status === 'active') {
             if (!$users) {
@@ -1269,12 +1554,16 @@ HTML;
                 return 'none';
             }
 
-            foreach ($users as $user) {
-                $message = $this->client()->disableUser($user['id']);
-                if (stripos($message, 'deleted') !== false) {
-                    // The server could not disable them, so Wizarr deleted them.
-                    $this->rememberUsers($service, []);
-                }
+            foreach ($this->grantKeys($properties) as $grant) {
+                $this->withGrant($grant, function () use ($service, $properties) {
+                    foreach ($this->parseUsers((string) ($this->grantView($properties)[self::PROP_USERS] ?? '')) as $user) {
+                        $message = $this->client()->disableUser($user['id']);
+                        if (stripos($message, 'deleted') !== false) {
+                            // The server could not disable them, so Wizarr deleted them.
+                            $this->rememberUsers($service, []);
+                        }
+                    }
+                });
             }
             $this->setProperty($service, self::PROP_TRIAL_ENDED, 'Trial ended', date(DATE_ATOM, $now));
             $this->closeService($service);
@@ -1288,7 +1577,9 @@ HTML;
                 foreach ($users as $user) {
                     $this->deleteUserQuietly($user['id']);
                 }
-                $this->rememberUsers($service, []);
+                foreach ($this->grantKeys($properties) as $grant) {
+                    $this->withGrant($grant, fn () => $this->rememberUsers($service, []));
+                }
 
                 return 'cleaned';
             }
@@ -1313,23 +1604,38 @@ HTML;
                 continue;
             }
             $props = ExtensionHelper::getServiceProperties($other);
-            if (!empty($props[self::PROP_TRIAL_CONVERTED]) || empty($props[self::PROP_USERS])) {
+            if (!empty($props[self::PROP_TRIAL_CONVERTED]) || !$this->allUsers($props, resolve: false)) {
                 continue;
             }
 
-            $users = $this->resolveUsers($props, null); // checks they still exist
-            if (!$users) {
+            // Per server: the trial's users, checked that they still exist.
+            $byGrant = [];
+            foreach ($this->grantKeys($props) as $grant) {
+                $found = $this->withGrant($grant, fn () => $this->resolveUsers($props, null));
+                if ($found) {
+                    $byGrant[$grant] = $found;
+                }
+            }
+            if (!$byGrant) {
                 continue;
             }
-            foreach ($users as $user) {
+            foreach (array_merge(...array_values($byGrant)) as $user) {
                 if (stripos($this->client()->enableUser($user['id']), 'enabled successfully') === false) {
                     return false; // cannot be switched back on (Plex): invite as usual
                 }
             }
 
-            $this->rememberUsers($service, $users);
+            foreach ($byGrant as $grant => $found) {
+                $this->withGrant((string) $grant, function () use ($service, $other, $found, $props) {
+                    $this->rememberUsers($service, $found);
+                    $label = (string) ($this->grantView($props)[self::PROP_SERVER_LABEL] ?? '');
+                    if ($this->grant !== '' && $label !== '') {
+                        $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), 'Wizarr media server (' . $label . ')', $label);
+                    }
+                    $this->rememberUsers($other, []); // never delete them from the trial again
+                });
+            }
             $this->setProperty($other, self::PROP_TRIAL_CONVERTED, 'Trial became service', (string) $service->id);
-            $this->setProperty($other, self::PROP_USERS, '', null); // never delete them from the trial again
             if ($other->status === 'active') {
                 $this->closeService($other);
             }
@@ -1522,28 +1828,29 @@ HTML;
             if ($state === 'suspended') {
                 return; // never create access for someone who has not paid
             }
-            $username = null;
-            foreach ($this->resolveUsers($properties, $this->findInvitation($properties)) as $user) {
+            // Seerr is connected to one media server (Jellyfin or Emby): the
+            // customer's user there is the one to import.
+            $usernames = [];
+            foreach ($this->allUsers($properties) as $user) {
                 if (in_array($user['type'], ['jellyfin', 'emby'], true)) {
-                    $username = $user['username'];
-
-                    break;
+                    $usernames[] = $user['username'];
                 }
             }
-            if ($username === null) {
+            if (!$usernames) {
                 return; // the customer has not created their user yet
             }
 
             $jellyfinUser = null;
             foreach ($seerr->mediaServerUsers() as $candidate) {
-                if (strcasecmp($candidate['username'], $username) === 0) {
-                    $jellyfinUser = $candidate;
-
-                    break;
+                foreach ($usernames as $name) {
+                    if ($jellyfinUser === null && strcasecmp($candidate['username'], $name) === 0) {
+                        $jellyfinUser = $candidate;
+                    }
                 }
             }
+            $username = $jellyfinUser['username'] ?? $usernames[0];
             if ($jellyfinUser === null) {
-                throw new SeerrException('Seerr does not list a Jellyfin user called "' . $username . '". Is Seerr connected to the same Jellyfin?');
+                throw new SeerrException('Seerr does not list a user called "' . $username . '". Is Seerr connected to the same Jellyfin or Emby?');
             }
 
             if ($seerr->userIdForJellyfinUser($jellyfinUser['id']) !== null) {
@@ -1711,8 +2018,7 @@ HTML;
             }
             $properties = ExtensionHelper::getServiceProperties($service);
             $since = $service->updated_at?->getTimestamp();
-            if (empty($properties[self::PROP_USERS]) && empty($properties[self::PROP_INVITE_URL])
-                && $since !== null && $now - $since > self::PREPARING_FOR_SECONDS) {
+            if (!$this->hasGrants($properties) && $since !== null && $now - $since > self::PREPARING_FOR_SECONDS) {
                 $stuck[] = $service->id;
             }
         }
@@ -2376,12 +2682,320 @@ HTML;
     }
 
     /* ------------------------------------------------------------------
+     | Grants: one invitation, and the user(s) it made, per media server
+     * ----------------------------------------------------------------- */
+
+    /*
+     * A subscription has one grant per media server it gives access to, each
+     * with its own invitation: one invitation for several servers does not
+     * work well in Wizarr. A grant's properties carry the server ID as suffix
+     * ("wizarr_invite_code:4"). Subscriptions from before 1.11 have a single
+     * grant without suffix (key ""), which may cover several servers; it is
+     * kept as it is.
+     *
+     * The single-invitation code below works on "the current grant": key()
+     * names its properties and grantView() shows its values under the plain
+     * names, so withGrant() can run that code once per server.
+     */
+
+    private string $grant = '';
+
+    /** @var array<int, array{name: string, type: string}>|null */
+    private ?array $serverInfo = null;
+
+    /** The property name for the current grant. */
+    private function key(string $prop): string
+    {
+        return $this->grant === '' || !in_array($prop, self::GRANT_PROPS, true) ? $prop : $prop . ':' . $this->grant;
+    }
+
+    /** $properties with the current grant's values under the plain names. Idempotent. */
+    private function grantView(array $properties): array
+    {
+        if ($this->grant === '') {
+            return $properties;
+        }
+        foreach (self::GRANT_PROPS as $prop) {
+            $properties[$prop] = $properties[$prop . ':' . $this->grant] ?? null;
+        }
+
+        return $properties;
+    }
+
+    /** Runs $fn with $grant as the current grant. */
+    private function withGrant(string $grant, callable $fn): mixed
+    {
+        $before = $this->grant;
+        $this->grant = $grant;
+        try {
+            return $fn();
+        } finally {
+            $this->grant = $before;
+        }
+    }
+
+    /**
+     * The grants a service has: "" for a pre-1.11 one, then server IDs, in
+     * a fixed order (the client area's buttons are numbered by it).
+     *
+     * @return string[]
+     */
+    public function grantKeys(array $properties): array
+    {
+        $keys = [];
+        foreach ($properties as $name => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            foreach (self::GRANT_PROPS as $prop) {
+                if ($prop === self::PROP_SERVER_LABEL) {
+                    continue; // a label alone is no grant
+                }
+                if ($name === $prop) {
+                    $keys[''] = true;
+                } elseif (str_starts_with((string) $name, $prop . ':') && ctype_digit(substr((string) $name, strlen($prop) + 1))) {
+                    $keys[substr((string) $name, strlen($prop) + 1)] = true;
+                }
+            }
+        }
+        $keys = array_map('strval', array_keys($keys));
+        usort($keys, fn ($a, $b) => ($a === '' ? -1 : (int) $a) <=> ($b === '' ? -1 : (int) $b));
+
+        return $keys;
+    }
+
+    /** True when the service has at least one invitation or user. */
+    private function hasGrants(array $properties): bool
+    {
+        return $this->grantKeys($properties) !== [];
+    }
+
+    /** Wizarr's media servers: ID => name and type. Asked once per instance. */
+    private function serverInfo(): array
+    {
+        if ($this->serverInfo === null) {
+            $this->serverInfo = [];
+            foreach ($this->client()->servers() as $server) {
+                $this->serverInfo[(int) $server['id']] = [
+                    'name' => (string) ($server['name'] ?? ''),
+                    'type' => strtolower((string) ($server['server_type'] ?? '')),
+                ];
+            }
+        }
+
+        return $this->serverInfo;
+    }
+
+    /**
+     * The servers this subscription should have: the customer's choice in
+     * the "media_server" option; without one, what it had so far; for a new
+     * subscription, every server on the product.
+     *
+     * @return int[]
+     */
+    public function chosenServerIds(array $settings, array $properties): array
+    {
+        $product = $this->idList($settings['server_ids'] ?? null);
+        $choice = strtolower(trim((string) ($properties[self::MEDIA_OPTION] ?? '')));
+        if ($choice === '') {
+            $recorded = $this->idList((string) ($properties[self::PROP_SERVERS] ?? ''));
+            if ($recorded) {
+                return array_values(array_intersect($recorded, $product)) ?: $recorded;
+            }
+
+            return $product;
+        }
+        if (in_array($choice, ['all', 'both', 'begge', 'alle'], true) || !$product) {
+            return $product;
+        }
+
+        $wanted = array_filter(array_map('trim', preg_split('/[,;+\s]+/', $choice)));
+        $info = $this->serverInfo();
+        $chosen = [];
+        foreach ($product as $id) {
+            $server = $info[$id] ?? ['name' => '', 'type' => ''];
+            if (in_array((string) $id, $wanted, true) || in_array($server['type'], $wanted, true) || in_array(strtolower($server['name']), $wanted, true)) {
+                $chosen[] = $id;
+            }
+        }
+        if (!$chosen) {
+            throw new WizarrException('The chosen media server "' . $choice . '" matches none of the servers on this product. '
+                . 'Its environment variable must be a server type (jellyfin, emby, plex), name or ID.');
+        }
+
+        return $chosen;
+    }
+
+    /**
+     * The servers the current grant covers: its own for a per-server grant;
+     * for a pre-1.11 grant, the servers its invitation or users are on.
+     *
+     * @return int[]
+     */
+    private function grantServerIds(array $settings, array $properties): array
+    {
+        if ($this->grant !== '') {
+            return [(int) $this->grant];
+        }
+        $properties = $this->grantView($properties);
+        $byName = [];
+        foreach ($this->serverInfo() as $id => $server) {
+            $byName[$server['name']] = $id;
+        }
+        $names = [];
+        $invitation = $this->findInvitation($properties);
+        foreach ((array) ($invitation['server_names'] ?? []) as $name) {
+            $names[] = (string) $name;
+        }
+        foreach ($this->resolveUsers($properties, $invitation) as $user) {
+            $names[] = (string) ($user['server'] ?? '');
+        }
+        $ids = array_values(array_unique(array_filter(array_map(fn ($n) => $byName[$n] ?? null, $names))));
+
+        return $ids ?: $this->idList($settings['server_ids'] ?? null);
+    }
+
+    /** "Emby" for a per-server grant; "" for a pre-1.11 one. */
+    private function grantLabel(array $properties): string
+    {
+        $label = (string) ($this->grantView($properties)[self::PROP_SERVER_LABEL] ?? '');
+
+        return $label !== '' ? $label : ($this->grant === '' ? '' : 'server ' . $this->grant);
+    }
+
+    /** The current per-server grant's server name, from Wizarr. */
+    private function grantServerName(): string
+    {
+        try {
+            return $this->serverInfo()[(int) $this->grant]['name'] ?? ('server ' . $this->grant);
+        } catch (Throwable $e) {
+            return 'server ' . $this->grant;
+        }
+    }
+
+    /**
+     * Brings the grants in line with the servers chosen: a new invitation for
+     * each server that has none, and the user(s) removed from a server that
+     * is no longer chosen. Used at purchase and after an upgrade/downgrade.
+     *
+     * @return array<string, array> the invitations made or found, per grant
+     */
+    public function syncGrants(Service $service, array $settings, array $properties): array
+    {
+        // What exists, per server.
+        $covered = $this->coveredServers($settings, $properties);
+
+        $explicit = trim((string) ($properties[self::MEDIA_OPTION] ?? '')) !== '' || trim((string) ($properties[self::PROP_SERVERS] ?? '')) !== '';
+        // A subscription from before 1.11, with no choice made: it keeps the
+        // servers it has, even if the product has more by now.
+        $wanted = !$explicit && $covered ? array_keys($covered) : $this->chosenServerIds($settings, $properties);
+        if (!$wanted) {
+            throw new WizarrException('This product has no media server selected. Edit the product and choose one.');
+        }
+        $this->setProperty($service, self::PROP_SERVERS, 'Wizarr media servers', implode(',', $wanted));
+
+        // Servers no longer chosen.
+        foreach ($covered as $id => $grant) {
+            if (in_array($id, $wanted, true)) {
+                continue;
+            }
+            $this->withGrant($grant, function () use ($service, $properties, $id, $wanted, $covered, $grant) {
+                $keep = array_filter(array_keys($covered, $grant, true), fn ($other) => in_array($other, $wanted, true));
+                if ($grant !== '' || !$keep) {
+                    $this->terminateNow($service, $properties);
+                } else {
+                    $this->removeServerFromGrant($service, $properties, $id);
+                }
+            });
+            Log::info('Wizarr: service ' . $service->id . ' no longer has media server ' . $id . '; its user there was removed.');
+        }
+
+        // Servers chosen: an invitation for each that has none, or the one it has.
+        $invitations = [];
+        foreach ($wanted as $id) {
+            $grant = $covered[$id] ?? (string) $id;
+            if (isset($invitations[$grant])) {
+                continue;
+            }
+            $invitations[$grant] = $this->withGrant($grant, function () use ($service, $settings, $properties) {
+                $view = $this->grantView($properties);
+                $invitation = $this->findInvitation($view);
+                if ($invitation && ($invitation['status'] ?? '') === 'used') {
+                    $this->rememberUsers($service, $this->resolveUsers($view, $invitation));
+                }
+                if ($invitation || !empty($view[self::PROP_USERS])) {
+                    return ($invitation ?? []) + ['has_user' => !empty($view[self::PROP_USERS]) || ($invitation['status'] ?? '') === 'used'];
+                }
+
+                return $this->issueInvitation($service, $settings);
+            });
+        }
+
+        return $invitations;
+    }
+
+    /**
+     * Which grant covers which server.
+     *
+     * @return array<int, string> server ID => grant
+     */
+    private function coveredServers(array $settings, array $properties): array
+    {
+        $covered = [];
+        foreach ($this->grantKeys($properties) as $grant) {
+            foreach ($this->withGrant($grant, fn () => $this->grantServerIds($settings, $properties)) as $id) {
+                $covered[$id] = $grant;
+            }
+        }
+
+        return $covered;
+    }
+
+    /** A pre-1.11 grant that covered several servers loses one of them. */
+    private function removeServerFromGrant(Service $service, array $properties, int $serverId): void
+    {
+        $properties = $this->grantView($properties);
+        $name = $this->serverInfo()[$serverId]['name'] ?? null;
+        $keep = [];
+        foreach ($this->resolveUsers($properties, $this->findInvitation($properties)) as $user) {
+            if ($name !== null && ($user['server'] ?? null) === $name) {
+                $this->deleteUserQuietly($user['id']);
+            } else {
+                $keep[] = $user;
+            }
+        }
+        $this->rememberUsers($service, $keep);
+    }
+
+    /**
+     * Every user of the service, all grants together.
+     *
+     * @return array<int, array{id: int, username: string, type: string}>
+     */
+    private function allUsers(array $properties, bool $resolve = true): array
+    {
+        $users = [];
+        foreach ($this->grantKeys($properties) as $grant) {
+            $users = array_merge($users, $this->withGrant($grant, function () use ($properties, $resolve) {
+                $view = $this->grantView($properties);
+
+                return $resolve
+                    ? $this->resolveUsers($view, $this->findInvitation($view))
+                    : $this->parseUsers((string) ($view[self::PROP_USERS] ?? ''));
+            }));
+        }
+
+        return $users;
+    }
+
+    /* ------------------------------------------------------------------
      | Invitations
      * ----------------------------------------------------------------- */
 
     private function issueInvitation(Service $service, array $settings): array
     {
-        $serverIds = $this->idList($settings['server_ids'] ?? null);
+        // A per-server grant invites to its own server only.
+        $serverIds = $this->grant === '' ? $this->idList($settings['server_ids'] ?? null) : [(int) $this->grant];
         if (!$serverIds) {
             throw new WizarrException('This product has no media server selected. Edit the product and choose one.');
         }
@@ -2408,6 +3022,17 @@ HTML;
         }
 
         $libraryIds = $this->idList($settings['library_ids'] ?? null);
+        if ($libraryIds && $this->grant !== '') {
+            // The product lists libraries of all its servers; this invitation
+            // only takes this server's. None of them chosen: the server's default.
+            $own = [];
+            foreach ($this->client()->libraries() as $library) {
+                if ((int) ($library['server_id'] ?? 0) === (int) $this->grant) {
+                    $own[] = (int) $library['id'];
+                }
+            }
+            $libraryIds = array_values(array_intersect($libraryIds, $own));
+        }
         if ($libraryIds) {
             $payload['library_ids'] = $libraryIds;
         }
@@ -2415,10 +3040,14 @@ HTML;
         $invitation = $this->client()->createInvitation($payload);
         $invitation['url'] = $this->absoluteUrl($invitation['url'] ?? null, (string) $invitation['code']);
 
-        $this->setProperty($service, self::PROP_INVITATION_ID, 'Wizarr invitation ID', (string) ($invitation['id'] ?? ''));
-        $this->setProperty($service, self::PROP_INVITE_CODE, 'Wizarr invite code', (string) $invitation['code']);
-        $this->setProperty($service, self::PROP_INVITE_URL, 'Wizarr invite link', $invitation['url']);
-        $this->setProperty($service, self::PROP_INVITE_EXPIRES, 'Wizarr invite link expires', $invitation['expires'] ?? null);
+        $suffix = $this->grant === '' ? '' : ' (' . $this->grantServerName() . ')';
+        $this->setProperty($service, $this->key(self::PROP_INVITATION_ID), 'Wizarr invitation ID' . $suffix, (string) ($invitation['id'] ?? ''));
+        $this->setProperty($service, $this->key(self::PROP_INVITE_CODE), 'Wizarr invite code' . $suffix, (string) $invitation['code']);
+        $this->setProperty($service, $this->key(self::PROP_INVITE_URL), 'Wizarr invite link' . $suffix, $invitation['url']);
+        $this->setProperty($service, $this->key(self::PROP_INVITE_EXPIRES), 'Wizarr invite link expires' . $suffix, $invitation['expires'] ?? null);
+        if ($this->grant !== '') {
+            $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), 'Wizarr media server' . $suffix, $this->grantServerName());
+        }
         $this->rememberUsers($service, []);
 
         return $invitation;
@@ -2430,6 +3059,7 @@ HTML;
      */
     private function findInvitation(array $properties): ?array
     {
+        $properties = $this->grantView($properties);
         $id = (string) ($properties[self::PROP_INVITATION_ID] ?? '');
         $code = (string) ($properties[self::PROP_INVITE_CODE] ?? '');
 
@@ -2453,10 +3083,13 @@ HTML;
 
     private function forgetInvitation(Service $service): void
     {
-        $this->setProperty($service, self::PROP_INVITATION_ID, '', null);
-        $this->setProperty($service, self::PROP_INVITE_CODE, '', null);
-        $this->setProperty($service, self::PROP_INVITE_URL, '', null);
-        $this->setProperty($service, self::PROP_INVITE_EXPIRES, '', null);
+        $this->setProperty($service, $this->key(self::PROP_INVITATION_ID), '', null);
+        $this->setProperty($service, $this->key(self::PROP_INVITE_CODE), '', null);
+        $this->setProperty($service, $this->key(self::PROP_INVITE_URL), '', null);
+        $this->setProperty($service, $this->key(self::PROP_INVITE_EXPIRES), '', null);
+        if ($this->grant !== '' && !$this->parseUsers((string) ($this->grantView(ExtensionHelper::getServiceProperties($service))[self::PROP_USERS] ?? ''))) {
+            $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), '', null);
+        }
     }
 
     /** Wizarr returns a relative path (/j/<code>), or nothing at all. */
@@ -2488,6 +3121,7 @@ HTML;
      */
     private function resolveUsers(array $properties, ?array $invitation): array
     {
+        $properties = $this->grantView($properties);
         $usedBy = is_array($invitation) ? trim((string) ($invitation['used_by'] ?? '')) : '';
         $recorded = $this->parseUsers((string) ($properties[self::PROP_USERS] ?? ''));
 
@@ -2546,6 +3180,8 @@ HTML;
             'id' => (int) $wizarrUser['id'],
             'username' => (string) $wizarrUser['username'],
             'type' => strtolower((string) ($wizarrUser['server_type'] ?? '')),
+            // Not stored; tells which server a user is on.
+            'server' => (string) ($wizarrUser['server'] ?? ''),
         ];
     }
 
@@ -2562,7 +3198,8 @@ HTML;
             $users,
         ));
 
-        $this->setProperty($service, self::PROP_USERS, 'Wizarr users', $encoded === '' ? null : $encoded);
+        $label = $this->grant === '' ? 'Wizarr users' : 'Wizarr users (' . $this->grantServerName() . ')';
+        $this->setProperty($service, $this->key(self::PROP_USERS), $label, $encoded === '' ? null : $encoded);
     }
 
     /** @return array<int, array{id: int, username: string, type: string}> */
@@ -2691,7 +3328,7 @@ HTML;
      *
      * @param  array<int, array{id: int, username: string, type: string}>  $users
      */
-    private function activeActions(array $users, array $watch, array $properties = []): array
+    private function activeActions(array $users, array $watch, array $properties = [], ?array $resetButtons = null): array
     {
         $actions = [$this->statusField(self::t('Active'))];
 
@@ -2712,26 +3349,33 @@ HTML;
             $actions[] = ['type' => 'text', 'label' => self::t('Username'), 'text' => implode(', ', $names)];
         }
 
-        foreach ($users as $user) {
-            // An unknown type (stored by 1.0.0) is offered; resetPassword checks it live.
-            if ($user['type'] === '' || in_array($user['type'], self::RESETTABLE_SERVERS, true)) {
-                $actions[] = ['type' => 'button', 'label' => self::t('Reset password'), 'function' => 'resetPassword'];
+        if ($resetButtons !== null) {
+            $actions = array_merge($actions, $resetButtons);
+        } else {
+            foreach ($users as $user) {
+                // An unknown type (stored by 1.0.0) is offered; resetPassword checks it live.
+                if ($user['type'] === '' || in_array($user['type'], self::RESETTABLE_SERVERS, true)) {
+                    $actions[] = ['type' => 'button', 'label' => self::t('Reset password'), 'function' => 'resetPassword'];
 
-                break;
+                    break;
+                }
             }
         }
 
         return array_merge($actions, $watch);
     }
 
-    private function statusField(string $text): array
+    /** "Status: ..." or, with several servers, "Emby: ...". */
+    private function statusField(string $text, string $server = ''): array
     {
-        return ['type' => 'text', 'label' => 'Status', 'text' => $text];
+        return ['type' => 'text', 'label' => $server !== '' ? $server : 'Status', 'text' => $text];
     }
 
-    private function inviteButton(string $url): array
+    private function inviteButton(string $url, string $server = ''): array
     {
-        return ['type' => 'button', 'label' => self::t('Create your user'), 'url' => $url, 'target' => '_blank'];
+        $label = $server !== '' ? self::t('Create your user on :server', ['server' => $server]) : self::t('Create your user');
+
+        return ['type' => 'button', 'label' => $label, 'url' => $url, 'target' => '_blank'];
     }
 
     /* ------------------------------------------------------------------

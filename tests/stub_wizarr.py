@@ -35,18 +35,21 @@ def fresh_state() -> dict:
             {"id": 1, "name": "Jellyfin", "server_type": "jellyfin", "verified": True, "offline": False},
             {"id": 2, "name": "Plex", "server_type": "plex", "verified": True, "offline": False},
             {"id": 3, "name": "Unverified", "server_type": "emby", "verified": False, "offline": False},
+            {"id": 4, "name": "Emby", "server_type": "emby", "verified": True, "offline": False},
         ],
         "libraries": [
             {"id": 10, "name": "Film", "server_id": 1, "server_name": "Jellyfin", "enabled": True},
             {"id": 11, "name": "Serier", "server_id": 1, "server_name": "Jellyfin", "enabled": True},
             {"id": 20, "name": "Movies", "server_id": 2, "server_name": "Plex", "enabled": True},
+            {"id": 40, "name": "Film", "server_id": 4, "server_name": "Emby", "enabled": True},
         ],
         "invitations": [],
         "users": [],
         "reset_tokens": [],
         # Discord (served under /discord/api/v10, not part of Wizarr)
         # Seerr (served under /seerr/api/v1). User 1 is the owner, as in Seerr.
-        "seerr": {"key": "seerr-key", "csrf": False, "default_permissions": 32,
+        # "media": the one media server type Seerr is connected to (Jellyfin or Emby).
+        "seerr": {"key": "seerr-key", "csrf": False, "default_permissions": 32, "media": "jellyfin",
                   "users": [{"id": 1, "jellyfinUserId": "jf-owner", "permissions": 2}], "next_id": 2},
         "discord": {
             "token": "bot-token", "bot_id": "999", "guild": "100000000000000111", "members": ["999"], "down": False,
@@ -260,7 +263,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/status":
             return self.send_json(200, {"version": "3.5.1"})
         if method == "GET" and path == "/settings/jellyfin/users":
-            jf = [{"id": f"jf-{u['username']}", "username": u["username"]} for u in STATE["users"] if server_by_id(u["server_id"])["server_type"] == "jellyfin"]
+            jf = [{"id": f"jf-{u['username']}", "username": u["username"]} for u in STATE["users"] if server_by_id(u["server_id"])["server_type"] == st["media"]]
             return self.send_json(200, [{"id": "jf-owner", "username": "owner"}] + jf)
         if method == "GET" and len(parts) == 3 and parts[:2] == ["user", "jellyfin"]:
             u = next((u for u in users if u["jellyfinUserId"] == parts[2]), None)
