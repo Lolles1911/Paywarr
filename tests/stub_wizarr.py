@@ -25,6 +25,9 @@ import secrets
 import sys
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
+
+import stub_silo
 
 API_KEY = "stub-key"
 
@@ -74,6 +77,8 @@ def fresh_state() -> dict:
     # More Seerr instances (served under /seerr2 and /seerr3), each with its own media server.
     state["seerr2"] = fresh_seerr("seerr2-key", "emby")
     state["seerr3"] = fresh_seerr("seerr3-key", "plex")
+    # Silo (served under /silo, see stub_silo.py)
+    state["silo"] = stub_silo.fresh()
     return state
 
 
@@ -134,6 +139,17 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_raw(self, status: int, payload, extra: dict) -> None:
+        body = b"" if payload is None else json.dumps(payload).encode()
+        self.send_response(status)
+        if payload is not None:
+            self.send_header("Content-Type", "application/problem+json" if status >= 400 else "application/json")
+        for name, value in extra.items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
@@ -153,6 +169,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/discord/api/v10/"):
             return self.handle_discord(method, path[len("/discord/api/v10"):])
+
+        if path.startswith("/silo/"):
+            query = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
+            status, payload, extra = stub_silo.handle(STATE, method, path[len("/silo"):], query, body, self.headers)
+            return self.send_raw(status, payload, extra)
 
         for name in ("seerr2", "seerr3", "seerr"):
             if path.startswith(f"/{name}/api/v1/"):
@@ -459,6 +480,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/_test/state":
             return self.send_json(200, STATE)
+
+        if path.startswith("/_test/silo-"):
+            return self.send_json(200, stub_silo.handle_test(STATE, path, body))
 
         if path == "/_test/set":
             for key in ("used_by_mode", "fail_next"):

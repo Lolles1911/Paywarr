@@ -10,6 +10,7 @@ declare(strict_types=1);
 require __DIR__ . '/shims.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/WizarrException.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/WizarrClient.php';
+require __DIR__ . '/../extensions/Servers/Wizarr/SiloClient.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/DiscordException.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/DiscordClient.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/ShopGate.php';
@@ -2529,6 +2530,184 @@ test('a longer outage fails the suspension loudly instead of pretending it worke
     throws(fn () => ext()->suspendServer($service, settings(), $service->propertyArray()), '503', 'suspend throws');
     stub('/_test/set', ['fail_next' => 0]);
     same(false, state()['users'][0]['is_disabled'], 'user untouched');
+});
+
+/* ---------- Silo, directly, without Wizarr ---------- */
+
+/** The extension on a Paymenter server set to Silo (stub_silo.py under /silo). */
+function silo(array $config = []): Wizarr
+{
+    global $STUB;
+
+    return ext($config + ['backend' => 'silo', 'host' => $STUB . '/silo', 'public_url' => 'https://watch.example.com', 'api_key' => 'sa_full']);
+}
+
+function siloSettings(array $overrides = []): array
+{
+    return $overrides + ['server_ids' => ['1'], 'library_ids' => ['1'], 'link_lifetime' => '7', 'access_days' => null, 'login_url' => ''];
+}
+
+function siloState(): array
+{
+    return state()['silo'];
+}
+
+/** The customer opens the link and creates their account. */
+function siloAccept(string $link, string $username = 'mette'): string
+{
+    return (string) stub('/_test/silo-accept', ['link' => $link, 'username' => $username, 'email' => $username . '@example.com'])['account'];
+}
+
+function siloAccount(string $id): ?array
+{
+    foreach (siloState()['accounts'] as $account) {
+        if ($account['id'] === $id) {
+            return $account;
+        }
+    }
+
+    return null;
+}
+
+/** Subscribed to a Silo product, account created. Returns [service, account ID]. */
+function siloSubscribed(string $username = 'mette', int $id = 1): array
+{
+    $service = service($id);
+    $data = silo()->createServer($service, siloSettings(), $service->propertyArray());
+
+    return [$service, siloAccept($data['invite_url'], $username)];
+}
+
+test('Silo: testConfig checks the key, and explains a key with only admin:users', function () {
+    same(true, silo()->testConfig(), 'full key');
+    ok(str_contains((string) silo(['api_key' => 'sa_wrong'])->testConfig(), 'rejected the API key'), 'wrong key');
+    ok(str_contains((string) silo(['api_key' => 'sa_users_only'])->testConfig(), 'full access'), 'scoped key: ' . silo(['api_key' => 'sa_users_only'])->testConfig());
+});
+
+test('Silo: the product page lists Silo and its libraries', function () {
+    $fields = array_column(silo()->getProductConfig(), null, 'name');
+    same([['value' => '1', 'label' => 'Silo (silo)']], $fields['server_ids']['options'], 'one server: Silo');
+    same(['Silo: Movies', 'Silo: Shows'], array_column($fields['library_ids']['options'], 'label'), 'its libraries');
+});
+
+test('Silo: first payment makes one link invitation for an ordinary account, with the chosen libraries', function () {
+    $service = service();
+    $data = silo()->createServer($service, siloSettings(), $service->propertyArray());
+
+    $create = array_values(array_filter(siloState()['requests'], fn ($r) => $r['method'] === 'POST'));
+    same([['delivery' => 'link', 'role' => 'user', 'note' => 'Paymenter', 'library_ids' => ['1']]], array_column($create, 'body'), 'exactly what Silo accepts');
+    ok(str_starts_with($data['invite_url'], 'https://silo.example.com/invite#'), 'Silo\'s own link: ' . $data['invite_url']);
+    same($data['invite_url'], grantProp($service, 'wizarr_invite_url'), 'link stored, as Silo never shows it again');
+
+    $actions = silo()->getActions($service, siloSettings(), $service->propertyArray());
+    same(['text:Status=Waiting for you to create your user', 'button:Create your user'], labels($actions), 'waiting');
+    same($data['invite_url'], $actions[1]['url'], 'the button opens the stored link');
+});
+
+test('Silo: once the account exists the client area shows it, with reset and "Open"', function () {
+    [$service, $account] = siloSubscribed();
+    $actions = silo()->getActions($service, siloSettings(), $service->propertyArray());
+    same(['text:Status=Active', 'text:Username=mette', 'button:Reset password', 'button:Open the media library'], labels($actions), 'active');
+    same('https://watch.example.com', end($actions)['url'], 'Open goes to Silo\'s public address');
+    same($account . ':mette:silo', grantProp($service, 'wizarr_users'), 'the account recorded');
+
+    $url = silo()->resetPassword($service, siloSettings(), $service->propertyArray());
+    ok(str_starts_with($url, 'https://silo.example.com/reset-password#'), 'Silo\'s reset link: ' . $url);
+});
+
+test('Silo: overdue disables the same account, paid again enables it; both with Silo\'s edit guard', function () {
+    [$service, $account] = siloSubscribed();
+    silo()->suspendServer($service, siloSettings(), $service->propertyArray());
+    same(false, siloAccount($account)['enabled'], 'disabled, not deleted');
+
+    silo()->unsuspendServer($service, siloSettings(), $service->propertyArray());
+    same(true, siloAccount($account)['enabled'], 'the same account back');
+    same(1, count(siloState()['invitations']), 'no new invitation');
+    same([], NotificationHelper::$sent, 'no new mail');
+    $writes = array_filter(siloState()['requests'], fn ($r) => $r['method'] === 'PUT');
+    ok(count($writes) === 2 && !array_filter($writes, fn ($r) => !$r['if_match']), 'every change sent If-Match');
+});
+
+test('Silo: a change made by someone else in between is read again, not overwritten blindly', function () {
+    [$service, $account] = siloSubscribed();
+    // The account changes between Paywarr reading and writing it, once.
+    stub('/_test/silo-stale', ['times' => 1]);
+    silo()->suspendServer($service, siloSettings(), $service->propertyArray());
+    same(false, siloAccount($account)['enabled'], 'disabled after reading it again');
+    same(2, count(array_filter(siloState()['requests'], fn ($r) => $r['method'] === 'PUT')), 'the first write was refused (412), the second went through');
+
+    // Changed again and again: Paywarr gives up instead of looping.
+    stub('/_test/silo-stale', ['times' => 5]);
+    $e = tryHook(fn () => silo()->unsuspendServer($service, siloSettings(), $service->propertyArray()));
+    ok($e !== null && str_contains($e->getMessage(), '412'), 'reported: ' . ($e ? $e->getMessage() : 'nothing thrown'));
+});
+
+test('Silo: an unused link is revoked at suspension, and payment brings a new one by mail', function () {
+    $service = service();
+    $first = silo()->createServer($service, siloSettings(), $service->propertyArray());
+    silo()->suspendServer($service, siloSettings(), $service->propertyArray());
+    same('revoked', siloState()['invitations'][0]['status'], 'the old link no longer works');
+
+    silo()->unsuspendServer($service, siloSettings(), $service->propertyArray());
+    same(2, count(siloState()['invitations']), 'a new invitation');
+    $fresh = grantProp($service, 'wizarr_invite_url');
+    ok($fresh !== $first['invite_url'] && str_starts_with($fresh, 'https://silo.example.com/invite#'), 'a new link');
+    same(1, count(NotificationHelper::$sent), 'mailed');
+});
+
+test('Silo: an expired link gets a "new link" button that works', function () {
+    $service = service();
+    silo()->createServer($service, siloSettings(), $service->propertyArray());
+    stub('/_test/silo-expire', ['id' => 1]);
+    $labels = labels(silo()->getActions($service, siloSettings(), $service->propertyArray()));
+    ok(in_array('text:Status=Your invitation link has expired', $labels, true), json_encode($labels));
+
+    $url = silo()->renewInvitation($service, siloSettings(), $service->propertyArray());
+    ok(str_starts_with($url, 'https://silo.example.com/invite#'), 'new link: ' . $url);
+    siloAccept($url, 'late');
+    same('late', siloState()['accounts'][1]['username'], 'it creates the account');
+});
+
+test('Silo: cancellation deletes the account; the accepted invitation is left as it is', function () {
+    [$service, $account] = siloSubscribed();
+    silo()->terminateServer($service, siloSettings(), $service->propertyArray());
+    same(null, siloAccount($account), 'account deleted');
+    same('accepted', siloState()['invitations'][0]['status'], 'nothing to revoke');
+    ok(siloAccount('1') !== null, 'the owner untouched');
+});
+
+test('Silo: administrators are never changed, and other accounts never matched', function () {
+    stub('/_test/silo-add', ['username' => 'anna', 'email' => 'mette.old@example.com']); // an older, unrelated account
+    [$service, $account] = siloSubscribed('mette');
+    silo()->suspendServer($service, siloSettings(), $service->propertyArray());
+    same([true, false], [siloAccount('2')['enabled'], siloAccount($account)['enabled']], 'only the account the invitation made');
+
+    $client = new \Paymenter\Extensions\Servers\Wizarr\SiloClient($GLOBALS['STUB'] . '/silo', 'sa_full');
+    try {
+        $client->disableUser(1);
+        $refused = false;
+    } catch (\Paymenter\Extensions\Servers\Wizarr\WizarrException $e) {
+        $refused = true;
+    }
+    same([true, true], [$refused, siloAccount('1')['enabled']], 'the owner is refused, client side');
+    same([], array_values(array_filter($client->users(), fn ($u) => $u['username'] === 'owner')), 'administrators are not listed as users');
+});
+
+test('Silo: long account and invitation lists are read page by page', function () {
+    for ($i = 0; $i < 230; $i++) {
+        stub('/_test/silo-add', ['username' => "user$i", 'email' => "user$i@example.com"]);
+    }
+    $client = new \Paymenter\Extensions\Servers\Wizarr\SiloClient($GLOBALS['STUB'] . '/silo', 'sa_full');
+    same(230, count($client->users()), 'all of them, owner left out');
+    $pages = array_filter(siloState()['requests'], fn ($r) => str_starts_with($r['path'], '/api/v2/admin/users'));
+    same(2, count($pages), 'two pages of 200');
+});
+
+test('Silo: a product with "Access expires after" is refused rather than giving access for good', function () {
+    $service = service();
+    $e = tryHook(fn () => silo()->createServer($service, siloSettings(['access_days' => '30']), $service->propertyArray()));
+    ok($e !== null && str_contains($e->getMessage(), 'cannot expire'), 'refused: ' . ($e ? $e->getMessage() : 'nothing thrown'));
+    same([], siloState()['invitations'], 'no invitation made');
 });
 
 /* ---------- summary ---------- */

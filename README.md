@@ -4,7 +4,7 @@
 
 [![Tests](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml/badge.svg)](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml)
 
-**Subscriptions and access management for your media server, with Paymenter and Wizarr.**
+**Subscriptions and access management for your media server, with Paymenter and Wizarr (or Silo).**
 
 Paywarr is a server extension for [Paymenter](https://paymenter.org) that turns a
 subscription into access through [Wizarr](https://github.com/wizarrrr/wizarr)
@@ -144,8 +144,9 @@ In Paymenter: **Admin → Servers → New server**, extension **Wizarr**:
 
 | Field | Value |
 |---|---|
-| Wizarr URL (internal) | `http://<ip>:<wizarr-port>`, the address Paymenter itself uses |
-| Wizarr URL (public) | The address customers open, e.g. `https://join.yourdomain.com` |
+| Connects to | **Wizarr** (for Silo, see [Silo](#silo-without-wizarr)) |
+| Wizarr or Silo URL (internal) | `http://<ip>:<wizarr-port>`, the address Paymenter itself uses |
+| Wizarr or Silo URL (public) | The address customers open, e.g. `https://join.yourdomain.com` |
 | API key | The key from Wizarr |
 
 Press **Test Connection**. Use IP and port as the internal address, not
@@ -853,6 +854,57 @@ creating a user; see *What you need to know about Plex, Jellyfin and Emby*.
 is. If such a customer adds Emby later, they get an invitation for Emby, and
 their existing user is not touched.
 
+## Silo, without Wizarr
+
+[Silo](https://github.com/Silo-Server/silo-server) has invitations and account
+management of its own, so Paywarr talks to it directly; Wizarr is not needed
+for Silo. Silo is new and not at version 1.0 yet: its API may still change, and
+this support has been tested against Silo's published API contract, not yet on
+a real Silo server. Feedback is very welcome.
+
+**API key.** In Silo: **Admin → API Keys → Create API Key**, label `Paywarr`,
+access **Full access**. The key belongs to your admin account. A key with only
+the `admin:users` scope is not enough: Silo keeps invitations, password reset
+links and the library list outside that scope.
+
+**Server in Paymenter.** **Admin → Servers → New server**, extension **Wizarr**:
+
+| Field | Value |
+|---|---|
+| Connects to | **Silo (directly, without Wizarr)** |
+| Wizarr or Silo URL (internal) | Silo's own address, e.g. `http://192.168.1.10:8090`. Not the Jellyfin-compatible port (8096) |
+| Wizarr or Silo URL (public) | Where customers watch, e.g. `https://silo.yourdomain.com`; the "Open" button |
+| API key | The key from Silo (starts with `sa_`) |
+
+Silo makes the invitation links itself, from the public address set in Silo,
+so check that address there too. Create the product as usual and choose
+**Silo** as media server; the libraries are Silo's.
+
+| Happens in Paymenter | In Silo |
+|---|---|
+| First invoice paid | A one-time link invitation for an ordinary account (never an admin), with the product's libraries |
+| Invoice overdue | The account is disabled (same account, same history); an unused link is revoked |
+| Paid again | The account is enabled again; a revoked link is replaced by a new one, by mail |
+| Cancelled | The account is deleted |
+| Forgotten password | "Reset password" opens Silo's own reset link |
+| Expired link | "Get a new invitation link" |
+
+Good to know:
+
+- One server in Paymenter connects to Wizarr *or* Silo. To offer both, add two
+  servers and a product for each.
+- How long an invitation link is valid is a setting in Silo; the product's
+  "Invitation link is valid for" is only used in the mail text, so set them alike.
+- Silo accounts never end on their own, so "Access expires after (days)" is
+  refused for Silo: use a subscription.
+- "Allow downloads" and "Allow live TV" are Wizarr settings; in Silo, set them
+  on the access group or account.
+- Seerr is not used with Silo. Paywarr Stats needs Tracearr, which doesn't know
+  Silo yet.
+- Paywarr changes an account with Silo's edit guard (`If-Match`), so a change
+  made at the same moment in Silo's admin is not overwritten; Paywarr reads the
+  account again and retries once.
+
 ## What you need to know about Plex, Jellyfin and Emby
 
 Plex is supported, but less tested than Jellyfin and Emby: the tests cover
@@ -905,16 +957,17 @@ They behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-181 scenarios run the extension through the whole lifecycle against
+194 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
-and Seerr): first payment, the Seerr add-on through purchase, suspension,
+Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
 subscription, the "your access is ready" box, the client area, an expired link,
 password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
 and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
 Emby or both with one invitation each (including switching later), Seerr
-request packages, up to three Seerr (including Plex), and the
+request packages, up to three Seerr (including Plex), Silo without Wizarr
+(its edit guard, paging, and that administrators are never touched), and the
 languages (English, Danish, and that every text in the code has a Danish
 translation).
 
@@ -958,6 +1011,7 @@ it*) does. Run it before you take on paying customers.
 | `extensions/Servers/Wizarr/DiscordClient.php` | Membership and role calls to Discord's API |
 | `extensions/Servers/Wizarr/DiscordException.php` | Error type |
 | `extensions/Servers/Wizarr/ShopGate.php` | The gatekeeper in front of the shop |
+| `extensions/Servers/Wizarr/SiloClient.php` | The calls to Silo, answering like the Wizarr client |
 | `extensions/Servers/Wizarr/SeerrClient.php` | The calls to Seerr (import, permissions, deletion) |
 | `extensions/Servers/Wizarr/SeerrException.php` | Error type |
 | `tools/discord-check.php` | Checks the Discord setup step by step |
@@ -967,7 +1021,7 @@ it*) does. Run it before you take on paying customers.
 | `extensions/Servers/Wizarr/resources/views/discord.blade.php` | The customer's Discord page |
 | `extensions/Servers/Wizarr/lang/da.json` | Danish translation of everything customers see |
 | `install.sh` | Copies the extension into Paymenter and reloads it |
-| `tests/` | Stub, stand-ins and scenarios |
+| `tests/` | Stubs (Wizarr, Discord, Seerr, Silo), stand-ins and scenarios |
 | `.github/workflows/` | Tests on every push, releases from tags |
 | `assets/` | Logo, banner and the picture GitHub shows when the project is shared |
 

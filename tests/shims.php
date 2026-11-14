@@ -397,6 +397,15 @@ namespace Illuminate\Support\Facades {
                 curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($data));
             }
             curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+            $received = [];
+            curl_setopt($curl, CURLOPT_HEADERFUNCTION, function ($curl, $line) use (&$received) {
+                if (str_contains($line, ':')) {
+                    [$name, $value] = explode(':', $line, 2);
+                    $received[strtolower(trim($name))] = trim($value);
+                }
+
+                return strlen($line);
+            });
 
             $body = curl_exec($curl);
             if ($body === false) {
@@ -410,7 +419,7 @@ namespace Illuminate\Support\Facades {
             $type = (string) curl_getinfo($curl, CURLINFO_CONTENT_TYPE);
             curl_close($curl);
 
-            return new Response($status, $body, ['content-type' => $type]);
+            return new Response($status, $body, ['content-type' => $type] + $received);
         }
     }
 

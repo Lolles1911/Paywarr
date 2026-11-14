@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.16.2',
+    version: '1.17.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -82,7 +82,7 @@ class Wizarr extends Server
     private const PROP_USERS = 'wizarr_users';
 
     /** Media servers where Wizarr can actually change a password. */
-    private const RESETTABLE_SERVERS = ['jellyfin', 'emby'];
+    private const RESETTABLE_SERVERS = ['jellyfin', 'emby', 'silo'];
 
     /** Set while a suspension/termination is under way; left behind when it fails. */
     private const PROP_PENDING = 'wizarr_pending';
@@ -152,7 +152,7 @@ class Wizarr extends Server
     /** How long a "member / not member" answer is reused while browsing the shop. */
     private const MEMBERSHIP_CACHE_SECONDS = 600;
 
-    private ?WizarrClient $client = null;
+    private WizarrClient|SiloClient|null $client = null;
 
     /* ------------------------------------------------------------------
      | Configuration
@@ -162,20 +162,31 @@ class Wizarr extends Server
     {
         return [
             [
+                'name' => 'backend',
+                'label' => 'Connects to',
+                'type' => 'select',
+                'default' => 'wizarr',
+                'options' => [
+                    ['value' => 'wizarr', 'label' => 'Wizarr (Plex, Jellyfin, Emby)'],
+                    ['value' => 'silo', 'label' => 'Silo (directly, without Wizarr)'],
+                ],
+                'description' => 'Silo has invitations of its own, so Paywarr talks to it directly. One server in Paymenter is one or the other; add a second server for both.',
+            ],
+            [
                 'name' => 'host',
-                'label' => 'Wizarr URL (internal)',
+                'label' => 'Wizarr or Silo URL (internal)',
                 'type' => 'text',
                 'required' => true,
                 'placeholder' => 'http://192.168.1.10:5690',
-                'description' => 'How Paymenter reaches Wizarr. E.g. http://<server IP>:<Wizarr port>. Never shown to customers.',
+                'description' => 'How Paymenter reaches Wizarr (e.g. port 5690) or Silo (its own port, e.g. 8090; not the Jellyfin-compatible 8096). Never shown to customers.',
             ],
             [
                 'name' => 'public_url',
-                'label' => 'Wizarr URL (public)',
+                'label' => 'Wizarr or Silo URL (public)',
                 'type' => 'text',
                 'required' => true,
                 'placeholder' => 'https://join.example.com',
-                'description' => 'The address your customers open. Wizarr only returns /j/<code>; this turns it into a link.',
+                'description' => 'The address your customers open. Wizarr: it turns Wizarr\'s /j/<code> into a link. Silo: where customers watch (the "Open Silo" button); Silo makes the invitation links itself, from its own public address.',
             ],
             [
                 'name' => 'api_key',
@@ -183,7 +194,7 @@ class Wizarr extends Server
                 'type' => 'password',
                 'required' => true,
                 'encrypted' => true,
-                'description' => 'Wizarr -> Settings -> API Keys.',
+                'description' => 'Wizarr -> Settings -> API Keys. Silo -> Admin -> API Keys, with Full access (a key with only admin:users cannot make invitations).',
             ],
             [
                 'name' => 'refund_action',
@@ -1061,7 +1072,8 @@ class Wizarr extends Server
             $this->deleteInvitationQuietly((int) $invitation['id']);
         }
 
-        return $this->absoluteUrl(null, (string) $this->issueInvitation($service, $settings)['code']);
+        // issueInvitation() returns the full link (Wizarr's made absolute, or Silo's own).
+        return (string) $this->issueInvitation($service, $settings)['url'];
     }
 
     /**
@@ -3411,6 +3423,11 @@ HTML;
             $sameCode = $code !== '' && (string) ($invitation['code'] ?? '') === $code;
 
             if (($sameId && ($code === '' || $sameCode)) || ($id === '' && $sameCode)) {
+                // Silo shows the link only once, when it is made; it was stored then.
+                if (empty($invitation['url']) && !empty($properties[self::PROP_INVITE_URL])) {
+                    $invitation['url'] = (string) $properties[self::PROP_INVITE_URL];
+                }
+
                 return $invitation;
             }
         }
@@ -3558,8 +3575,16 @@ HTML;
      | Small helpers
      * ----------------------------------------------------------------- */
 
-    private function client(): WizarrClient
+    private function client(): WizarrClient|SiloClient
     {
+        if ($this->config('backend') === 'silo') {
+            return $this->client ??= new SiloClient(
+                (string) $this->config('host'),
+                (string) $this->config('api_key'),
+                (string) $this->config('public_url'),
+            );
+        }
+
         return $this->client ??= new WizarrClient(
             (string) $this->config('host'),
             (string) $this->config('api_key'),
