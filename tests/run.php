@@ -112,6 +112,7 @@ function test(string $name, callable $fn): void
 {
     global $results;
     stub('/_test/reset');
+    \Illuminate\Support\Facades\Cache::$store = [];
     NotificationHelper::$sent = [];
     NotificationHelper::$fail = false;
     Log::$warnings = [];
@@ -1540,7 +1541,7 @@ function allServers(array $overrides = []): array
 }
 
 /** Runs the check; returns the refusal shown to the customer, or null when allowed. */
-function seerrRefusal(array $properties, ?string $seerrType = 'jellyfin', array $product = []): ?string
+function seerrRefusal(array $properties, string|array|null $seerrType = 'jellyfin', array $product = []): ?string
 {
     try {
         ext(seerrSettings())->checkSeerrServer(allServers($product), $properties, $seerrType);
@@ -1633,6 +1634,100 @@ test('requests: checked on the order\'s invoice line and on an upgrade, never wh
     ok(!$refused(fn () => ext()->guardSeerrForUpgrade($upgrade)), 'a paid upgrade completing is never stopped');
     $upgrade->invoice_id = null;
     ok($refused(fn () => ext()->guardSeerrForUpgrade($upgrade)), 'a free change completing at once is checked');
+});
+
+/* ---------- Up to three Seerr, one per media server ---------- */
+
+/** Seerr 1 on Jellyfin, Seerr 2 on Emby, Seerr 3 on Plex (see the stub). */
+function threeSeerr(array $overrides = []): array
+{
+    global $STUB;
+
+    return $overrides + seerrSettings() + [
+        'seerr2_url' => $STUB . '/seerr2', 'seerr2_api_key' => 'seerr2-key', 'seerr2_public_url' => 'https://requests-emby.example.com',
+        'seerr3_url' => $STUB . '/seerr3', 'seerr3_api_key' => 'seerr3-key', 'seerr3_public_url' => 'https://requests-plex.example.com',
+    ];
+}
+
+/** A customer with Requests who picked $choice on a product with Jellyfin, Plex and Emby, users created. */
+function requestsCustomer(string $choice, int $id = 70): Service
+{
+    $service = service($id, "customer$id@example.com");
+    $service->configs = ['media_server' => $choice, 'seerr' => 'yes'];
+    $service->product = (object) ['server' => (object) ['extension' => 'Wizarr', 'settings' => []], 'settings' => allServers()];
+    $data = ext(threeSeerr())->createServer($service, allServers(), props($service));
+    foreach ($data['invites'] as $invite) {
+        redeem($invite['code'], "user$id", "customer$id@example.com");
+    }
+    ext(threeSeerr())->getActions($service, allServers(), props($service)); // records the users
+
+    return $service;
+}
+
+/** Customers (not the owner) on each Seerr. */
+function seerrCustomers(): array
+{
+    $state = state();
+
+    return array_map(fn ($name) => count($state[$name]['users']) - 1, ['seerr' => 'seerr', 'seerr2' => 'seerr2', 'seerr3' => 'seerr3']);
+}
+
+test('more Seerr: each customer gets an account on the Seerr of their own media server', function () {
+    foreach (['emby' => ['seerr' => 0, 'seerr2' => 1, 'seerr3' => 0], 'plex' => ['seerr' => 0, 'seerr2' => 1, 'seerr3' => 1], 'jellyfin,emby' => ['seerr' => 1, 'seerr2' => 1, 'seerr3' => 1]] as $choice => $expected) {
+        static $id = 70;
+        $service = requestsCustomer($choice, $id++);
+        ext(threeSeerr())->syncSeerr($service, allServers(), props($service), 'active');
+        same($expected, seerrCustomers(), "after \"$choice\"");
+    }
+});
+
+test('more Seerr: the Requests button goes to the customer\'s own Seerr', function () {
+    $service = requestsCustomer('emby');
+    ext(threeSeerr())->syncSeerr($service, allServers(), props($service), 'active');
+    $buttons = array_column(array_filter(ext(threeSeerr())->getActions($service, allServers(), props($service)), fn ($a) => ($a['label'] ?? '') === 'Request movies and shows'), 'url');
+    same(['https://requests-emby.example.com'], array_values($buttons), 'Emby\'s Seerr');
+});
+
+test('more Seerr: switching from Both to Emby moves the account to the Emby Seerr; cancelling deletes it there', function () {
+    $service = requestsCustomer('jellyfin,emby');
+    ext(threeSeerr())->syncSeerr($service, allServers(), props($service), 'active');
+    same(['seerr' => 1, 'seerr2' => 0, 'seerr3' => 0], seerrCustomers(), 'on the Jellyfin Seerr');
+
+    $service->configs['media_server'] = 'emby';
+    ext(threeSeerr())->upgradeServer($service, allServers(), props($service));
+    same(['seerr' => 0, 'seerr2' => 1, 'seerr3' => 0], seerrCustomers(), 'moved to the Emby Seerr');
+    same('2', $service->propertyArray()['seerr_instance'] ?? null, 'remembers which Seerr');
+
+    ext(threeSeerr())->terminateServer($service, allServers(), props($service));
+    same(['seerr' => 0, 'seerr2' => 0, 'seerr3' => 0], seerrCustomers(), 'deleted where it was');
+});
+
+test('more Seerr: a Plex customer who already has a Seerr account is left alone', function () {
+    stub('/_test/set', ['seerr3' => ['users' => [['id' => 1, 'jellyfinUserId' => 'jf-owner', 'permissions' => 2], ['id' => 5, 'plexId' => 1, 'email' => 'customer70@example.com', 'permissions' => 32]], 'next_id' => 6]]);
+    $service = requestsCustomer('plex');
+    ext(threeSeerr())->syncSeerr($service, allServers(), props($service), 'active');
+    same(1, seerrCustomers()['seerr3'], 'no second account');
+    ok(!isset($service->propertyArray()['seerr_user_id']), 'not taken over');
+});
+
+test('more Seerr: checkout allows a server any Seerr is connected to, and names them all otherwise', function () {
+    same(null, seerrRefusal(['media_server' => 'emby', 'seerr' => 'yes'], ['jellyfin', 'emby']), 'Emby, with an Emby Seerr');
+    same('Requests need Jellyfin or Emby. Choose a media server with Jellyfin or Emby, or remove Requests.',
+        seerrRefusal(['media_server' => 'plex', 'seerr' => 'yes'], ['jellyfin', 'emby']), 'Plex, without a Plex Seerr');
+    try {
+        ext(threeSeerr())->checkSeerrServer(allServers(), ['media_server' => 'plex', 'seerr' => 'yes']);
+        $ok = true;
+    } catch (DisplayException $e) {
+        $ok = false;
+    }
+    ok($ok, 'asks every Seerr: Plex is fine with a Plex Seerr');
+});
+
+test('more Seerr: Test Connection checks every Seerr, and half-filled ones', function () {
+    global $STUB;
+    same(true, ext(threeSeerr())->testConfig(), 'all three fine');
+    $result = ext(seerrSettings(['seerr2_url' => $STUB . '/seerr2']))->testConfig();
+    ok(is_string($result) && str_contains($result, 'Seerr 2 settings are incomplete'), 'got: ' . json_encode($result));
 });
 
 /* ---------- Jellyfin, Emby or both: one invitation per server ---------- */

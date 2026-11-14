@@ -79,6 +79,30 @@ class SeerrClient
         $this->call('post', '/user/' . $id . '/settings/permissions', ['permissions' => $permissions]);
     }
 
+    /**
+     * Plex users who can be imported: shared with the owner's Plex server and
+     * without a Seerr account yet (Seerr leaves out the ones that have one).
+     *
+     * @return array<int, array{id: string, username: string, email: string}>
+     */
+    public function plexUsersToImport(): array
+    {
+        $users = [];
+        foreach ($this->call('get', '/settings/plex/users') ?? [] as $user) {
+            $users[] = ['id' => (string) ($user['id'] ?? ''), 'username' => (string) ($user['username'] ?? ''), 'email' => (string) ($user['email'] ?? '')];
+        }
+
+        return $users;
+    }
+
+    /** Imports one Plex user; their new Seerr user ID, or null when none was created. */
+    public function importPlexUser(string $plexId): ?int
+    {
+        $created = ($this->call('post', '/user/import-from-plex', ['plexIds' => [$plexId]]) ?? [])['createdUsers'] ?? [];
+
+        return isset($created[0]['id']) ? (int) $created[0]['id'] : null;
+    }
+
     /** The media server Seerr is connected to: 'plex', 'jellyfin', 'emby', or null when none is set up. */
     public function mediaServerType(): ?string
     {

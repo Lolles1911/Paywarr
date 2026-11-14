@@ -661,18 +661,38 @@ deleted when the add-on ends. Clean them up once in Seerr before you start.
 Customers with the add-on get the button **"Request movies and shows"** in the
 client area.
 
+### More than one Seerr
+
+A Seerr is connected to one media server (Jellyfin, Emby or Plex). To offer
+Requests to customers on several, run a Seerr for each (they can all send
+requests to the same Radarr and Sonarr) and fill in **Seerr 2** and **Seerr 3**
+on the Wizarr server: URL (internal), URL (public) and API key, like the first.
+Paywarr asks each Seerr which media server it uses.
+
+- A customer gets **one** Seerr account: on the Seerr of their first server
+  that has one, in the order Jellyfin, Emby, Plex. With "Both" (Jellyfin and
+  Emby) that is the Jellyfin Seerr.
+- The **Request movies and shows** button goes to that Seerr.
+- If the customer changes media server so that another Seerr serves them,
+  the account moves: deleted on the old Seerr (with its requests there),
+  created on the new one.
+- Plex users are imported once they have accepted the share in Plex; until
+  then Paywarr tries again every hour. A Plex user who already has a Seerr
+  account is left alone, like everyone else.
+
 ### Requests need Seerr's media server
 
-Seerr is connected to one media server (Jellyfin, Emby or Plex) and can only
-give accounts to that server's users. So a customer who picks Requests must
-also have that server: with Seerr on Jellyfin, "Emby" plus Requests is
+Each Seerr can only give accounts to its own media server's users. So a
+customer who picks Requests must also have a server that one of your Seerr
+is connected to: with Seerr on Jellyfin, "Emby" plus Requests is
 refused at checkout ("Requests need Jellyfin. Choose a media server with
 Jellyfin, or remove Requests."), while "Jellyfin" or "Both" is fine. The same
 check runs when a customer changes their choice later. Nothing is created or
 charged when it refuses.
 
-Paywarr asks Seerr which server it is connected to (and remembers it for an
-hour). If Seerr can't be reached, the purchase goes ahead and the log says
+With several Seerr, the message names them all ("Requests need Jellyfin or
+Emby"). Paywarr asks each Seerr which server it is connected to (and remembers
+it for an hour). If Seerr can't be reached, the purchase goes ahead and the log says
 why, so an outage never blocks sales.
 
 ### Request packages
@@ -865,7 +885,7 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-175 scenarios run the extension through the whole lifecycle against
+181 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -874,7 +894,7 @@ password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
 and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
 Emby or both with one invitation each (including switching later), Seerr
-request packages, and the
+request packages, up to three Seerr (including Plex), and the
 languages (English, Danish, and that every text in the code has a Danish
 translation).
 

@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.13.0',
+    version: '1.14.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -110,6 +110,9 @@ class Wizarr extends Server
 
     /** On the service, while suspended: the Seerr permissions to give back. */
     private const PROP_SEERR_SAVED_PERMISSIONS = 'seerr_saved_permissions';
+
+    /** Which Seerr ("1", "2" or "3") the customer's account is on; missing means the first. */
+    private const PROP_SEERR_INSTANCE = 'seerr_instance';
 
     /** The request limit last set in Seerr ("5/7", "0/" = no limit, "default"), so it is only sent when it changes. */
     private const PROP_SEERR_QUOTA = 'seerr_quota';
@@ -232,6 +235,7 @@ class Wizarr extends Server
                 'encrypted' => true,
                 'description' => 'Seerr -> Settings -> General -> API Key.',
             ],
+            ...$this->extraSeerrFields(),
 
             // Optional: Discord membership. All five are needed for it to work.
             [
@@ -278,6 +282,20 @@ class Wizarr extends Server
         ];
     }
 
+    /** Optional Seerr 2 and 3, each connected to another media server. */
+    private function extraSeerrFields(): array
+    {
+        $fields = [];
+        foreach (['2', '3'] as $n) {
+            $fields[] = ['name' => 'seerr' . $n . '_url', 'label' => 'Seerr ' . $n . ': URL (internal)', 'type' => 'text', 'required' => false,
+                'description' => $n === '2' ? 'Optional. Another Seerr, connected to another media server (e.g. Emby or Plex). Paywarr asks each Seerr which one it uses.' : 'Optional. A third Seerr.'];
+            $fields[] = ['name' => 'seerr' . $n . '_public_url', 'label' => 'Seerr ' . $n . ': URL (public)', 'type' => 'text', 'required' => false];
+            $fields[] = ['name' => 'seerr' . $n . '_api_key', 'label' => 'Seerr ' . $n . ': API key', 'type' => 'password', 'required' => false, 'encrypted' => true];
+        }
+
+        return $fields;
+    }
+
     public function testConfig(): bool|string
     {
         try {
@@ -289,12 +307,21 @@ class Wizarr extends Server
                 return 'Connected, but Wizarr has no verified media server yet. Add and verify one in Wizarr first.';
             }
 
-            if ($this->seerrConfigured()) {
-                $seerr = $this->seerr();
+            foreach (['1', '2', '3'] as $n) {
+                $name = $n === '1' ? 'Seerr' : 'Seerr ' . $n;
+                if (!in_array($n, $this->seerrInstances(), true)) {
+                    if (trim((string) $this->config($this->seerrPrefix($n) . 'url')) !== '' || trim((string) $this->config($this->seerrPrefix($n) . 'api_key')) !== '') {
+                        return 'Wizarr works, but the ' . $name . ' settings are incomplete: fill in the URL and the API key, or neither.';
+                    }
+                    continue;
+                }
+                $seerr = $this->seerr($n);
                 $seerr->version();
-                $seerr->mediaServerUsers(); // needs the owner's key and a working Jellyfin connection in Seerr
-            } elseif (trim((string) $this->config('seerr_url')) !== '' || trim((string) $this->config('seerr_api_key')) !== '') {
-                return 'Wizarr works, but the Seerr settings are incomplete: fill in the URL and the API key, or neither.';
+                $type = $seerr->mediaServerType(); // needs the owner's key
+                if ($type === null) {
+                    return 'Wizarr works, but ' . $name . ' is not connected to a media server yet.';
+                }
+                $type === 'plex' ? $seerr->plexUsersToImport() : $seerr->mediaServerUsers();
             }
 
             if ($this->discordConfigured()) {
@@ -1870,24 +1897,35 @@ HTML;
         if (!$this->seerrConfigured()) {
             return;
         }
-        $seerr = $this->seerr();
+        $instance = (string) ($properties[self::PROP_SEERR_INSTANCE] ?? '') ?: '1';
         $managed = (int) ($properties[self::PROP_SEERR_USER] ?? 0);
 
         if ($state === 'ended' || !$this->wantsSeerr($productSettings, $properties)) {
+            if ($managed && in_array($instance, $this->seerrInstances(), true)) {
+                $this->seerr($instance)->deleteUser($managed);
+            }
             if ($managed) {
-                $seerr->deleteUser($managed);
-                $this->setProperty($service, self::PROP_SEERR_USER, '', null);
-                $this->setProperty($service, self::PROP_SEERR_SAVED_PERMISSIONS, '', null);
-                $this->setProperty($service, self::PROP_SEERR_QUOTA, '', null);
+                $this->forgetSeerrAccount($service);
             }
 
             return;
         }
 
-        if ($managed && !$seerr->userExists($managed)) {
-            $managed = 0; // removed in Seerr by hand: import again
-            $this->setProperty($service, self::PROP_SEERR_SAVED_PERMISSIONS, '', null);
-            $this->setProperty($service, self::PROP_SEERR_QUOTA, '', null);
+        // That Seerr was removed from the settings, or the account in Seerr by hand.
+        if ($managed && (!in_array($instance, $this->seerrInstances(), true) || !$this->seerr($instance)->userExists($managed))) {
+            $managed = 0;
+        }
+        // The customer's media servers changed, and another Seerr serves them now.
+        if ($managed && $state === 'active') {
+            $target = $this->seerrForUsers($this->allUsers($properties));
+            if ($target !== null && $target[0] !== $instance) {
+                $this->seerr($instance)->deleteUser($managed);
+                $managed = 0;
+                Log::info('Wizarr: service ' . $service->id . ' moves to another Seerr (its media servers changed).');
+            }
+        }
+        if (!$managed && (int) ($properties[self::PROP_SEERR_USER] ?? 0)) {
+            $this->forgetSeerrAccount($service);
             $properties[self::PROP_SEERR_SAVED_PERMISSIONS] = null;
             $properties[self::PROP_SEERR_QUOTA] = null;
         }
@@ -1896,40 +1934,25 @@ HTML;
             if ($state === 'suspended') {
                 return; // never create access for someone who has not paid
             }
-            // Seerr is connected to one media server (Jellyfin or Emby): the
-            // customer's user there is the one to import.
-            $usernames = [];
-            foreach ($this->allUsers($properties) as $user) {
-                if (in_array($user['type'], ['jellyfin', 'emby'], true)) {
-                    $usernames[] = $user['username'];
-                }
+            // Each Seerr is connected to one media server: the customer's user
+            // on the first server that has a Seerr gets the account.
+            $users = $this->allUsers($properties);
+            $target = $this->seerrForUsers($users);
+            if ($target === null) {
+                return; // no user yet, or none on a server any Seerr is connected to
             }
-            if (!$usernames) {
-                return; // the customer has not created their user yet
-            }
-
-            $jellyfinUser = null;
-            foreach ($seerr->mediaServerUsers() as $candidate) {
-                foreach ($usernames as $name) {
-                    if ($jellyfinUser === null && strcasecmp($candidate['username'], $name) === 0) {
-                        $jellyfinUser = $candidate;
-                    }
-                }
-            }
-            $username = $jellyfinUser['username'] ?? $usernames[0];
-            if ($jellyfinUser === null) {
-                throw new SeerrException('Seerr does not list a user called "' . $username . '". Is Seerr connected to the same Jellyfin or Emby?');
-            }
-
-            if ($seerr->userIdForJellyfinUser($jellyfinUser['id']) !== null) {
-                Log::info('Wizarr: ' . $username . ' already had a Seerr account; it is left as it is and not managed by Paymenter.');
-
+            [$instance, $type] = $target;
+            $mine = array_values(array_filter($users, fn ($user) => $user['type'] === $type));
+            $managed = $type === 'plex'
+                ? $this->importPlexUser($this->seerr($instance), $mine)
+                : $this->importJellyfinUser($this->seerr($instance), $mine);
+            if ($managed === null) {
                 return;
             }
-
-            $managed = $seerr->importJellyfinUser($jellyfinUser['id']);
             $this->setProperty($service, self::PROP_SEERR_USER, 'Seerr user ID', (string) $managed);
+            $this->setProperty($service, self::PROP_SEERR_INSTANCE, 'Seerr instance', $instance === '1' ? null : $instance);
         }
+        $seerr = $this->seerr($instance);
 
         $saved = $properties[self::PROP_SEERR_SAVED_PERMISSIONS] ?? null;
         if ($state === 'suspended' && ($saved === null || $saved === '')) {
@@ -1954,6 +1977,102 @@ HTML;
                 $this->setProperty($service, self::PROP_SEERR_QUOTA, 'Seerr request limit', $key);
             }
         }
+    }
+
+    /** A Jellyfin or Emby user into Seerr; null when they already had an account there. */
+    private function importJellyfinUser(SeerrClient $seerr, array $users): ?int
+    {
+        $usernames = array_column($users, 'username');
+        $match = null;
+        foreach ($seerr->mediaServerUsers() as $candidate) {
+            foreach ($usernames as $name) {
+                if ($match === null && strcasecmp($candidate['username'], $name) === 0) {
+                    $match = $candidate;
+                }
+            }
+        }
+        if ($match === null) {
+            throw new SeerrException('Seerr does not list a user called "' . $usernames[0] . '". Is Seerr connected to the same Jellyfin or Emby?');
+        }
+        if ($seerr->userIdForJellyfinUser($match['id']) !== null) {
+            Log::info('Wizarr: ' . $match['username'] . ' already had a Seerr account; it is left as it is and not managed by Paymenter.');
+
+            return null;
+        }
+
+        return $seerr->importJellyfinUser($match['id']);
+    }
+
+    /**
+     * A Plex user into Seerr, found by e-mail or username. Seerr only lists
+     * Plex users without an account, who have accepted the share: anyone else
+     * is left alone (and tried again next hour).
+     */
+    private function importPlexUser(SeerrClient $seerr, array $users): ?int
+    {
+        $wanted = [];
+        foreach ($users as $user) {
+            $wanted[] = strtolower($user['username']);
+            if (($user['email'] ?? '') !== '') {
+                $wanted[] = strtolower($user['email']);
+            }
+        }
+        foreach ($seerr->plexUsersToImport() as $candidate) {
+            if (in_array(strtolower($candidate['email']), $wanted, true) || in_array(strtolower($candidate['username']), $wanted, true)) {
+                return $seerr->importPlexUser($candidate['id']);
+            }
+        }
+        Log::info('Wizarr: Seerr has no Plex user to import for ' . ($users[0]['username'] ?? '?') . ' (they already have an account, or have not accepted the share yet).');
+
+        return null;
+    }
+
+    private function forgetSeerrAccount(Service $service): void
+    {
+        foreach ([self::PROP_SEERR_USER, self::PROP_SEERR_SAVED_PERMISSIONS, self::PROP_SEERR_QUOTA, self::PROP_SEERR_INSTANCE] as $prop) {
+            $this->setProperty($service, $prop, '', null);
+        }
+    }
+
+    /**
+     * Which Seerr serves these users: [instance, media server type], for the
+     * first of Jellyfin, Emby and Plex they have that a Seerr is connected to.
+     */
+    private function seerrForUsers(array $users): ?array
+    {
+        $types = array_unique(array_column($users, 'type'));
+        foreach (['jellyfin', 'emby', 'plex'] as $type) {
+            if (!in_array($type, $types, true)) {
+                continue;
+            }
+            foreach ($this->seerrInstances() as $n) {
+                if ($this->seerrType($n) === $type) {
+                    return [$n, $type];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** The configured Seerr instances: "1" (the first fields), "2", "3". */
+    private function seerrInstances(): array
+    {
+        return array_values(array_filter(['1', '2', '3'], fn ($n) => trim((string) $this->config($this->seerrPrefix($n) . 'url')) !== ''
+            && trim((string) $this->config($this->seerrPrefix($n) . 'api_key')) !== ''));
+    }
+
+    private function seerrPrefix(string $n): string
+    {
+        return $n === '1' ? 'seerr_' : 'seerr' . $n . '_';
+    }
+
+    /** The media server a Seerr is connected to, asked once an hour. */
+    private function seerrType(string $n): ?string
+    {
+        $url = trim((string) $this->config($this->seerrPrefix($n) . 'url'));
+
+        return Cache::remember('wizarr:seerr-media-type:' . md5($url), 3600, fn () => $this->seerr($n)->mediaServerType());
     }
 
     /** Seerr must never break a payment: log it and let the hourly run try again. */
@@ -1999,15 +2118,15 @@ HTML;
      *
      * @param  string|null  $seerrType  for tests; asked from Seerr otherwise
      */
-    public function checkSeerrServer(array $productSettings, array $properties, ?string $seerrType = null): void
+    public function checkSeerrServer(array $productSettings, array $properties, string|array|null $seerrTypes = null): void
     {
         if (!$this->seerrConfigured() || !$this->wantsSeerr($productSettings, $properties)) {
             return;
         }
         try {
-            $seerrType ??= Cache::remember('wizarr:seerr-media-type', 3600, fn () => $this->seerr()->mediaServerType());
-            if ($seerrType === null) {
-                return;
+            $seerrTypes = $seerrTypes === null ? array_map(fn ($n) => $this->seerrType($n), $this->seerrInstances()) : (array) $seerrTypes;
+            if (in_array(null, $seerrTypes, true)) {
+                return; // a Seerr without a media server: nothing to check against
             }
             $types = array_map(fn ($id) => $this->serverInfo()[$id]['type'] ?? '', $this->chosenServerIds($productSettings, $properties));
         } catch (Throwable $e) {
@@ -2015,8 +2134,9 @@ HTML;
 
             return;
         }
-        if (!in_array($seerrType, $types, true)) {
-            $name = ['jellyfin' => 'Jellyfin', 'emby' => 'Emby', 'plex' => 'Plex'][$seerrType] ?? $seerrType;
+        if (!array_intersect($seerrTypes, $types)) {
+            $names = array_map(fn ($type) => ['jellyfin' => 'Jellyfin', 'emby' => 'Emby', 'plex' => 'Plex'][$type] ?? $type, array_values(array_unique($seerrTypes)));
+            $name = count($names) > 1 ? implode(', ', array_slice($names, 0, -1)) . ' ' . self::t('or') . ' ' . end($names) : $names[0];
 
             throw new DisplayException(self::t('Requests need :server. Choose a media server with :server, or remove Requests.', ['server' => $name]));
         }
@@ -2061,14 +2181,18 @@ HTML;
 
     private function seerrConfigured(): bool
     {
-        return trim((string) $this->config('seerr_url')) !== '' && trim((string) $this->config('seerr_api_key')) !== '';
+        return $this->seerrInstances() !== [];
     }
 
-    private ?SeerrClient $seerrClient = null;
+    /** @var array<string, SeerrClient> */
+    private array $seerrClients = [];
 
-    private function seerr(): SeerrClient
+    private function seerr(string $n = '1'): SeerrClient
     {
-        return $this->seerrClient ??= new SeerrClient(trim((string) $this->config('seerr_url')), trim((string) $this->config('seerr_api_key')));
+        return $this->seerrClients[$n] ??= new SeerrClient(
+            trim((string) $this->config($this->seerrPrefix($n) . 'url')),
+            trim((string) $this->config($this->seerrPrefix($n) . 'api_key')),
+        );
     }
 
     /* ------------------------------------------------------------------
@@ -3530,7 +3654,7 @@ HTML;
                 : self::t(':count movies and :count TV seasons every :days days', ['count' => (int) $limit, 'days' => (int) $days])];
         }
 
-        $seerrUrl = trim((string) $this->config('seerr_public_url'));
+        $seerrUrl = trim((string) $this->config($this->seerrPrefix((string) ($properties[self::PROP_SEERR_INSTANCE] ?? '') ?: '1') . 'public_url'));
         if (!empty($properties[self::PROP_SEERR_USER]) && $seerrUrl !== '') {
             $watch[] = ['type' => 'button', 'label' => self::t('Request movies and shows'), 'url' => $seerrUrl, 'target' => '_blank'];
         }

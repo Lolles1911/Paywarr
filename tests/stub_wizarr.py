@@ -29,8 +29,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 API_KEY = "stub-key"
 
 
+def fresh_seerr(key: str, media: str) -> dict:
+    """One Seerr: user 1 is the owner, as in Seerr."""
+    return {"key": key, "csrf": False, "default_permissions": 32, "media": media,
+            "users": [{"id": 1, "jellyfinUserId": "jf-owner", "permissions": 2}], "next_id": 2}
+
+
 def fresh_state() -> dict:
-    return {
+    state = {
         "servers": [
             {"id": 1, "name": "Jellyfin", "server_type": "jellyfin", "verified": True, "offline": False, "external_url": "https://jellyfin.example.com"},
             {"id": 2, "name": "Plex", "server_type": "plex", "verified": True, "offline": False},
@@ -65,6 +71,10 @@ def fresh_state() -> dict:
         "fail_next": 0,
         "requests": [],
     }
+    # More Seerr instances (served under /seerr2 and /seerr3), each with its own media server.
+    state["seerr2"] = fresh_seerr("seerr2-key", "emby")
+    state["seerr3"] = fresh_seerr("seerr3-key", "plex")
+    return state
 
 
 STATE = fresh_state()
@@ -144,8 +154,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/discord/api/v10/"):
             return self.handle_discord(method, path[len("/discord/api/v10"):])
 
-        if path.startswith("/seerr/api/v1/"):
-            return self.handle_seerr(method, path[len("/seerr/api/v1"):], body)
+        for name in ("seerr2", "seerr3", "seerr"):
+            if path.startswith(f"/{name}/api/v1/"):
+                return self.handle_seerr(method, path[len(f"/{name}/api/v1"):], body, name)
 
         STATE["requests"].append({"method": method, "path": path, "body": body})
 
@@ -248,10 +259,10 @@ class Handler(BaseHTTPRequestHandler):
 
         return self.send_json(404, {"error": f"no route for {method} {path}"})
 
-    def handle_seerr(self, method: str, path: str, body: dict) -> None:
+    def handle_seerr(self, method: str, path: str, body: dict, name: str = "seerr") -> None:
         """Seerr v3.5.1's answers for the calls the add-on makes."""
-        st = STATE["seerr"]
-        STATE["requests"].append({"method": method, "path": "seerr:" + path, "body": body})
+        st = STATE[name]
+        STATE["requests"].append({"method": method, "path": name + ":" + path, "body": body})
         if st["csrf"] and method != "GET":
             return self.send_json(403, {"message": "invalid csrf token"})
         if self.headers.get("X-Api-Key") != st["key"]:
@@ -265,6 +276,28 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/settings/main":
             # server/constants/server.ts: PLEX = 1, JELLYFIN = 2, EMBY = 3
             return self.send_json(200, {"mediaServerType": {"plex": 1, "jellyfin": 2, "emby": 3}.get(st["media"], 4), "applicationTitle": "Seerr"})
+        # Plex: server/routes/settings/index.ts GET /plex/users lists the Plex users who have
+        # access (Wizarr shared the library) and no Seerr account yet; /user/import-from-plex
+        # creates accounts for the plexIds given.
+        plex_id = lambda u: str(1000 + u["id"])
+        has_account = lambda u: any(su.get("plexId") == int(plex_id(u)) or (su.get("email") or "").lower() == (u.get("email") or "").lower() for su in users)
+        plex_users = lambda: [u for u in STATE["users"] if server_by_id(u["server_id"])["server_type"] == "plex" and u.get("email")]
+        if method == "GET" and path == "/settings/plex/users":
+            if st["media"] != "plex":
+                return self.send_json(500, {"message": "Unable to retrieve unimported Plex users."})
+            return self.send_json(200, [{"id": plex_id(u), "title": u["username"], "username": u["username"], "email": u["email"], "thumb": ""}
+                                        for u in plex_users() if not has_account(u)])
+        if method == "POST" and path == "/user/import-from-plex":
+            created = []
+            for u in plex_users():
+                if plex_id(u) in body.get("plexIds", []) and not has_account(u):
+                    new = {"id": st["next_id"], "plexId": int(plex_id(u)), "permissions": st["default_permissions"],
+                           "username": u["username"], "email": u["email"], "settings": {},
+                           "movieQuotaLimit": None, "movieQuotaDays": None, "tvQuotaLimit": None, "tvQuotaDays": None}
+                    st["next_id"] += 1
+                    users.append(new)
+                    created.append(new)
+            return self.send_json(201, {"createdUsers": created, "refreshedUsers": 0})
         if method == "GET" and path == "/settings/jellyfin/users":
             jf = [{"id": f"jf-{u['username']}", "username": u["username"]} for u in STATE["users"] if server_by_id(u["server_id"])["server_type"] == st["media"]]
             return self.send_json(200, [{"id": "jf-owner", "username": "owner"}] + jf)
@@ -439,8 +472,9 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["next_user_id"] = body["next_user_id"]
             if "discord" in body:
                 STATE["discord"].update(body["discord"])
-            if "seerr" in body:
-                STATE["seerr"].update(body["seerr"])
+            for name in ("seerr", "seerr2", "seerr3"):
+                if name in body:
+                    STATE[name].update(body[name])
             return self.send_json(200, {"ok": True})
 
         if path == "/_test/set-user":
