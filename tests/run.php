@@ -938,6 +938,8 @@ function freshBoot(bool $scheduleAlreadyResolved): \Illuminate\Foundation\FakeAp
     \Illuminate\Support\Facades\Route::$routes = [];
     \Illuminate\Support\Facades\Event::$listeners = [];
     \Illuminate\Support\Facades\View::$namespaces = [];
+    // A new request is a new PHP process: nothing registered yet.
+    (new ReflectionProperty(Wizarr::class, 'refundListener'))->setValue(null, false);
     if ($scheduleAlreadyResolved) {
         $app->make(\Illuminate\Console\Scheduling\Schedule::class);
     }
@@ -972,6 +974,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
     ok(in_array('auth.login', $events, true), 'Discord button on the login page');
     ok(in_array('auth.register', $events, true), 'and on the sign-up page');
     ok(count(\App\Models\User::$deleting) > 0, 'listens for customers being deleted');
+    ok(in_array(\App\Events\InvoiceTransaction\Updated::class, $events, true), 'listens for refunds');
 
     // The scheduler is created later, when schedule:run starts.
     $schedule = $app->make(\Illuminate\Console\Scheduling\Schedule::class);
@@ -1383,6 +1386,80 @@ test('discord login: the button escapes what it prints and shows the terms when 
     ok(str_contains($html, '>terms</a>'), 'terms');
     ok(!str_contains($html, '"><script>'), 'escaped');
     ok(!str_contains(ext()->discordLoginButton('https://x/login', ''), 'terms'), 'no terms line without a terms URL');
+});
+
+/* ---------- refunds ---------- */
+
+/** A transaction as Paymenter's Refund button leaves it: refunded_amount just changed. */
+function transaction(float $amount, float $refunded, $status = 'succeeded', bool $refundJustChanged = true): object
+{
+    return new class($amount, $refunded, $status, $refundJustChanged)
+    {
+        public ?object $invoice = null;
+
+        public function __construct(public float $amount, public float $refunded_amount, public $status, private bool $changed) {}
+
+        public function wasChanged($attribute): bool
+        {
+            return $this->changed && $attribute === 'refunded_amount';
+        }
+    };
+}
+
+/** An invoice for $services, paid by $transactions; the first transaction is the one just refunded. */
+function refundedInvoice(array $services, array $transactions, string $referenceType = \App\Models\Service::class): object
+{
+    $invoice = (object) [
+        'transactions' => $transactions,
+        'items' => array_map(fn ($s) => (object) ['reference_type' => $referenceType, 'reference' => $s], $services),
+    ];
+    foreach ($transactions as $t) {
+        $t->invoice = $invoice;
+    }
+
+    return $transactions[0];
+}
+
+function wizarrService(int $id, array $serverSettings = [], string $extension = 'Wizarr'): \App\Models\Service
+{
+    $service = service($id, "customer$id@example.com");
+    $service->product = (object) ['server' => (object) ['extension' => $extension, 'settings' => $serverSettings], 'settings' => settings()];
+
+    return $service;
+}
+
+test('refund: an invoice refunded in full suspends the access it paid for', function () {
+    $service = wizarrService(41);
+    $suspended = [];
+    $result = ext()->afterRefund(refundedInvoice([$service], [transaction(99, 99)]), function ($s) use (&$suspended) { $suspended[] = $s->id; });
+    same([41], $result, 'reported');
+    same([41], $suspended, 'suspended');
+});
+
+test('refund: a partial refund, or one of two payments refunded, changes nothing', function () {
+    $spy = function () { throw new RuntimeException('must not suspend'); };
+    same([], ext()->afterRefund(refundedInvoice([wizarrService(42)], [transaction(99, 20)]), $spy), 'partial');
+    same([], ext()->afterRefund(refundedInvoice([wizarrService(43)], [transaction(99, 99), transaction(99, 0)]), $spy), 'double charge, one refunded');
+    same([], ext()->afterRefund(refundedInvoice([wizarrService(44)], [transaction(99, 99, 'succeeded', false)]), $spy), 'a later change to a refunded payment (e.g. its fee) is not a new refund');
+    same([], ext()->afterRefund(refundedInvoice([wizarrService(45)], [transaction(99, 99, 'failed')]), $spy), 'nothing was paid');
+});
+
+test('refund: the setting, other products, upgrades and inactive services are left alone', function () {
+    $spy = function () { throw new RuntimeException('must not suspend'); };
+    same([], ext()->afterRefund(refundedInvoice([wizarrService(46, ['refund_action' => 'nothing'])], [transaction(99, 99)]), $spy), '"Do nothing"');
+    same([], ext()->afterRefund(refundedInvoice([wizarrService(47, [], 'Pterodactyl')], [transaction(99, 99)]), $spy), 'another extension');
+    same([], ext()->afterRefund(refundedInvoice([wizarrService(48)], [transaction(99, 99)], 'App\Models\ServiceUpgrade'), $spy), 'an upgrade (e.g. Seerr)');
+    $suspended = wizarrService(49);
+    $suspended->status = 'suspended';
+    same([], ext()->afterRefund(refundedInvoice([$suspended], [transaction(99, 99)]), $spy), 'already suspended');
+});
+
+test('refund: Paymenter\'s status enum is understood, and cents do not count as kept', function () {
+    $status = \App\Enums\InvoiceTransactionStatus::Succeeded;
+    ok(ext()->fullyRefunded([transaction(99.99, 99.99, $status)]), 'enum status');
+    ok(ext()->fullyRefunded([transaction(10.10, 10.1)]), 'float rounding');
+    ok(!ext()->fullyRefunded([transaction(10.10, 10.09)]), 'a cent kept is a partial refund');
+    ok(!ext()->fullyRefunded([]), 'no payments');
 });
 
 /* ---------- languages ---------- */

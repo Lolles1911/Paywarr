@@ -28,6 +28,16 @@ namespace App\Attributes {
     }
 }
 
+namespace App\Enums {
+    /** As app/Enums/InvoiceTransactionStatus.php in Paymenter v1.5.9. */
+    enum InvoiceTransactionStatus: string
+    {
+        case Processing = 'processing';
+        case Succeeded = 'succeeded';
+        case Failed = 'failed';
+    }
+}
+
 namespace App\Exceptions {
     /** Paymenter shows the message of this one to the customer as a notice. */
     class DisplayException extends \Exception {}
@@ -133,6 +143,8 @@ namespace App\Models {
     class Service
     {
         public const STATUS_ACTIVE = 'active';
+
+        public const STATUS_SUSPENDED = 'suspended';
 
         public string $status = 'active';
 

@@ -42,6 +42,7 @@ Paymenter decides **when**; the extension translates that into Wizarr:
 | The "Seerr" add-on bought / ended | The customer gets / loses access to Seerr (requests) |
 | Trial ended | The user is disabled; if the customer buys, the same user is re-enabled (see below) |
 | You delete the customer in Paymenter | Access is removed everywhere first; otherwise the customer isn't deleted |
+| You refund an invoice in full | The access it paid for is suspended (see below) |
 
 ## Installation
 
@@ -447,6 +448,27 @@ customer:
 su -s /bin/bash www-data -c "php /tmp/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"
 ```
 
+## Refunds
+
+When you refund an invoice **in full** with the **Refund** button on the
+invoice in Paymenter, the subscription it paid for is suspended, just as if
+it were overdue: the user is disabled and keeps their history. The customer
+gets no "suspended" email, because Paymenter's template for it talks about
+unpaid invoices.
+
+- **Partial refunds change nothing**, for example a discount, or one of two
+  payments when someone was charged twice.
+- **Upgrade invoices** (e.g. adding Seerr later) are left alone.
+- To undo it, press **Unsuspend** on the service in admin.
+- Paymenter cancels the subscription later in the usual way, a number of days
+  after its due date (**Admin → Settings → Cronjob**).
+- To turn it off: **When an invoice is refunded in full** → **Do nothing** on the
+  Wizarr server.
+
+**Not covered:** refunds you make directly at PayPal or Stripe, and
+chargebacks. Paymenter never hears about those, so neither does Paywarr. Press
+**Suspend** on the service yourself.
+
 ## Deleting a customer
 
 Paymenter's **Delete** on a user deletes the subscriptions directly in the
@@ -626,8 +648,8 @@ The two behave differently, and that is up to Wizarr, not the extension:
 
 - **If a suspension fails,** the safety net fixes it within an hour once Wizarr
   answers again. Until then the user still has access.
-- **Refunds and chargebacks** haven't been looked into; expect to close the
-  access manually.
+- **Refunds made directly at PayPal or Stripe, and chargebacks,** are not seen;
+  suspend those yourself (see *Refunds*).
 - **The customer needs an account in Paymenter** to buy, created either with
   email and password, or with one click through "Log in with Discord".
 - Wizarr returns `used_by` as `<User 12>`, although its documentation says

@@ -5,6 +5,8 @@ namespace Paymenter\Extensions\Servers\Wizarr;
 use App\Attributes\ExtensionMeta;
 use App\Classes\Extension\Server;
 use App\Events\Service\Created as ServiceCreated;
+use App\Events\InvoiceTransaction\Updated as TransactionUpdated;
+use App\Jobs\Server\SuspendJob;
 use App\Exceptions\DisplayException;
 use App\Helpers\ExtensionHelper;
 use App\Helpers\NotificationHelper;
@@ -14,6 +16,7 @@ use App\Models\User;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Session;
@@ -54,7 +57,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.9.0',
+    version: '1.10.0',
     author: 'Paywarr',
     url: 'https://github.com/wizarrrr/wizarr',
 )]
@@ -147,6 +150,17 @@ class Wizarr extends Server
                 'required' => true,
                 'encrypted' => true,
                 'description' => 'Wizarr -> Settings -> API Keys.',
+            ],
+            [
+                'name' => 'refund_action',
+                'label' => 'When an invoice is refunded in full',
+                'type' => 'select',
+                'default' => 'suspend',
+                'options' => [
+                    ['value' => 'suspend', 'label' => 'Suspend the access'],
+                    ['value' => 'nothing', 'label' => 'Do nothing'],
+                ],
+                'description' => 'Refunds made with the Refund button on an invoice in Paymenter. Partial refunds never change anything.',
             ],
 
             // Optional: Seerr as a paid add-on.
@@ -390,6 +404,15 @@ class Wizarr extends Server
         Event::listen(ServiceCreated::class, function (ServiceCreated $event) {
             $this->guardCheckout($event->service);
         });
+
+        // A refund with Paymenter's Refund button. Once, however many Wizarr
+        // servers there are: each service is handled with its own server's settings.
+        if (!self::$refundListener) {
+            self::$refundListener = true;
+            Event::listen(TransactionUpdated::class, function (TransactionUpdated $event) {
+                $this->afterRefund($event->invoiceTransaction);
+            });
+        }
 
         // "Your access is ready" banner on every page of the client area.
         Event::listen('footer', fn () => $this->renderBanner());
@@ -1079,6 +1102,86 @@ HTML;
         }
 
         return false;
+    }
+
+    /* ------------------------------------------------------------------
+     | Refunds
+     * ----------------------------------------------------------------- */
+
+    private static bool $refundListener = false;
+
+    /**
+     * After Paymenter's Refund button: when the invoice has been refunded in
+     * full, suspend the Wizarr services it paid for, like an overdue invoice
+     * would. Partial refunds (a discount, a double charge) change nothing.
+     * Refunds and chargebacks made directly at PayPal or Stripe never reach
+     * Paymenter, so they are not seen here.
+     *
+     * @param  callable|null  $suspend  for tests; defaults to suspendForRefund()
+     * @return int[] the services that were suspended
+     */
+    public function afterRefund($transaction, ?callable $suspend = null): array
+    {
+        if (!method_exists($transaction, 'wasChanged') || !$transaction->wasChanged('refunded_amount')) {
+            return [];
+        }
+        $invoice = $transaction->invoice;
+        if (!$invoice || !$this->fullyRefunded($invoice->transactions)) {
+            return [];
+        }
+
+        $suspend ??= fn (Service $service) => $this->suspendForRefund($service);
+        $suspended = [];
+        foreach ($invoice->items as $item) {
+            // Upgrades (e.g. adding Seerr) reference a ServiceUpgrade: left alone.
+            if ($item->reference_type !== Service::class || !($service = $item->reference)) {
+                continue;
+            }
+            $server = $service->product?->server;
+            if ($server?->extension !== 'Wizarr' || $service->status !== Service::STATUS_ACTIVE) {
+                continue;
+            }
+            // That service's own server decides.
+            $settings = ExtensionHelper::settingsToArray($server->settings);
+            if (($settings['refund_action'] ?? 'suspend') === 'nothing') {
+                continue;
+            }
+            $suspend($service);
+            $suspended[] = $service->id;
+        }
+
+        return $suspended;
+    }
+
+    /** True when money came in and all of it went back. */
+    public function fullyRefunded(iterable $transactions): bool
+    {
+        $paid = 0.0;
+        $kept = 0.0;
+        foreach ($transactions as $transaction) {
+            $status = $transaction->status instanceof \BackedEnum ? $transaction->status->value : $transaction->status;
+            if ($status !== 'succeeded') {
+                continue;
+            }
+            $paid += (float) $transaction->amount;
+            $kept += (float) $transaction->amount - (float) $transaction->refunded_amount;
+        }
+
+        return $paid > 0 && $kept < 0.005;
+    }
+
+    /**
+     * What Paymenter's own overdue run does, once the refund is committed
+     * (the Refund button runs inside a database transaction). No "suspended"
+     * mail: that template is written for unpaid invoices.
+     */
+    private function suspendForRefund(Service $service): void
+    {
+        DB::afterCommit(function () use ($service) {
+            $service->update(['status' => Service::STATUS_SUSPENDED]);
+            SuspendJob::dispatch($service, false);
+            Log::info('Wizarr: service ' . $service->id . ' suspended because its invoice was refunded in full.');
+        });
     }
 
     /* ------------------------------------------------------------------
