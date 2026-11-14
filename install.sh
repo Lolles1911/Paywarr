@@ -46,18 +46,6 @@ chmod -R 755 "$TARGET"
 
 echo "Installed to $TARGET."
 
-# Paywarr Stats: a separate extension, inactive until enabled under Admin -> Extensions.
-STATS_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/extensions/Others/PaywarrStats"
-STATS_TARGET="$EXTENSIONS/Others/PaywarrStats"
-if [ -f "$STATS_SOURCE/PaywarrStats.php" ]; then
-  rm -rf "$STATS_TARGET"
-  mkdir -p "$STATS_TARGET"
-  cp -r "$STATS_SOURCE"/. "$STATS_TARGET"/
-  chown -R --reference="$EXTENSIONS/Gateways/Stripe" "$STATS_TARGET"
-  chmod -R 755 "$STATS_TARGET"
-  echo "Installed Paywarr Stats to $STATS_TARGET (enable it under Admin -> Extensions to use it)."
-fi
-
 if [ -f "$PAYMENTER/artisan" ] && command -v php >/dev/null 2>&1; then
   # As the user that owns storage/ (usually www-data): run as root, artisan can
   # leave root-owned files behind that the web server then cannot write.

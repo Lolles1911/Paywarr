@@ -40,4 +40,3 @@ jobs:
           bash -n tools/backup-paymenter.sh
           php -l tools/discord-check.php
           php -l tools/seerr-check.php
-          for f in extensions/Others/PaywarrStats/*.php; do php -l "$f"; done

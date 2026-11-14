@@ -74,9 +74,6 @@ def fresh_state() -> dict:
     # More Seerr instances (served under /seerr2 and /seerr3), each with its own media server.
     state["seerr2"] = fresh_seerr("seerr2-key", "emby")
     state["seerr3"] = fresh_seerr("seerr3-key", "plex")
-    # Tracearr (served under /tracearr/api/v2/public): identities with their accounts,
-    # and per identity the numbers /users/:id/stats and /users/:id/history return.
-    state["tracearr"] = {"key": "trr_pub_test", "identities": [], "stats": {}, "history": {}}
     return state
 
 
@@ -156,20 +153,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/discord/api/v10/"):
             return self.handle_discord(method, path[len("/discord/api/v10"):])
-
-        if path == "/tracearr/api/v1/images/proxy":
-            # apps/server/src/routes/images.ts: no authentication; an image, whatever server it came from.
-            from urllib.parse import parse_qs, urlparse
-            url = parse_qs(urlparse(self.path).query).get("url", [""])[0]
-            STATE["requests"].append({"method": method, "path": "tracearr-image:" + url, "body": {}})
-            if "notimage" in url:
-                return self.send_raw(200, "text/html", b"<html>login</html>")
-            if "svg" in url:
-                return self.send_raw(200, "image/svg+xml", b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")
-            return self.send_raw(200, "image/jpeg", b"\xff\xd8\xff\xe0JPEG:" + url.encode())
-
-        if path.startswith("/tracearr/api/v2/public/"):
-            return self.handle_tracearr(method, path[len("/tracearr/api/v2/public"):])
 
         for name in ("seerr2", "seerr3", "seerr"):
             if path.startswith(f"/{name}/api/v1/"):
@@ -379,39 +362,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"permissions": u["permissions"]})
         return self.send_json(404, {"message": "not found"})
 
-    def send_raw(self, status: int, content_type: str, body: bytes) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def handle_tracearr(self, method: str, path: str) -> None:
-        """Tracearr's public API v2, as apps/server/src/routes/publicV2 answers it."""
-        from urllib.parse import parse_qs, urlparse
-        tr = STATE["tracearr"]
-        query = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
-        STATE["requests"].append({"method": method, "path": "tracearr:" + path, "body": query})
-        auth = self.headers.get("Authorization") or ""
-        if not auth.startswith("Bearer "):
-            return self.send_json(401, {"message": "Missing or invalid Authorization header"})
-        if auth[7:] != tr["key"]:
-            return self.send_json(401, {"message": "Invalid API key"})
-        parts = path.strip("/").split("/")
-        page_size = int(query.get("pageSize", 25))
-        if method == "GET" and path == "/users":
-            start = int(query.get("cursor", "0") or 0)
-            page = tr["identities"][start:start + page_size]
-            nxt = str(start + page_size) if start + page_size < len(tr["identities"]) else None
-            return self.send_json(200, {"data": page, "meta": {"nextCursor": nxt, "pageSize": page_size}})
-        if method == "GET" and len(parts) == 3 and parts[0] == "users" and parts[2] == "stats":
-            empty = {"all_time": {"plays": 0, "watch_time_ms": 0}, "last_30": {"plays": 0, "watch_time_ms": 0}, "last_7": {"plays": 0, "watch_time_ms": 0}}
-            st = tr["stats"].get(parts[1], {})
-            return self.send_json(200, {"user_id": parts[1], "windows": st.get("windows", empty), "top_genres": st.get("top_genres", [])})
-        if method == "GET" and len(parts) == 3 and parts[0] == "users" and parts[2] == "history":
-            return self.send_json(200, {"data": tr["history"].get(parts[1], [])[:page_size], "meta": {"nextCursor": None, "pageSize": page_size}})
-        return self.send_json(404, {"message": "Not found"})
-
     def handle_discord(self, method: str, path: str) -> None:
         """Discord's REST answers for the two calls the extension makes."""
         d = STATE["discord"]
@@ -522,7 +472,7 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["next_user_id"] = body["next_user_id"]
             if "discord" in body:
                 STATE["discord"].update(body["discord"])
-            for name in ("seerr", "seerr2", "seerr3", "tracearr"):
+            for name in ("seerr", "seerr2", "seerr3"):
                 if name in body:
                     STATE[name].update(body[name])
             return self.send_json(200, {"ok": True})

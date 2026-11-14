@@ -724,46 +724,12 @@ If it doesn't work, run `tools/seerr-check.php` (see *Troubleshooting*).
 Typically `http://` or the whole internal address is missing, or the "Yes"
 option doesn't have the environment variable `yes`/`ja`.
 
-## Paywarr Stats: each customer's own statistics
+## Customer statistics: Paywarr Stats
 
-![The "My stats" page](screenshots/stats.png)
-
-A second, separate extension in this repository. With
-[Tracearr](https://github.com/connorgallopo/tracearr) collecting what is watched
-on your Plex, Jellyfin and Emby servers, it gives every customer a **My stats**
-page in the client area:
-
-- Watch time and plays for the last 7 days, the last 30 days and all time
-- Their favourite genres
-- What they watched recently, with posters, server, date and how much of it
-
-Each customer only sees their own numbers: the page asks Tracearr only about
-the media server users Paywarr has recorded on that customer's subscriptions
-(same server type and username). They log in to Paymenter as usual, Discord
-included; Tracearr's address and key stay on the server. The numbers are kept
-for 10 minutes, so page views don't load Tracearr. Plays from before a customer
-was in Tracearr come in when Tracearr imports them (e.g. from Playback
-Reporting).
-
-**Setup** (needs Paywarr and a running Tracearr):
-
-1. In Tracearr: **Settings → Data & API → API → Generate key**. It starts with
-   `trr_pub_`.
-2. `install.sh` already copied the extension. In Paymenter: **Admin →
-   Extensions → Available Extensions → Paywarr Stats → Install**.
-3. Open it, fill in **Tracearr URL (internal)** (e.g. `http://192.168.1.10:3000`)
-   and **Tracearr API key**, turn on **Enabled**, and save.
-
-**My stats** then appears in the client area menu. Without a Tracearr URL the
-page says the statistics can't be loaded; with a wrong key the log says
-"Tracearr rejected the API key".
-
-**Posters** come from Tracearr's image proxy, fetched by Paymenter and passed
-on, so Tracearr can stay on your own network. The page only asks for poster
-number 1, 2, 3 … of the customer's own list, never for an address, so it can't
-be used to fetch anything else; only real images are passed on (no SVG).
-
-Not shown (yet): favourites (Tracearr records plays, not favourites).
+Want each customer to see their own watch statistics in the client area?
+[**Paywarr Stats**](https://github.com/Lolles1911/Paywarr-stats) is a separate
+extension that does that with Tracearr, using the media server users Paywarr
+records.
 
 ## Languages
 
@@ -926,7 +892,7 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-192 scenarios run the extension through the whole lifecycle against
+181 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -935,8 +901,7 @@ password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
 and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
 Emby or both with one invitation each (including switching later), Seerr
-request packages, up to three Seerr (including Plex), Paywarr Stats against
-a Tracearr stub, and the
+request packages, up to three Seerr (including Plex), and the
 languages (English, Danish, and that every text in the code has a Danish
 translation).
 
@@ -991,7 +956,6 @@ it*) does. Run it before you take on paying customers.
 | `install.sh` | Copies the extension into Paymenter and reloads it |
 | `tests/` | Stub, stand-ins and scenarios |
 | `.github/workflows/` | Tests on every push, releases from tags |
-| `extensions/Others/PaywarrStats/` | Paywarr Stats: the "My stats" page from Tracearr |
 
 ## License
 
