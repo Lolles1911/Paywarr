@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/banner.png" alt="Paywarr" width="760"></p>
+
 # Paywarr
 
 [![Tests](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml/badge.svg)](https://github.com/Lolles1911/paywarr/actions/workflows/tests.yml)
@@ -956,6 +958,7 @@ it*) does. Run it before you take on paying customers.
 | `install.sh` | Copies the extension into Paymenter and reloads it |
 | `tests/` | Stub, stand-ins and scenarios |
 | `.github/workflows/` | Tests on every push, releases from tags |
+| `assets/` | Logo, banner and the picture GitHub shows when the project is shared |
 
 ## License
 
