@@ -1,7 +1,8 @@
 name: Release
 
-# Push a tag like v1.10.0 to publish a release. The tag must match the
-# version in extensions/Servers/Wizarr/Wizarr.php, and the tests must pass.
+# A tag like v1.10.0 (pushed, or made with "Draft a new release" on GitHub)
+# is checked: it must match the version in extensions/Servers/Wizarr/Wizarr.php,
+# and the tests must pass. A pushed tag gets its release made here.
 on:
   push:
     tags: ['v*']
@@ -35,4 +36,10 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "Paywarr $GITHUB_REF_NAME" --generate-notes --verify-tag
+        # A release made on github.com already exists; then this only checks.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists."
+          else
+            gh release create "$GITHUB_REF_NAME" --title "Paywarr $GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
