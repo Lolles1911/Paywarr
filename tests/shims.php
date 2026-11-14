@@ -407,15 +407,22 @@ namespace Illuminate\Support\Facades {
                 throw new \RuntimeException('cURL error: ' . $error);
             }
             $status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+            $type = (string) curl_getinfo($curl, CURLINFO_CONTENT_TYPE);
             curl_close($curl);
 
-            return new Response($status, $body);
+            return new Response($status, $body, ['content-type' => $type]);
         }
     }
 
     class Response
     {
-        public function __construct(private int $status, private string $body) {}
+        public function __construct(private int $status, private string $body, private array $headers = []) {}
+
+        /** As Illuminate\Http\Client\Response::header(): one header's value, "" when absent. */
+        public function header(string $name): string
+        {
+            return (string) ($this->headers[strtolower($name)] ?? '');
+        }
 
         public function status(): int
         {
@@ -674,6 +681,16 @@ namespace Illuminate\Support\Facades {
         public function name($name): static
         {
             $this->name .= $name;
+
+            return $this;
+        }
+
+        /** @var array<string, string> parameter => pattern, as Route::where*() set them */
+        public array $wheres = [];
+
+        public function whereNumber($parameter): static
+        {
+            $this->wheres[$parameter] = '[0-9]+';
 
             return $this;
         }

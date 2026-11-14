@@ -1678,8 +1678,10 @@ function tracearrWithCustomers(): void
             'u-ole' => ['windows' => windows(99, 99, 99, 99, 99, 99), 'top_genres' => [['genre' => 'Horror', 'plays' => 99]]],
         ],
         'history' => [
-            'u-mette' => [['media_title' => 'Pilot', 'show_title' => 'The Show', 'season_number' => 1, 'episode_number' => 2, 'media_type' => 'episode', 'server_name' => 'Jellyfin', 'started_at' => '2026-11-10T20:00:00Z', 'percent_complete' => 100]],
-            'u-mette-emby' => [['media_title' => 'A Film', 'show_title' => null, 'year' => 2024, 'media_type' => 'movie', 'server_name' => 'Emby', 'started_at' => '2026-11-12T20:00:00Z', 'percent_complete' => 55.4]],
+            'u-mette' => [['media_title' => 'Pilot', 'show_title' => 'The Show', 'season_number' => 1, 'episode_number' => 2, 'media_type' => 'episode', 'server_name' => 'Jellyfin', 'started_at' => '2026-11-10T20:00:00Z', 'percent_complete' => 100,
+                'poster_url' => '/api/v1/images/proxy?server=s1&url=%2FItems%2Fshow%2FImages%2FPrimary&width=300&height=450&fallback=poster']],
+            'u-mette-emby' => [['media_title' => 'A Film', 'show_title' => null, 'year' => 2024, 'media_type' => 'movie', 'server_name' => 'Emby', 'started_at' => '2026-11-12T20:00:00Z', 'percent_complete' => 55.4,
+                'poster_url' => 'http://evil.example.com/steal']],
             'u-ole' => [['media_title' => 'Ole\'s secret', 'media_type' => 'movie', 'server_name' => 'Jellyfin', 'started_at' => '2026-11-13T20:00:00Z']],
         ],
     ]]);
@@ -1759,6 +1761,33 @@ test('stats: the page shows the numbers, escapes what it prints, and speaks Dani
     ok(str_contains(stats()->pageHtml(null), 'be loaded right now'), 'Tracearr down: a message, not an error page');
 });
 
+test('stats: posters come through Paymenter, only from Tracearr\'s image proxy and only the customer\'s own', function () {
+    tracearrWithCustomers();
+    $stats = stats()->statsFor([['type' => 'jellyfin', 'username' => 'mette'], ['type' => 'emby', 'username' => 'mette']]);
+    same(['', '/api/v1/images/proxy?server=s1&url=%2FItems%2Fshow%2FImages%2FPrimary&width=300&height=450&fallback=poster'], array_column($stats['history'], 'poster'), 'only proxy paths are kept');
+
+    $image = stats()->posterFor($stats, 2);
+    same('image/jpeg', $image['type'] ?? null, 'the image, as an image');
+    ok(str_contains($image['body'] ?? '', '/Items/show/Images/Primary'), 'from Tracearr\'s proxy');
+    same([null, null, null], [stats()->posterFor($stats, 1), stats()->posterFor($stats, 0), stats()->posterFor($stats, 99)], 'no poster, number 0, a number past the list');
+
+    $html = stats()->pageHtml($stats, '/stats/poster/');
+    ok(str_contains($html, 'src="/stats/poster/2"') && !str_contains($html, 'src="/stats/poster/1"'), 'an <img> only where there is a poster');
+    ok(!str_contains($html, 'evil.example.com') && !str_contains($html, 'images/proxy'), 'no outside or Tracearr address in the page');
+});
+
+test('stats: the poster fetch refuses anything but an image from the proxy', function () {
+    global $STUB;
+    $client = new \Paymenter\Extensions\Others\PaywarrStats\TracearrClient($STUB . '/tracearr', 'trr_pub_test');
+    stub('/_test/clear-requests');
+    same(null, $client->poster('/api/v2/public/users'), 'another Tracearr path');
+    same(null, $client->poster('http://evil.example.com/x'), 'another host');
+    same([], state()['requests'], 'neither was even asked for');
+    same(null, $client->poster('/api/v1/images/proxy?url=notimage'), 'not an image (e.g. a login page)');
+    same(null, $client->poster('/api/v1/images/proxy?url=svg'), 'SVG, which can carry scripts');
+    same('image/jpeg', $client->poster('/api/v1/images/proxy?url=ok')['type'] ?? null, 'a real image');
+});
+
 test('stats: boot adds "My stats" to the client area menu', function () {
     freshBoot(scheduleAlreadyResolved: false);
     stats()->boot();
@@ -1769,8 +1798,10 @@ test('stats: boot adds "My stats" to the client area menu', function () {
         }
     }
     same(['My stats', 'extensions.paywarr-stats', 'ri-bar-chart-2'], [$item['name'] ?? null, $item['route'] ?? null, $item['icon'] ?? null], 'menu item');
-    same(['GET stats extensions.paywarr-stats'], array_map(fn ($r) => $r->method . ' ' . $r->uri . ' ' . $r->name, \Illuminate\Support\Facades\Route::$routes), 'route');
-    same(['web', 'auth'], \Illuminate\Support\Facades\Route::$routes[0]->middleware, 'logged-in customers only');
+    $routes = \Illuminate\Support\Facades\Route::$routes;
+    same(['GET stats extensions.paywarr-stats', 'GET stats/poster/{number} extensions.paywarr-stats.poster'], array_map(fn ($r) => $r->method . ' ' . $r->uri . ' ' . $r->name, $routes), 'routes');
+    same(['web', 'auth'], $routes[0]->middleware, 'logged-in customers only');
+    same([['web', 'auth', 'throttle:120,1'], ['number' => '[0-9]+']], [$routes[1]->middleware, $routes[1]->wheres], 'posters: logged in, throttled, by number only');
 });
 
 test('stats: every text has a Danish translation', function () {

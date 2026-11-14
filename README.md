@@ -735,7 +735,7 @@ page in the client area:
 
 - Watch time and plays for the last 7 days, the last 30 days and all time
 - Their favourite genres
-- What they watched recently, with server, date and how much of it
+- What they watched recently, with posters, server, date and how much of it
 
 Each customer only sees their own numbers: the page asks Tracearr only about
 the media server users Paywarr has recorded on that customer's subscriptions
@@ -758,8 +758,12 @@ Reporting).
 page says the statistics can't be loaded; with a wrong key the log says
 "Tracearr rejected the API key".
 
-Not shown (yet): favourites (Tracearr records plays, not favourites) and
-posters (Tracearr's images need a Tracearr login).
+**Posters** come from Tracearr's image proxy, fetched by Paymenter and passed
+on, so Tracearr can stay on your own network. The page only asks for poster
+number 1, 2, 3 … of the customer's own list, never for an address, so it can't
+be used to fetch anything else; only real images are passed on (no SVG).
+
+Not shown (yet): favourites (Tracearr records plays, not favourites).
 
 ## Languages
 
@@ -922,7 +926,7 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-190 scenarios run the extension through the whole lifecycle against
+192 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole

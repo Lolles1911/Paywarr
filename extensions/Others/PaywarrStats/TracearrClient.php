@@ -49,6 +49,31 @@ class TracearrClient
         return $this->call('/users/' . rawurlencode($id) . '/history', ['pageSize' => $pageSize])['data'] ?? [];
     }
 
+    /**
+     * A poster through Tracearr's image proxy (/api/v1/images/proxy, which
+     * needs no key). Only that path is ever fetched, so this cannot be used
+     * to reach anything else on Tracearr's network.
+     *
+     * @return array{body: string, type: string}|null  null when it is not an image
+     */
+    public function poster(string $path): ?array
+    {
+        if (!str_starts_with($path, '/api/v1/images/proxy?')) {
+            return null;
+        }
+        try {
+            $response = Http::withHeaders(['Accept' => 'image/*'])->timeout($this->timeout)->get(rtrim($this->baseUrl, '/') . $path);
+        } catch (Throwable $e) {
+            return null;
+        }
+        $type = strtolower(trim(explode(';', $response->header('Content-Type'))[0]));
+        if ($response->status() !== 200 || !str_starts_with($type, 'image/') || $type === 'image/svg+xml') {
+            return null;
+        }
+
+        return ['body' => $response->body(), 'type' => $type];
+    }
+
     private function call(string $path, array $query = []): array
     {
         $url = rtrim($this->baseUrl, '/') . '/api/v2/public' . $path;

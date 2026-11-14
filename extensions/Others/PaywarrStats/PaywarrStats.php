@@ -21,7 +21,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Paywarr Stats',
     description: 'Shows each customer their own watch statistics from Tracearr, on a page in the client area.',
-    version: '1.0.0',
+    version: '1.1.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -72,26 +72,68 @@ class PaywarrStats extends Extension
     {
         $user = Auth::user();
         try {
-            $stats = Cache::remember('paywarr-stats:' . $user->id, self::CACHE_SECONDS, function () use ($user) {
-                $services = Service::where('user_id', $user->id)
-                    ->whereIn('status', ['active', 'suspended'])
-                    ->with(['properties', 'product.server'])
-                    ->get();
-                $lists = [];
-                foreach ($services as $service) {
-                    if ($service->product?->server?->extension === 'Wizarr') {
-                        $lists[] = $service->properties->pluck('value', 'key')->all();
-                    }
-                }
-
-                return $this->statsFor($this->mediaAccounts($lists));
-            });
+            $stats = $this->statsForUser($user);
         } catch (Throwable $e) {
             Log::warning('Paywarr Stats: could not load the statistics of user ' . $user->id . ': ' . $e->getMessage());
             $stats = null;
         }
 
-        return view('layouts.app', ['slot' => new HtmlString($this->pageHtml($stats)), 'title' => self::t('My stats')]);
+        return view('layouts.app', [
+            'slot' => new HtmlString($this->pageHtml($stats, rtrim(route('extensions.paywarr-stats'), '/') . '/poster/')),
+            'title' => self::t('My stats'),
+        ]);
+    }
+
+    /** GET /stats/poster/{number}: a poster of the customer's own "Recently watched". */
+    public function poster($number)
+    {
+        try {
+            $image = $this->posterFor($this->statsForUser(Auth::user()), (int) $number);
+        } catch (Throwable $e) {
+            $image = null;
+        }
+        if ($image === null) {
+            abort(404);
+        }
+
+        return response($image['body'], 200, [
+            'Content-Type' => $image['type'],
+            'Cache-Control' => 'private, max-age=86400',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /**
+     * Poster number $number (from 1) of these statistics, fetched from
+     * Tracearr; null when there is none.
+     *
+     * @return array{body: string, type: string}|null
+     */
+    public function posterFor(array $stats, int $number): ?array
+    {
+        $path = $stats['history'][$number - 1]['poster'] ?? null;
+
+        return $number >= 1 && is_string($path) && $path !== '' ? $this->client()->poster($path) : null;
+    }
+
+    /** The customer's statistics, kept for CACHE_SECONDS. */
+    private function statsForUser($user): array
+    {
+        // "v2": entries from 1.0.0 were stored without posters.
+        return Cache::remember('paywarr-stats:v2:' . $user->id, self::CACHE_SECONDS, function () use ($user) {
+            $services = Service::where('user_id', $user->id)
+                ->whereIn('status', ['active', 'suspended'])
+                ->with(['properties', 'product.server'])
+                ->get();
+            $lists = [];
+            foreach ($services as $service) {
+                if ($service->product?->server?->extension === 'Wizarr') {
+                    $lists[] = $service->properties->pluck('value', 'key')->all();
+                }
+            }
+
+            return $this->statsFor($this->mediaAccounts($lists));
+        });
     }
 
     /**
@@ -186,6 +228,8 @@ class PaywarrStats extends Extension
                     'server' => (string) ($play['server_name'] ?? ''),
                     'started_at' => (string) ($play['started_at'] ?? ''),
                     'percent' => isset($play['percent_complete']) ? (int) round((float) $play['percent_complete']) : null,
+                    // Tracearr's own proxy path; served to the customer through /stats/poster/{number}.
+                    'poster' => str_starts_with((string) ($play['poster_url'] ?? ''), '/api/v1/images/proxy?') ? (string) $play['poster_url'] : '',
                 ];
             }
         }
@@ -201,7 +245,7 @@ class PaywarrStats extends Extension
     }
 
     /** The page body. Styled with the theme's colour variables, like Paywarr's box. */
-    public function pageHtml(?array $stats): string
+    public function pageHtml(?array $stats, string $posterBase = '/stats/poster/'): string
     {
         $e = fn ($value) => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
         $html = '<div id="paywarr-stats" class="container mt-14">'
@@ -214,9 +258,11 @@ class PaywarrStats extends Extension
             . '#paywarr-stats .ps-label{font-size:.85rem;color:hsl(var(--color-muted, var(--color-base)))}'
             . '#paywarr-stats .ps-value{font-size:1.6rem;font-weight:700;margin:.25rem 0}'
             . '#paywarr-stats .ps-list{padding:0}'
-            . '#paywarr-stats .ps-row{display:flex;justify-content:space-between;gap:1rem;padding:.75rem 1.25rem;border-top:1px solid hsl(var(--color-neutral))}'
+            . '#paywarr-stats .ps-row{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.75rem 1.25rem;border-top:1px solid hsl(var(--color-neutral))}'
             . '#paywarr-stats .ps-row:first-child{border-top:0}'
             . '#paywarr-stats .ps-sub{font-size:.85rem;color:hsl(var(--color-muted, var(--color-base)))}'
+            . '#paywarr-stats .ps-play{display:flex;gap:.9rem;align-items:center;min-width:0}'
+            . '#paywarr-stats .ps-poster{flex:none;width:2.75rem;height:4.1rem;border-radius:.35rem;object-fit:cover;background:hsl(var(--color-neutral))}'
             . '#paywarr-stats .ps-genre{display:inline-block;margin:0 .5rem .5rem 0;padding:.35rem .8rem;border-radius:9999px;border:1px solid hsl(var(--color-neutral));font-size:.9rem}'
             . '</style>'
             . '<h1>' . $e(self::t('My stats')) . '</h1>';
@@ -250,12 +296,15 @@ class PaywarrStats extends Extension
 
         if ($stats['history']) {
             $html .= '<h2>' . $e(self::t('Recently watched')) . '</h2><div class="ps-list">';
-            foreach ($stats['history'] as $play) {
+            foreach ($stats['history'] as $index => $play) {
                 $title = $play['show'] !== ''
                     ? $play['show'] . ($play['season'] !== null && $play['episode'] !== null ? sprintf(' S%02dE%02d', $play['season'], $play['episode']) : '') . ($play['title'] !== '' ? ' – ' . $play['title'] : '')
                     : $play['title'] . ($play['year'] ? ' (' . $play['year'] . ')' : '');
                 $when = ($ts = strtotime($play['started_at'])) ? date(self::t('M j, Y'), $ts) : '';
-                $html .= '<div class="ps-row"><div><div>' . $e($title) . '</div><div class="ps-sub">' . $e(trim($play['server'] . ($when !== '' ? ' · ' . $when : ''), ' ·')) . '</div></div>'
+                $poster = ($play['poster'] ?? '') !== ''
+                    ? '<img class="ps-poster" loading="lazy" alt="" src="' . $e($posterBase . ($index + 1)) . '" onerror="this.style.visibility=\'hidden\'">'
+                    : '<span class="ps-poster" aria-hidden="true"></span>';
+                $html .= '<div class="ps-row"><div class="ps-play">' . $poster . '<div><div>' . $e($title) . '</div><div class="ps-sub">' . $e(trim($play['server'] . ($when !== '' ? ' · ' . $when : ''), ' ·')) . '</div></div></div>'
                     . '<div class="ps-sub">' . ($play['percent'] !== null ? $e($play['percent'] . '%') : '') . '</div></div>';
             }
             $html .= '</div>';

@@ -157,6 +157,17 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/discord/api/v10/"):
             return self.handle_discord(method, path[len("/discord/api/v10"):])
 
+        if path == "/tracearr/api/v1/images/proxy":
+            # apps/server/src/routes/images.ts: no authentication; an image, whatever server it came from.
+            from urllib.parse import parse_qs, urlparse
+            url = parse_qs(urlparse(self.path).query).get("url", [""])[0]
+            STATE["requests"].append({"method": method, "path": "tracearr-image:" + url, "body": {}})
+            if "notimage" in url:
+                return self.send_raw(200, "text/html", b"<html>login</html>")
+            if "svg" in url:
+                return self.send_raw(200, "image/svg+xml", b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")
+            return self.send_raw(200, "image/jpeg", b"\xff\xd8\xff\xe0JPEG:" + url.encode())
+
         if path.startswith("/tracearr/api/v2/public/"):
             return self.handle_tracearr(method, path[len("/tracearr/api/v2/public"):])
 
@@ -367,6 +378,13 @@ class Handler(BaseHTTPRequestHandler):
                 u["permissions"] = int(body["permissions"])
                 return self.send_json(200, {"permissions": u["permissions"]})
         return self.send_json(404, {"message": "not found"})
+
+    def send_raw(self, status: int, content_type: str, body: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def handle_tracearr(self, method: str, path: str) -> None:
         """Tracearr's public API v2, as apps/server/src/routes/publicV2 answers it."""
