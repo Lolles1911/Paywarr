@@ -272,7 +272,13 @@ class Handler(BaseHTTPRequestHandler):
             created = []
             for jid in body.get("jellyfinUserIds", []):
                 if not any(u["jellyfinUserId"] == jid for u in users):
-                    u = {"id": st["next_id"], "jellyfinUserId": jid, "permissions": st["default_permissions"]}
+                    name = jid[3:] if jid.startswith("jf-") else jid
+                    u = {"id": st["next_id"], "jellyfinUserId": jid, "permissions": st["default_permissions"],
+                         "username": name, "email": name + "@example.com", "jellyfinUsername": name,
+                         # what a customer may have set themselves in Seerr
+                         "settings": {"locale": "da", "discoverRegion": "DK", "streamingRegion": "DK", "originalLanguage": "da",
+                                      "watchlistSyncMovies": True, "watchlistSyncTv": False},
+                         "movieQuotaLimit": None, "movieQuotaDays": None, "tvQuotaLimit": None, "tvQuotaDays": None}
                     st["next_id"] += 1
                     users.append(u)
                     created.append(u)
@@ -288,6 +294,29 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(405, {"message": "This account cannot be deleted."})
                 users.remove(u)
                 return self.send_json(200, u)
+            if parts[2:] == ["settings", "main"]:
+                # server/routes/user/usersettings.ts: GET and POST /main
+                settings = u.setdefault("settings", {})
+                if method == "GET":
+                    return self.send_json(200, {
+                        "username": u.get("username"), "email": u.get("email"),
+                        **{k: settings.get(k) for k in ("locale", "discoverRegion", "streamingRegion", "originalLanguage")},
+                        **{k: u.get(k) for k in ("movieQuotaLimit", "movieQuotaDays", "tvQuotaLimit", "tvQuotaDays")},
+                        "globalMovieQuotaDays": 7, "globalMovieQuotaLimit": 3, "globalTvQuotaDays": 7, "globalTvQuotaLimit": 1,
+                        **{k: settings.get(k) for k in ("watchlistSyncMovies", "watchlistSyncTv")},
+                    })
+                if u["id"] == 1:
+                    return self.send_json(403, {"message": "You do not have permission to modify this user's settings."})
+                # Everything is taken from the body; what is not sent is emptied.
+                u["username"] = body.get("username")
+                u["email"] = body.get("email") or u.get("jellyfinUsername") or u.get("email")
+                # Quotas only change for users without Manage Users (8) or Admin (2).
+                if not (u["permissions"] & (2 | 8)):
+                    for k in ("movieQuotaDays", "movieQuotaLimit", "tvQuotaDays", "tvQuotaLimit"):
+                        u[k] = body.get(k)
+                for k in ("locale", "discoverRegion", "streamingRegion", "originalLanguage", "watchlistSyncMovies", "watchlistSyncTv"):
+                    settings[k] = body.get(k)
+                return self.send_json(200, {"username": u["username"], "email": u["email"]})
             if parts[2:] == ["settings", "permissions"]:
                 if method == "GET":
                     return self.send_json(200, {"permissions": u["permissions"]})

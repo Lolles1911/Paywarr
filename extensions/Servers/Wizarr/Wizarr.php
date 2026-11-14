@@ -57,7 +57,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.11.0',
+    version: '1.12.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -108,6 +108,9 @@ class Wizarr extends Server
 
     /** On the service, while suspended: the Seerr permissions to give back. */
     private const PROP_SEERR_SAVED_PERMISSIONS = 'seerr_saved_permissions';
+
+    /** The request limit last set in Seerr ("5/7", "0/" = no limit, "default"), so it is only sent when it changes. */
+    private const PROP_SEERR_QUOTA = 'seerr_quota';
 
     /** Paymenter configurable option (its environment variable) that buys the Seerr add-on. */
     public const SEERR_OPTION = 'seerr';
@@ -1779,11 +1782,45 @@ HTML;
     /** Bought as an option on the subscription, or included in the product. */
     public function wantsSeerr(array $productSettings, array $properties): bool
     {
-        if ($this->truthy($productSettings['seerr_included'] ?? false)) {
-            return true;
+        return $this->seerrPlan($productSettings, $properties) !== null;
+    }
+
+    /**
+     * What the "seerr" option's value means: null for no Seerr, otherwise
+     * the request limit ([limit, days], null = Seerr's defaults, limit 0 =
+     * no limit):
+     *
+     *   no / nej / 0      no Seerr
+     *   yes / ja / 1      Seerr, with Seerr's default limits
+     *   5                 5 movies and 5 TV seasons a week
+     *   10/30             10 of each per 30 days
+     *   unlimited         no limit
+     *
+     * @return array{limit: ?int, days: ?int}|null
+     */
+    public function seerrPlan(array $productSettings, array $properties): ?array
+    {
+        $value = strtolower(trim((string) ($properties[self::SEERR_OPTION] ?? '')));
+        $default = ['limit' => null, 'days' => null];
+
+        if (in_array($value, ['ja', 'yes', 'y', '1', 'true', 'on'], true)) {
+            return $default;
+        }
+        if (in_array($value, ['unlimited', 'ubegrænset', 'ubegraenset'], true)) {
+            return ['limit' => 0, 'days' => null];
+        }
+        if (preg_match('#^(\d+)\s*(?:/\s*(\d+))?$#', $value, $match) && (int) $match[1] > 0) {
+            return ['limit' => (int) $match[1], 'days' => isset($match[2]) && (int) $match[2] > 0 ? (int) $match[2] : 7];
         }
 
-        return in_array(strtolower(trim((string) ($properties[self::SEERR_OPTION] ?? ''))), ['ja', 'yes', 'y', '1', 'true', 'on'], true);
+        // No (or no option): only if the product includes Seerr.
+        return $this->truthy($productSettings['seerr_included'] ?? false) ? $default : null;
+    }
+
+    /** "5/7", "0/" or "default": the plan as stored on the service. */
+    private function quotaKey(array $plan): string
+    {
+        return $plan['limit'] === null ? 'default' : $plan['limit'] . '/' . ($plan['days'] ?? '');
     }
 
     /**
@@ -1813,6 +1850,7 @@ HTML;
                 $seerr->deleteUser($managed);
                 $this->setProperty($service, self::PROP_SEERR_USER, '', null);
                 $this->setProperty($service, self::PROP_SEERR_SAVED_PERMISSIONS, '', null);
+                $this->setProperty($service, self::PROP_SEERR_QUOTA, '', null);
             }
 
             return;
@@ -1821,7 +1859,9 @@ HTML;
         if ($managed && !$seerr->userExists($managed)) {
             $managed = 0; // removed in Seerr by hand: import again
             $this->setProperty($service, self::PROP_SEERR_SAVED_PERMISSIONS, '', null);
+            $this->setProperty($service, self::PROP_SEERR_QUOTA, '', null);
             $properties[self::PROP_SEERR_SAVED_PERMISSIONS] = null;
+            $properties[self::PROP_SEERR_QUOTA] = null;
         }
 
         if (!$managed) {
@@ -1873,6 +1913,18 @@ HTML;
         } elseif ($state === 'active' && $saved !== null && $saved !== '') {
             $seerr->setPermissions($managed, (int) $saved);
             $this->setProperty($service, self::PROP_SEERR_SAVED_PERMISSIONS, '', null);
+        }
+
+        // The request limit the customer bought, sent only when it changes.
+        if ($state === 'active') {
+            $plan = $this->seerrPlan($productSettings, $properties);
+            $key = $this->quotaKey($plan);
+            // Nothing stored means Seerr's defaults, as a freshly imported user has.
+            $stored = (string) ($properties[self::PROP_SEERR_QUOTA] ?? '');
+            if (($stored === '' ? 'default' : $stored) !== $key) {
+                $seerr->setQuota($managed, $plan['limit'], $plan['days']);
+                $this->setProperty($service, self::PROP_SEERR_QUOTA, 'Seerr request limit', $key);
+            }
         }
     }
 
@@ -3336,6 +3388,14 @@ HTML;
         if ($endsAt !== null) {
             $actions[] = ['type' => 'text', 'label' => self::t('Trial'), 'text' => self::t(':remaining – ends :date', ['remaining' => $this->remainingText($endsAt - time()), 'date' => date(self::t('M j, Y \a\t H:i'), $endsAt)])];
             $watch[] = ['type' => 'button', 'label' => self::t('Continue with a subscription'), 'url' => $this->shopUrl()];
+        }
+
+        $quota = (string) ($properties[self::PROP_SEERR_QUOTA] ?? '');
+        if (!empty($properties[self::PROP_SEERR_USER]) && $quota !== '' && $quota !== 'default') {
+            [$limit, $days] = array_pad(explode('/', $quota, 2), 2, '');
+            $actions[] = ['type' => 'text', 'label' => self::t('Requests'), 'text' => (int) $limit === 0
+                ? self::t('Unlimited')
+                : self::t(':count movies and :count TV seasons every :days days', ['count' => (int) $limit, 'days' => (int) $days])];
         }
 
         $seerrUrl = trim((string) $this->config('seerr_public_url'));

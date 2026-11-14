@@ -1333,9 +1333,11 @@ test('seerr: add-on bought later through an upgrade, then dropped again', functi
 
 test('seerr: a customer who already had a Seerr account is left alone', function () {
     $service = seerrCustomer(addOn: true);
+    $service->configs = ['seerr' => '5'];
     stub('/_test/set', ['seerr' => ['users' => [['id' => 1, 'jellyfinUserId' => 'jf-owner', 'permissions' => 2], ['id' => 7, 'jellyfinUserId' => 'jf-mette', 'permissions' => 32]], 'next_id' => 8]]);
     seerrSync($service, 'active');
     ok(!isset($service->propertyArray()['seerr_user_id']), 'not taken over');
+    same(0, quotaPosts(), 'and never given a request limit');
     seerrSync($service, 'ended');
     same(2, count(seerrUsers()), 'their own account is not deleted');
 });
@@ -1430,6 +1432,101 @@ test('discord login: the button escapes what it prints and shows the terms when 
     ok(str_contains($html, '>terms</a>'), 'terms');
     ok(!str_contains($html, '"><script>'), 'escaped');
     ok(!str_contains(ext()->discordLoginButton('https://x/login', ''), 'terms'), 'no terms line without a terms URL');
+});
+
+/* ---------- Seerr request packages ---------- */
+
+function seerrPlanFor(string $value, array $productSettings = []): ?array
+{
+    return ext()->seerrPlan($productSettings, $value === '' ? [] : ['seerr' => $value]);
+}
+
+function seerrUser(int $id): array
+{
+    foreach (seerrUsers() as $user) {
+        if ($user['id'] === $id) {
+            return $user;
+        }
+    }
+    throw new RuntimeException("no Seerr user $id");
+}
+
+function quotaPosts(): int
+{
+    return count(array_filter(state()['requests'], fn ($r) => $r['method'] === 'POST' && str_ends_with($r['path'], '/settings/main')));
+}
+
+test('seerr packages: the option\'s value is read as a request limit', function () {
+    $default = ['limit' => null, 'days' => null];
+    same(null, seerrPlanFor('no'), 'no');
+    same(null, seerrPlanFor('nej'), 'nej');
+    same(null, seerrPlanFor(''), 'nothing chosen');
+    same(null, seerrPlanFor('typo'), 'unknown means no');
+    same($default, seerrPlanFor('yes'), 'yes: Seerr\'s defaults');
+    same($default, seerrPlanFor('1'), '1 is yes, as before');
+    same(['limit' => 1, 'days' => 7], seerrPlanFor('1/7'), 'one a week');
+    same(['limit' => 5, 'days' => 7], seerrPlanFor('5'), 'a number: per week');
+    same(['limit' => 10, 'days' => 30], seerrPlanFor('10/30'), 'per 30 days');
+    same(['limit' => 0, 'days' => null], seerrPlanFor('unlimited'), 'no limit');
+    same($default, seerrPlanFor('', ['seerr_included' => true]), 'included in the product');
+    same(['limit' => 5, 'days' => 7], seerrPlanFor('5', ['seerr_included' => true]), 'included, with a package chosen');
+});
+
+test('seerr packages: the bought limit is set in Seerr, and the customer\'s own settings are kept', function () {
+    $service = seerrCustomer(addOn: true);
+    $service->configs = ['seerr' => '5'];
+    seerrSync($service, 'active');
+
+    $user = seerrUser((int) $service->propertyArray()['seerr_user_id']);
+    same([5, 7, 5, 7], [$user['movieQuotaLimit'], $user['movieQuotaDays'], $user['tvQuotaLimit'], $user['tvQuotaDays']], 'movies and TV');
+    same(['mette', 'mette@example.com'], [$user['username'], $user['email']], 'name and e-mail kept');
+    same(['locale' => 'da', 'discoverRegion' => 'DK', 'streamingRegion' => 'DK', 'originalLanguage' => 'da', 'watchlistSyncMovies' => true, 'watchlistSyncTv' => false],
+        $user['settings'], 'their own settings kept');
+});
+
+test('seerr packages: sent only when it changes: up to unlimited, back to plain yes', function () {
+    $service = seerrCustomer(addOn: true);
+    seerrSync($service, 'active');
+    same(0, quotaPosts(), 'plain yes on a new account: Seerr\'s defaults, nothing to send');
+
+    $service->configs = ['seerr' => '5'];
+    seerrSync($service, 'active');
+    seerrSync($service, 'active');
+    same(1, quotaPosts(), 'set once, not every hour');
+
+    $service->configs = ['seerr' => 'unlimited'];
+    seerrSync($service, 'active');
+    $id = (int) $service->propertyArray()['seerr_user_id'];
+    same(0, seerrUser($id)['movieQuotaLimit'], 'unlimited');
+
+    $service->configs = ['seerr' => 'yes'];
+    seerrSync($service, 'active');
+    same([null, null], [seerrUser($id)['movieQuotaLimit'], seerrUser($id)['movieQuotaDays']], 'back to Seerr\'s defaults');
+    same(3, quotaPosts(), 'three changes, three calls');
+});
+
+test('seerr packages: the client area shows the limit', function () {
+    $service = seerrCustomer(addOn: true);
+    $service->configs = ['seerr' => '10/30'];
+    seerrSync($service, 'active');
+    $labels = labels(ext(seerrSettings())->getActions($service, settings(), ExtensionHelperProps($service)));
+    ok(in_array('text:Requests=10 movies and 10 TV seasons every 30 days', $labels, true), json_encode($labels));
+
+    $service->configs = ['seerr' => 'unlimited'];
+    seerrSync($service, 'active');
+    $labels = labels(ext(seerrSettings())->getActions($service, settings(), ExtensionHelperProps($service)));
+    ok(in_array('text:Requests=Unlimited', $labels, true), json_encode($labels));
+    same('Anmodninger', inLocale('da', fn () => Wizarr::t('Requests')), 'in Danish too');
+});
+
+test('seerr packages: a suspended customer keeps the limit, and it is not sent again when they pay', function () {
+    $service = seerrCustomer(addOn: true);
+    $service->configs = ['seerr' => '5'];
+    seerrSync($service, 'active');
+    seerrSync($service, 'suspended');
+    seerrSync($service, 'active');
+    same(1, quotaPosts(), 'one call in all');
+    same(5, seerrUser((int) $service->propertyArray()['seerr_user_id'])['movieQuotaLimit'], 'still 5');
 });
 
 /* ---------- Jellyfin, Emby or both: one invitation per server ---------- */

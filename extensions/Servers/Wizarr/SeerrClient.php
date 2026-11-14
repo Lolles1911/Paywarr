@@ -79,6 +79,44 @@ class SeerrClient
         $this->call('post', '/user/' . $id . '/settings/permissions', ['permissions' => $permissions]);
     }
 
+    /**
+     * The user's own request limits: [limit, days], each null when Seerr's
+     * defaults apply. Movies and TV are set alike, so the movie values are read.
+     *
+     * @return array{0: ?int, 1: ?int}
+     */
+    public function quota(int $id): array
+    {
+        $settings = $this->call('get', '/user/' . $id . '/settings/main') ?? [];
+
+        return [
+            isset($settings['movieQuotaLimit']) ? (int) $settings['movieQuotaLimit'] : null,
+            isset($settings['movieQuotaDays']) ? (int) $settings['movieQuotaDays'] : null,
+        ];
+    }
+
+    /**
+     * Sets how many movies and how many TV seasons the user may request per
+     * $days days. null = Seerr's defaults; limit 0 = no limit.
+     *
+     * Seerr saves this together with the user's name, e-mail and other
+     * settings, and empties whatever is not sent, so those are read first and
+     * sent back unchanged.
+     */
+    public function setQuota(int $id, ?int $limit, ?int $days): void
+    {
+        $current = $this->call('get', '/user/' . $id . '/settings/main') ?? [];
+        $keep = array_intersect_key($current, array_flip([
+            'username', 'email', 'locale', 'discoverRegion', 'streamingRegion', 'originalLanguage', 'watchlistSyncMovies', 'watchlistSyncTv',
+        ]));
+        $this->call('post', '/user/' . $id . '/settings/main', $keep + [
+            'movieQuotaLimit' => $limit,
+            'movieQuotaDays' => $days,
+            'tvQuotaLimit' => $limit,
+            'tvQuotaDays' => $days,
+        ]);
+    }
+
     /** Deletes the user and, as Seerr does, their requests. Gone already is fine. */
     public function deleteUser(int $id): void
     {

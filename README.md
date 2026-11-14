@@ -653,12 +653,38 @@ deleted when the add-on ends. Clean them up once in Seerr before you start.
    - Environment Variable: **`seerr`**
    - Products: your subscription
    - Options: **No** (env `no`, price 0) and **Yes** (env `yes`, your price per
-     period). The Danish `nej`/`ja` work too.
+     period). The Danish `nej`/`ja` work too. To sell request packages instead
+     of a plain Yes, see *Request packages* below.
 7. If a product should always include Seerr (e.g. a premium plan), tick
    **Seerr included** on the product instead.
 
 Customers with the add-on get the button **"Request movies and shows"** in the
 client area.
+
+### Request packages
+
+Instead of a plain Yes, the `seerr` option can sell packages with a limit on
+how much the customer may request, e.g. a cheap one and an unlimited one:
+
+| Option | Environment variable | The customer may request |
+|---|---|---|
+| No | `no` | (no Seerr) |
+| 5 a week | `5` | 5 movies and 5 TV seasons every 7 days |
+| 10 a month | `10/30` | 10 movies and 10 TV seasons every 30 days |
+| Unlimited | `unlimited` | as much as they like |
+| Yes | `yes` | what Seerr's own default limits allow |
+
+The number before `/` is the limit, the one after it the days (7 when left
+out); write a single request a week as `1/7`, since `1` means Yes. Movies and
+TV get the same limit, and Seerr counts each TV season as one request.
+
+- The limit is set on the customer's own Seerr account and shown in the
+  client area ("Requests: 5 movies and 5 TV seasons every 7 days").
+- Changing package (upgrade/downgrade) changes the limit at once; nothing else
+  about the account changes.
+- The customer's own Seerr settings (language, region, watchlist sync) are
+  kept.
+- Seerr's default limits, for **Yes**, are under Seerr → Settings → Users.
 
 If it doesn't work, run `tools/seerr-check.php` (see *Troubleshooting*).
 Typically `http://` or the whole internal address is missing, or the "Yes"
@@ -816,7 +842,7 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-163 scenarios run the extension through the whole lifecycle against
+168 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -824,7 +850,8 @@ subscription, the "your access is ready" box, the client area, an expired link,
 password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
 and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
-Emby or both with one invitation each (including switching later), and the
+Emby or both with one invitation each (including switching later), Seerr
+request packages, and the
 languages (English, Danish, and that every text in the code has a Danish
 translation).
 

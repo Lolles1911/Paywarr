@@ -78,8 +78,10 @@ foreach ($user->services()->with(['product.settings', 'product.server'])->get() 
     echo '  ' . ($option === null ? '-     ' : 'OK    ') . 'configurable option "' . Wizarr::SEERR_OPTION . '": '
         . ($option === null ? 'not on this service (environment variable of the option must be "seerr")' : '"' . $option . '"') . PHP_EOL;
     echo '  ' . (($productSettings['seerr_included'] ?? false) ? 'OK    ' : '-     ') . 'Seerr included in product: ' . (($productSettings['seerr_included'] ?? false) ? 'yes' : 'no') . PHP_EOL;
-    $wants = $extension->wantsSeerr($productSettings, $properties);
-    echo '  ' . ($wants ? 'OK    ' : 'FAIL  ') . 'gets Seerr: ' . ($wants ? 'yes' : 'NO - the chosen value\'s environment variable must be "yes" (or "ja")') . PHP_EOL;
+    $plan = $extension->seerrPlan($productSettings, $properties);
+    $wants = $plan !== null;
+    $limit = $plan === null ? '' : ($plan['limit'] === null ? ", Seerr's default request limits" : ($plan['limit'] === 0 ? ', unlimited requests' : ', ' . $plan['limit'] . ' requests every ' . $plan['days'] . ' days'));
+    echo '  ' . ($wants ? 'OK    ' : 'FAIL  ') . 'gets Seerr: ' . ($wants ? 'yes' . $limit : 'NO - the chosen value\'s environment variable must be "yes", a package like "5" or "10/30", or "unlimited"') . PHP_EOL;
 
     $users = (string) ($properties['wizarr_users'] ?? '');
     echo '  ' . ($users === '' ? 'FAIL  ' : 'OK    ') . 'media server user recorded: ' . ($users ?: 'none yet - has the customer created their user? Opening the subscription in the client area records it') . PHP_EOL;
