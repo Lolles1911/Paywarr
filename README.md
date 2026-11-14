@@ -157,7 +157,7 @@ described further down.
 | Libraries | Empty = the server's default |
 | Invitation link is valid for | How long the customer has to create their user |
 | Access expires after (days) | **Leave empty for subscriptions.** Only for one-time-paid products |
-| Where customers watch | Optional. Becomes a button in the client area |
+| Where customers watch | Optional. Becomes a button in the client area. With several media servers, each server's *External URL* in Wizarr is used instead (see *Jellyfin, Emby or both*) |
 | Trial: days | Only on a trial product; see *Trials* |
 | Seerr included | See *Seerr as a paid add-on* |
 | Discord role while active | See *Discord roles* |
@@ -752,7 +752,9 @@ its own link.
 
 **Setup:**
 
-1. Add and verify both servers in Wizarr (**Settings → Servers**).
+1. Add and verify both servers in Wizarr (**Settings → Servers**), each with
+   its **External URL**: the address customers open it on. It becomes the
+   "Open Jellyfin" / "Open Emby" button in the client area.
 2. On the product, select both under **Media server**. Choose libraries of
    both under **Libraries** if you like: each invitation only takes its own
    server's.
@@ -775,7 +777,9 @@ gets every server on the product.
 - The email and the client area have a link per server ("Create your user on
   Emby"), and the box at the bottom of the page shows the next one still
   waiting.
-- Once the users exist: a **Reset password on …** button per server.
+- Once the users exist: an **Open …** and a **Reset password on …** button
+  per server. A server without an External URL in Wizarr gets no Open button
+  (on a product with only that server, *Where customers watch* is used).
 - An expired link is renewed for that server only.
 
 **Changing later** (upgrade/downgrade in the client area):
@@ -842,7 +846,7 @@ The two behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-168 scenarios run the extension through the whole lifecycle against
+171 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 and Seerr): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole

@@ -1603,18 +1603,54 @@ test('media: the client area shows each server\'s link, then a reset button per 
     redeem($data['invites'][0]['code'], 'mette');
     same([
         'text:Status=Active', 'text:Emby=Waiting for you to create your user', 'button:Create your user on Emby',
-        'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Open the media library',
+        'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Open Jellyfin',
     ], labels(ext()->getActions($service, mediaSettings(), props($service))), 'Jellyfin done, Emby waiting');
 
     redeem($data['invites'][1]['code'], 'mette');
     $actions = ext()->getActions($service, mediaSettings(), props($service));
     same([
-        'text:Status=Active', 'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Reset password on Emby', 'button:Open the media library',
+        'text:Status=Active', 'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Reset password on Emby', 'button:Open Jellyfin', 'button:Open Emby',
     ], labels($actions), 'both done');
+    same(['https://jellyfin.example.com', 'https://emby.example.com'], array_column(array_filter($actions, fn ($a) => str_starts_with($a['label'] ?? '', 'Open ')), 'url'), 'each to its own server');
     same(['resetPassword1', 'resetPassword2'], array_values(array_filter(array_column($actions, 'function'))), 'numbered buttons');
 
     ext()->resetPassword2($service, mediaSettings(), props($service));
     same(userOn(4)['id'], resetTokens()[0]['user_id'], 'button 2 resets the Emby user');
+});
+
+test('media: an Emby customer\'s "Open" button goes to Emby, never to the product\'s Jellyfin address', function () {
+    $service = chosen('emby');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    redeem($data['invite_code'], 'mette');
+    $actions = ext()->getActions($service, mediaSettings(), props($service));
+    $open = array_values(array_filter($actions, fn ($a) => ($a['url'] ?? '') !== '' && ($a['target'] ?? '') === '_blank'));
+    same(['https://emby.example.com'], array_column($open, 'url'), 'Emby\'s own address');
+});
+
+test('media: once the users exist, page views make no calls to Wizarr, with one server or two', function () {
+    foreach (['emby', 'both'] as $i => $choice) {
+        $service = chosen($choice, 20 + $i);
+        $data = ext()->createServer($service, mediaSettings(), props($service));
+        foreach ($data['invites'] as $invite) {
+            redeem($invite['code'], "user$i");
+        }
+        ext()->getActions($service, mediaSettings(), props($service)); // records the users
+
+        stub('/_test/clear-requests');
+        ext()->getActions($service, mediaSettings(), props($service));
+        same([], array_column(state()['requests'], 'path'), "no calls ($choice)");
+    }
+});
+
+test('media: a server without an address in Wizarr gets no "Open" button, rather than the wrong one', function () {
+    stub('/_test/set', ['servers' => [4 => ['external_url' => '']]]);
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    foreach ($data['invites'] as $invite) {
+        redeem($invite['code'], 'mette');
+    }
+    $labels = labels(ext()->getActions($service, mediaSettings(), props($service)));
+    ok(in_array('button:Open Jellyfin', $labels, true) && !in_array('button:Open Emby', $labels, true), json_encode($labels));
 });
 
 test('media: an expired Emby link is renewed on its own; Jellyfin is untouched', function () {

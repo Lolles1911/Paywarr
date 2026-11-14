@@ -57,7 +57,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.12.0',
+    version: '1.12.1',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -129,8 +129,11 @@ class Wizarr extends Server
     /** Per-server label ("Emby"), stored when its invitation is made. */
     private const PROP_SERVER_LABEL = 'wizarr_server';
 
+    /** Per-server "External URL" from Wizarr ("-" when it has none), stored so page views need no call. */
+    private const PROP_SERVER_URL = 'wizarr_server_url';
+
     /** Properties that exist once per media server (grant), see key(). */
-    private const GRANT_PROPS = ['wizarr_invitation_id', 'wizarr_invite_code', 'wizarr_invite_url', 'wizarr_invite_expires', 'wizarr_users', 'wizarr_server'];
+    private const GRANT_PROPS = ['wizarr_invitation_id', 'wizarr_invite_code', 'wizarr_invite_url', 'wizarr_invite_expires', 'wizarr_users', 'wizarr_server', 'wizarr_server_url'];
 
     /** How many servers can have their own buttons in the client area. */
     private const MAX_GRANT_BUTTONS = 4;
@@ -397,7 +400,8 @@ class Wizarr extends Server
                 'type' => 'text',
                 'required' => false,
                 'placeholder' => 'https://jellyfin.example.com',
-                'description' => 'Optional. Shown as a button in the client area once the user exists.',
+                'description' => 'Optional. Shown as a button in the client area once the user exists. With several media servers, '
+                    . 'each server\'s "External URL" in Wizarr is used instead.',
             ],
             [
                 'name' => 'trial_days',
@@ -541,9 +545,10 @@ class Wizarr extends Server
         $invites = [];
         $first = null;
         foreach ($invitations as $grant => $invitation) {
+            $grantSettings = ['login_url' => $this->withGrant((string) $grant, fn () => $this->watchUrl($settings))] + $settings;
             $data = ($invitation['code'] ?? '') === ''
-                ? $this->accessMailData($settings)
-                : $this->mailData($invitation, $settings, alreadyUsed: !empty($invitation['has_user']));
+                ? $this->accessMailData($grantSettings)
+                : $this->mailData($invitation, $grantSettings, alreadyUsed: !empty($invitation['has_user']));
             $first ??= $data;
             $server = $grant === '' ? '' : $this->withGrant((string) $grant, fn () => $this->grantServerName());
             $invites[] = ['server' => $server, 'url' => $data['invite_url'], 'code' => $data['invite_code']];
@@ -745,6 +750,7 @@ class Wizarr extends Server
         $this->rememberUsers($service, []);
         if ($this->grant !== '') {
             $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), '', null);
+            $this->setProperty($service, $this->key(self::PROP_SERVER_URL), '', null);
         }
     }
 
@@ -759,18 +765,18 @@ class Wizarr extends Server
      */
     public function getActions(Service $service, $settings, $properties): array
     {
-        $loginUrl = trim((string) ($settings['login_url'] ?? ''));
-        $watch = $loginUrl === '' ? [] : [[
-            'type' => 'button',
-            'label' => self::t('Open the media library'),
-            'url' => $loginUrl,
-            'target' => '_blank',
-        ]];
-
         $grants = $this->grantKeys($properties);
         if (count($grants) > 1) {
-            return $this->actionsForGrants($service, $settings, $properties, $grants, $watch);
+            return $this->actionsForGrants($service, $settings, $properties, $grants);
         }
+
+        $url = $this->withGrant($grants[0] ?? '', fn () => $this->watchUrl($settings, $properties, $service));
+        $watch = $url === '' ? [] : [[
+            'type' => 'button',
+            'label' => self::t('Open the media library'),
+            'url' => $url,
+            'target' => '_blank',
+        ]];
 
         return $this->withGrant($grants[0] ?? '', fn () => $this->actionsForGrant($service, $settings, $this->grantView($properties), $watch));
     }
@@ -836,9 +842,10 @@ class Wizarr extends Server
      * each server's invitation needs, then the usual "active" part for the
      * users that exist. Buttons are numbered by grant (renewInvitation2 ...).
      */
-    private function actionsForGrants(Service $service, array $settings, array $properties, array $grants, array $watch): array
+    private function actionsForGrants(Service $service, array $settings, array $properties, array $grants): array
     {
         $users = [];
+        $watch = [];
         $pending = [];
         $resets = [];
         foreach (array_slice($grants, 0, self::MAX_GRANT_BUTTONS) as $index => $grant) {
@@ -884,6 +891,13 @@ class Wizarr extends Server
             });
             $users = array_merge($users, $grantUsers);
             $pending = array_merge($pending, $entries);
+            // "Open Emby" once the user there exists.
+            if ($grantUsers) {
+                [$url, $label] = $this->withGrant($grant, fn () => [$this->watchUrl($settings, $properties, $service), $this->grantLabel($properties)]);
+                if ($url !== '') {
+                    $watch[] = ['type' => 'button', 'label' => $label !== '' ? self::t('Open :server', ['server' => $label]) : self::t('Open the media library'), 'url' => $url, 'target' => '_blank'];
+                }
+            }
             foreach ($grantUsers as $user) {
                 if ($user['type'] === '' || in_array($user['type'], self::RESETTABLE_SERVERS, true)) {
                     $label = $this->withGrant($grant, fn () => $this->grantLabel($properties));
@@ -998,7 +1012,7 @@ class Wizarr extends Server
 
         // Already has a user: a new link would be a second seat on one subscription.
         if ($status === 'used' || !empty($properties[self::PROP_USERS])) {
-            $loginUrl = trim((string) ($settings['login_url'] ?? ''));
+            $loginUrl = $this->watchUrl($settings, $properties, $service);
 
             return $loginUrl !== '' ? $loginUrl : rtrim((string) $this->config('public_url'), '/');
         }
@@ -1634,6 +1648,10 @@ HTML;
                     $label = (string) ($this->grantView($props)[self::PROP_SERVER_LABEL] ?? '');
                     if ($this->grant !== '' && $label !== '') {
                         $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), 'Wizarr media server (' . $label . ')', $label);
+                    }
+                    $address = (string) ($this->grantView($props)[self::PROP_SERVER_URL] ?? '');
+                    if ($this->grant !== '' && $address !== '') {
+                        $this->setProperty($service, $this->key(self::PROP_SERVER_URL), 'Wizarr media server address (' . $label . ')', $address);
                     }
                     $this->rememberUsers($other, []); // never delete them from the trial again
                 });
@@ -2752,7 +2770,7 @@ HTML;
 
     private string $grant = '';
 
-    /** @var array<int, array{name: string, type: string}>|null */
+    /** @var array<int, array{name: string, type: string, url: string}>|null */
     private ?array $serverInfo = null;
 
     /** The property name for the current grant. */
@@ -2800,7 +2818,7 @@ HTML;
                 continue;
             }
             foreach (self::GRANT_PROPS as $prop) {
-                if ($prop === self::PROP_SERVER_LABEL) {
+                if ($prop === self::PROP_SERVER_LABEL || $prop === self::PROP_SERVER_URL) {
                     continue; // a label alone is no grant
                 }
                 if ($name === $prop) {
@@ -2831,6 +2849,8 @@ HTML;
                 $this->serverInfo[(int) $server['id']] = [
                     'name' => (string) ($server['name'] ?? ''),
                     'type' => strtolower((string) ($server['server_type'] ?? '')),
+                    // "External URL" in Wizarr: where customers open this server.
+                    'url' => trim((string) ($server['external_url'] ?? '')),
                 ];
             }
         }
@@ -2913,6 +2933,36 @@ HTML;
         $label = (string) ($this->grantView($properties)[self::PROP_SERVER_LABEL] ?? '');
 
         return $label !== '' ? $label : ($this->grant === '' ? '' : 'server ' . $this->grant);
+    }
+
+    /**
+     * Where the customer watches on the current grant's server: the server's
+     * "External URL" in Wizarr. A subscription from before 1.11, or a server
+     * without one on a single-server product, uses "Where customers watch".
+     */
+    private function watchUrl(array $settings, array $properties = [], ?Service $service = null): string
+    {
+        $productUrl = trim((string) ($settings['login_url'] ?? ''));
+        if ($this->grant === '') {
+            return $productUrl;
+        }
+        // Stored with the invitation; asked once for grants made before that.
+        $stored = (string) ($this->grantView($properties)[self::PROP_SERVER_URL] ?? '');
+        if ($stored === '') {
+            try {
+                $stored = ($this->serverInfo()[(int) $this->grant]['url'] ?? '') ?: '-';
+                if ($service) {
+                    $this->setProperty($service, $this->key(self::PROP_SERVER_URL), 'Wizarr media server address (' . $this->grantServerName() . ')', $stored);
+                }
+            } catch (Throwable $e) {
+                $stored = '-';
+            }
+        }
+        if ($stored !== '-') {
+            return $stored;
+        }
+
+        return count($this->idList($settings['server_ids'] ?? null)) <= 1 ? $productUrl : '';
     }
 
     /** The current per-server grant's server name, from Wizarr. */
@@ -3099,6 +3149,7 @@ HTML;
         $this->setProperty($service, $this->key(self::PROP_INVITE_EXPIRES), 'Wizarr invite link expires' . $suffix, $invitation['expires'] ?? null);
         if ($this->grant !== '') {
             $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), 'Wizarr media server' . $suffix, $this->grantServerName());
+            $this->setProperty($service, $this->key(self::PROP_SERVER_URL), 'Wizarr media server address' . $suffix, ($this->serverInfo()[(int) $this->grant]['url'] ?? '') ?: '-');
         }
         $this->rememberUsers($service, []);
 
@@ -3141,6 +3192,7 @@ HTML;
         $this->setProperty($service, $this->key(self::PROP_INVITE_EXPIRES), '', null);
         if ($this->grant !== '' && !$this->parseUsers((string) ($this->grantView(ExtensionHelper::getServiceProperties($service))[self::PROP_USERS] ?? ''))) {
             $this->setProperty($service, $this->key(self::PROP_SERVER_LABEL), '', null);
+            $this->setProperty($service, $this->key(self::PROP_SERVER_URL), '', null);
         }
     }
 

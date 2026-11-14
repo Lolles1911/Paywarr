@@ -32,10 +32,10 @@ API_KEY = "stub-key"
 def fresh_state() -> dict:
     return {
         "servers": [
-            {"id": 1, "name": "Jellyfin", "server_type": "jellyfin", "verified": True, "offline": False},
+            {"id": 1, "name": "Jellyfin", "server_type": "jellyfin", "verified": True, "offline": False, "external_url": "https://jellyfin.example.com"},
             {"id": 2, "name": "Plex", "server_type": "plex", "verified": True, "offline": False},
             {"id": 3, "name": "Unverified", "server_type": "emby", "verified": False, "offline": False},
-            {"id": 4, "name": "Emby", "server_type": "emby", "verified": True, "offline": False},
+            {"id": 4, "name": "Emby", "server_type": "emby", "verified": True, "offline": False, "external_url": "https://emby.example.com"},
         ],
         "libraries": [
             {"id": 10, "name": "Film", "server_id": 1, "server_name": "Jellyfin", "enabled": True},
@@ -430,6 +430,8 @@ class Handler(BaseHTTPRequestHandler):
                     STATE[key] = body[key]
             if "offline" in body:
                 server_by_id(body["server_id"])["offline"] = body["offline"]
+            for server_id, fields in body.get("servers", {}).items():
+                server_by_id(int(server_id)).update(fields)
             if "next_user_id" in body:
                 STATE["next_user_id"] = body["next_user_id"]
             if "discord" in body:
