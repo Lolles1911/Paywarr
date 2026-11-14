@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.16.1',
+    version: '1.16.2',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -136,6 +136,9 @@ class Wizarr extends Server
 
     /** Per-server "External URL" from Wizarr ("-" when it has none), stored so page views need no call. */
     private const PROP_SERVER_URL = 'wizarr_server_url';
+
+    /** How long the servers' addresses from Wizarr are kept (seconds). */
+    private const SERVER_URLS_SECONDS = 600;
 
     /** Properties that exist once per media server (grant), see key(). */
     private const GRANT_PROPS = ['wizarr_invitation_id', 'wizarr_invite_code', 'wizarr_invite_url', 'wizarr_invite_expires', 'wizarr_users', 'wizarr_server', 'wizarr_server_url'];
@@ -3048,15 +3051,18 @@ HTML;
     private function serverInfo(): array
     {
         if ($this->serverInfo === null) {
-            $this->serverInfo = [];
+            // Filled only once Wizarr has answered: after a failed call the
+            // next one asks again instead of getting "no servers".
+            $info = [];
             foreach ($this->client()->servers() as $server) {
-                $this->serverInfo[(int) $server['id']] = [
+                $info[(int) $server['id']] = [
                     'name' => (string) ($server['name'] ?? ''),
                     'type' => strtolower((string) ($server['server_type'] ?? '')),
                     // "External URL" in Wizarr: where customers open this server.
-                    'url' => trim((string) ($server['external_url'] ?? '')),
+                    'url' => $this->webAddress((string) ($server['external_url'] ?? '')),
                 ];
             }
+            $this->serverInfo = $info;
         }
 
         return $this->serverInfo;
@@ -3146,27 +3152,51 @@ HTML;
      */
     private function watchUrl(array $settings, array $properties = [], ?Service $service = null): string
     {
-        $productUrl = trim((string) ($settings['login_url'] ?? ''));
+        $productUrl = $this->webAddress((string) ($settings['login_url'] ?? ''));
         if ($this->grant === '') {
             return $productUrl;
         }
-        // Stored with the invitation; asked once for grants made before that.
+        // Wizarr's current "External URL", so an address added or changed
+        // there shows up; the last one seen is kept for when Wizarr is down.
         $stored = (string) ($this->grantView($properties)[self::PROP_SERVER_URL] ?? '');
-        if ($stored === '') {
-            try {
-                $stored = ($this->serverInfo()[(int) $this->grant]['url'] ?? '') ?: '-';
-                if ($service) {
-                    $this->setProperty($service, $this->key(self::PROP_SERVER_URL), 'Wizarr media server address (' . $this->grantServerName() . ')', $stored);
-                }
-            } catch (Throwable $e) {
-                $stored = '-';
+        try {
+            $url = $this->serverUrls()[(int) $this->grant] ?? '';
+            if ($url !== '' && $url !== $stored && $service) {
+                $this->setProperty($service, $this->key(self::PROP_SERVER_URL), 'Wizarr media server address (' . $this->grantServerName() . ')', $url);
             }
+        } catch (Throwable $e) {
+            $url = $stored === '-' ? '' : $this->webAddress($stored);
         }
-        if ($stored !== '-') {
-            return $stored;
+        if ($url !== '') {
+            return $url;
         }
 
         return count($this->idList($settings['server_ids'] ?? null)) <= 1 ? $productUrl : '';
+    }
+
+    /**
+     * Each server's "External URL" in Wizarr, by server ID. Kept for
+     * SERVER_URLS_SECONDS, so page views don't ask Wizarr every time.
+     *
+     * @return array<int, string>
+     */
+    private function serverUrls(): array
+    {
+        $urls = Cache::get('paywarr:server-urls');
+        if (!is_array($urls)) {
+            $urls = array_map(fn ($server) => $server['url'], $this->serverInfo());
+            Cache::put('paywarr:server-urls', $urls, self::SERVER_URLS_SECONDS);
+        }
+
+        return $urls;
+    }
+
+    /** "emby.example.com" becomes "https://emby.example.com"; empty stays empty. */
+    private function webAddress(string $url): string
+    {
+        $url = trim($url);
+
+        return $url === '' || preg_match('~^[a-z][a-z0-9+.-]*://~i', $url) ? $url : 'https://' . ltrim($url, '/');
     }
 
     /** The current per-server grant's server name, from Wizarr. */

@@ -1854,6 +1854,25 @@ test('media: a server without an address in Wizarr gets no "Open" button, rather
     ok(in_array('button:Open Jellyfin', $labels, true) && !in_array('button:Open Emby', $labels, true), json_encode($labels));
 });
 
+test('media: an address added in Wizarr later shows up, with https:// added when it is missing', function () {
+    stub('/_test/set', ['servers' => [4 => ['external_url' => '']]]);
+    $service = chosen('both');
+    $data = ext()->createServer($service, mediaSettings(), props($service));
+    foreach ($data['invites'] as $invite) {
+        redeem($invite['code'], 'mette');
+    }
+    $open = fn (array $config = []) => array_column(array_filter(ext($config)->getActions($service, mediaSettings(), props($service)), fn ($a) => str_starts_with($a['label'] ?? '', 'Open ')), 'url', 'label');
+    same(['Open Jellyfin' => 'https://jellyfin.example.com'], $open(), 'no Emby address yet');
+
+    stub('/_test/set', ['servers' => [4 => ['external_url' => 'emby.example.net']]]);
+    same(['Open Jellyfin' => 'https://jellyfin.example.com'], $open(), 'kept for a while, so page views don\'t ask Wizarr');
+    \Illuminate\Support\Facades\Cache::$store = []; // ten minutes later
+    same(['Open Jellyfin' => 'https://jellyfin.example.com', 'Open Emby' => 'https://emby.example.net'], $open(), 'then it is there, as a full address');
+
+    \Illuminate\Support\Facades\Cache::$store = [];
+    same(['Open Jellyfin' => 'https://jellyfin.example.com', 'Open Emby' => 'https://emby.example.net'], $open(['host' => 'http://127.0.0.1:1']), 'Wizarr down: the last addresses seen');
+});
+
 test('media: an expired Emby link is renewed on its own; Jellyfin is untouched', function () {
     $service = chosen('both');
     $data = ext()->createServer($service, mediaSettings(), props($service));
