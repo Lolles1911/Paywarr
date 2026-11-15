@@ -592,6 +592,23 @@ class Wizarr extends Server
             'condition' => Auth::check() && Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== []),
         ]);
 
+        // The same in the top bar, plus a link to where the customer watches.
+        Event::listen('navigation', function () {
+            if (!Auth::check()) {
+                return [];
+            }
+            $items = [];
+            if (Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== [])) {
+                $items[] = ['name' => self::t('Requests'), 'url' => route('extensions.wizarr.requests'), 'icon' => 'ri-movie-2', 'priority' => 10];
+                $items[] = ['name' => self::t('Report a problem'), 'url' => route('extensions.wizarr.report'), 'icon' => 'ri-error-warning', 'priority' => 12];
+            }
+            if ($watch = $this->navWatchLink(Auth::user())) {
+                $items[] = ['name' => $watch['label'], 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 13];
+            }
+
+            return $items;
+        });
+
         if ($this->discordConfigured()) {
             // Under the login form, and under the sign-up form (themes that offer the
             // "auth.register" hook; Paymenter's default theme does not).
@@ -2430,6 +2447,60 @@ HTML;
      *
      * @return array<int, array{service: Service, ext: static, kind: string, user: ?int, label: string}>
      */
+    /**
+     * The top bar's "Open Silo" (or "Open Jellyfin"): the first "Open" button
+     * of the customer's active subscriptions, as their client area shows it.
+     * Kept for 10 minutes, as building it may ask Wizarr or Silo.
+     *
+     * @return array{label: string, url: string}|null
+     */
+    public function navWatchLink($user, ?iterable $services = null): ?array
+    {
+        if (!$user) {
+            return null;
+        }
+        $find = function () use ($user, $services) {
+            $services ??= Service::where('user_id', $user->id)->where('status', 'active')->with(['product.server', 'properties'])->orderBy('id')->get();
+            foreach ($services as $service) {
+                if (($service->status ?? '') !== 'active' || $service->product?->server?->extension !== 'Wizarr') {
+                    continue;
+                }
+                try {
+                    $settings = ExtensionHelper::settingsToArray($service->product->settings);
+                    $actions = $this->forServiceServer($service)->getActions($service, $settings, ExtensionHelper::getServiceProperties($service));
+                } catch (Throwable $e) {
+                    continue;
+                }
+                // The "Open ..." buttons; not "Create your user" or Seerr's "Request movies and shows".
+                $open = strtok(self::t('Open the media library'), ' ');
+                foreach ($actions as $action) {
+                    $label = (string) ($action['label'] ?? '');
+                    if (($action['type'] ?? '') === 'button' && !empty($action['url']) && str_starts_with($label, $open . ' ')) {
+                        if ($label === self::t('Open the media library')) {
+                            $label = $this->forServiceServer($service)->isSilo() ? self::t('Open :server', ['server' => 'Silo']) : self::t('Watch');
+                        }
+
+                        return ['label' => $label, 'url' => (string) $action['url']];
+                    }
+                }
+            }
+
+            return [];
+        };
+        if ($services !== null) {
+            return $find() ?: null;
+        }
+        // A customer whose user isn't created yet gets the link within a minute of creating it.
+        $key = 'wizarr:nav-watch:' . $user->id;
+        $link = Cache::get($key);
+        if (!is_array($link)) {
+            $link = $find();
+            Cache::put($key, $link, $link ? 600 : 60);
+        }
+
+        return $link ?: null;
+    }
+
     public function requestsSources($user, ?iterable $services = null): array
     {
         $sources = [];

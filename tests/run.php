@@ -2990,6 +2990,22 @@ test('Requests tab (Silo): read with the key, and "Request in Silo" opens the ti
     ok(str_contains($series, 'href="https://watch.example.com/title/series/1399"'), 'a partly available show opens in Silo too');
 });
 
+test('top bar: "Open Silo" once the customer has a user, not before; Danish too', function () {
+    global $STUB;
+    $pending = service(30);
+    $pending->status = 'active';
+    $pending->product = (object) ['server' => (object) ['id' => 9, 'extension' => 'Wizarr', 'settings' => ['backend' => 'silo', 'host' => $STUB . '/silo', 'public_url' => 'https://watch.example.com', 'api_key' => 'sa_full']], 'settings' => siloSettings()];
+    silo()->createServer($pending, siloSettings(), props($pending));
+    same(null, ext()->navWatchLink((object) ['id' => 1], [$pending]), 'invitation not used yet: no link (not "Create your user")');
+
+    [$service] = siloWithRequests('', 31);
+    $service->status = 'active';
+    same(['label' => 'Open Silo', 'url' => 'https://watch.example.com'], ext()->navWatchLink((object) ['id' => 1], [$pending, $service]), 'the first subscription with a user');
+    same('Åbn Silo', inLocale('da', fn () => ext()->navWatchLink((object) ['id' => 1], [$service]))['label'], 'Danish');
+    $service->status = 'suspended';
+    same(null, ext()->navWatchLink((object) ['id' => 1], [$service]), 'not while suspended');
+});
+
 test('Requests tab: not ready before the customer has a user, and "every active customer" gives everyone requests', function () {
     $service = reportCustomer('', 70);
     same([], ext()->requestsSources((object) ['id' => 1], [$service]), 'no requests bought: no tab');
