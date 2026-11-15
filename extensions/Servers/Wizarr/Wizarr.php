@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.20.3',
+    version: '1.21.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -580,10 +580,10 @@ class Wizarr extends Server
             'route' => 'extensions.wizarr.requests',
             'icon' => 'ri-movie-2',
             'priority' => 29,
-            'condition' => Auth::check() && Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== []),
+            'condition' => Auth::check() && Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== []),
         ]);
 
-        // "Report a problem", for customers with requests.
+        // "Report a problem", for every customer with a subscription to report from.
         Event::listen('navigation.dashboard', fn () => [
             'name' => self::t('Report a problem'),
             'route' => 'extensions.wizarr.report',
@@ -591,6 +591,25 @@ class Wizarr extends Server
             'priority' => 30,
             'condition' => Auth::check() && Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== []),
         ]);
+
+        // The same in the top bar, plus a link to where the customer watches.
+        Event::listen('navigation', function () {
+            if (!Auth::check()) {
+                return [];
+            }
+            $items = [];
+            if (Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== [])) {
+                $items[] = ['name' => self::t('Requests'), 'url' => route('extensions.wizarr.requests'), 'icon' => 'ri-movie-2', 'priority' => 10];
+            }
+            if (Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== [])) {
+                $items[] = ['name' => self::t('Report a problem'), 'url' => route('extensions.wizarr.report'), 'icon' => 'ri-error-warning', 'priority' => 12];
+            }
+            if ($watch = $this->navWatchLink(Auth::user())) {
+                $items[] = ['name' => $watch['label'], 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 13];
+            }
+
+            return $items;
+        });
 
         if ($this->discordConfigured()) {
             // Under the login form, and under the sign-up form (themes that offer the
@@ -2430,10 +2449,64 @@ HTML;
      *
      * @return array<int, array{service: Service, ext: static, kind: string, user: ?int, label: string}>
      */
+    /**
+     * The top bar's "Open Silo" (or "Open Jellyfin"): the first "Open" button
+     * of the customer's active subscriptions, as their client area shows it.
+     * Kept for 10 minutes, as building it may ask Wizarr or Silo.
+     *
+     * @return array{label: string, url: string}|null
+     */
+    public function navWatchLink($user, ?iterable $services = null): ?array
+    {
+        if (!$user) {
+            return null;
+        }
+        $find = function () use ($user, $services) {
+            $services ??= Service::where('user_id', $user->id)->where('status', 'active')->with(['product.server', 'properties'])->orderBy('id')->get();
+            foreach ($services as $service) {
+                if (($service->status ?? '') !== 'active' || $service->product?->server?->extension !== 'Wizarr') {
+                    continue;
+                }
+                try {
+                    $settings = ExtensionHelper::settingsToArray($service->product->settings);
+                    $actions = $this->forServiceServer($service)->getActions($service, $settings, ExtensionHelper::getServiceProperties($service));
+                } catch (Throwable $e) {
+                    continue;
+                }
+                // The "Open ..." buttons; not "Create your user" or Seerr's "Request movies and shows".
+                $open = strtok(self::t('Open the media library'), ' ');
+                foreach ($actions as $action) {
+                    $label = (string) ($action['label'] ?? '');
+                    if (($action['type'] ?? '') === 'button' && !empty($action['url']) && str_starts_with($label, $open . ' ')) {
+                        if ($label === self::t('Open the media library')) {
+                            $label = $this->forServiceServer($service)->isSilo() ? self::t('Open :server', ['server' => 'Silo']) : self::t('Watch');
+                        }
+
+                        return ['label' => $label, 'url' => (string) $action['url']];
+                    }
+                }
+            }
+
+            return [];
+        };
+        if ($services !== null) {
+            return $find() ?: null;
+        }
+        // A customer whose user isn't created yet gets the link within a minute of creating it.
+        $key = 'wizarr:nav-watch:' . $user->id;
+        $link = Cache::get($key);
+        if (!is_array($link)) {
+            $link = $find();
+            Cache::put($key, $link, $link ? 600 : 60);
+        }
+
+        return $link ?: null;
+    }
+
     public function requestsSources($user, ?iterable $services = null): array
     {
         $sources = [];
-        foreach ($this->reportSources($user, $services) as $source) {
+        foreach ($this->librarySources($user, $services, true) as $source) {
             $properties = ExtensionHelper::getServiceProperties($source['service']);
             if ($source['kind'] === 'silo') {
                 $silo = array_values(array_filter($source['ext']->allUsers($properties, resolve: false), fn ($u) => $u['type'] === 'silo'));
@@ -2911,12 +2984,19 @@ HTML;
     ];
 
     /**
-     * Where this customer can report from: one entry per active subscription
-     * with requests, on Silo (its catalog) or with Seerr (titles on the server).
+     * Where this customer can report from: one entry per active subscription,
+     * on Silo (its catalog) or with Seerr (titles on the server). Without a
+     * Seerr, a Wizarr server has nothing to search, so it isn't one.
      *
      * @return array<int, array{service: Service, ext: static, kind: string}>
      */
     public function reportSources($user, ?iterable $services = null): array
+    {
+        return $this->librarySources($user, $services, false);
+    }
+
+    /** As reportSources(), only subscriptions with requests (the "requests" option, "Requests included", or everyone). */
+    private function librarySources($user, ?iterable $services, bool $withRequests): array
     {
         if (!$user) {
             return [];
@@ -2928,7 +3008,7 @@ HTML;
                 continue;
             }
             $ext = $this->forServiceServer($service);
-            if ($ext->seerrPlan(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service)) === null) {
+            if ($withRequests && $ext->seerrPlan(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service)) === null) {
                 continue;
             }
             if ($ext->isSilo()) {

@@ -738,8 +738,8 @@ option doesn't have the environment variable `yes`/`ja`.
 
 ## The Requests tab
 
-Customers with requests get **Requests** in the client area menu
-(`/wizarr/requests`), a request page inside Paymenter:
+Customers with requests get **Requests** in the client area menu and the top
+bar (`/wizarr/requests`), a request page inside Paymenter:
 
 - **What is left** of their limit, e.g. "3 of 10 requests left · 30 days" (with
   Seerr movies and TV seasons apart, as Seerr counts them).
@@ -790,10 +790,27 @@ invitation is sent. They can only be bought on top of a package with a limit:
 refuses a top-up without a package. A refunded top-up comes off again. With
 Seerr the extra requests count for movies and for TV seasons alike.
 
+## In the top bar
+
+Signed-in customers get links next to Home and Shop (in the menu on a phone):
+
+| Link | Who sees it |
+|---|---|
+| **Requests** | Customers with requests (see *The Requests tab*) |
+| **Report a problem** | Every customer with an active subscription |
+| **Open Silo** (or **Open Jellyfin** …) | Customers who have created their user: the same address as the "Open" button on their subscription, their first one if they have several |
+
+[Paywarr Stats](https://github.com/Lolles1911/Paywarr-stats) adds **My stats**
+there too. Paymenter shows them as plain links; how they look is up to the
+theme.
+
 ## Report a problem with a movie or show
 
-Customers with requests (Seerr, or Silo's own) get **Report a problem** in the
-client area menu, at `/wizarr/report`:
+Every customer with an active subscription gets **Report a problem** in the
+client area menu and the top bar, at `/wizarr/report`, with or without
+requests. They search their library, so it needs something to search: on a
+Silo server that is always there; on a Wizarr server (Jellyfin, Emby, Plex) it
+needs a Seerr set up on the server, or the link doesn't show.
 
 1. They search their library and choose the title: on Silo its catalog, with
    Seerr only what is on the media server (available or partly available).

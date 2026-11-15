@@ -3,6 +3,16 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.21.0 (2026-11-15)
+
+- **New: links in the top bar.** Signed-in customers get **Requests**,
+  **Report a problem** and **Open Silo** (or Open Jellyfin …) next to Home
+  and Shop, and in the menu on a phone. "Open" leads where the "Open" button on
+  their subscription does, once they have created their user.
+- **Report a problem is for every customer** with an active subscription, not
+  only those with requests. On a Wizarr server it needs a Seerr to search the
+  library. The Requests tab stays for customers with requests.
+
 ## 1.20.3 (2026-11-15)
 
 - **Fixed:** the posters on "Report a problem" were cut to a thin strip with

@@ -2839,7 +2839,7 @@ function reportSources(array $services): array
     return ext()->reportSources((object) ['id' => 1], $services);
 }
 
-test('reports: only active subscriptions with requests can report, on Silo or with Seerr', function () {
+test('reports: every active subscription can report, on Silo or with Seerr; the Requests tab only with requests', function () {
     [$silo] = siloWithRequests('10/30', 1);
     $silo->status = 'active';
     [$noRequests] = siloWithRequests('', 2);
@@ -2847,7 +2847,11 @@ test('reports: only active subscriptions with requests can report, on Silo or wi
     $seerr = reportCustomer('yes', 3);
     $suspended = reportCustomer('yes', 4, 'suspended');
     $plain = reportCustomer('', 5);
-    same([[1, 'silo'], [3, 'seerr']], array_map(fn ($s) => [$s['service']->id, $s['kind']], reportSources([$silo, $noRequests, $seerr, $suspended, $plain])), 'Silo with requests, and Seerr with requests');
+    same([[1, 'silo'], [2, 'silo'], [3, 'seerr'], [5, 'seerr']], array_map(fn ($s) => [$s['service']->id, $s['kind']], reportSources([$silo, $noRequests, $seerr, $suspended, $plain])), 'with or without requests; not suspended');
+    same([1, 3], array_map(fn ($s) => $s['service']->id, ext()->requestsSources((object) ['id' => 1], [$silo, $noRequests, $seerr, $suspended, $plain])), 'the Requests tab: only with requests');
+    $noSeerr = reportCustomer('', 6);
+    unset($noSeerr->product->server->settings['seerr_url'], $noSeerr->product->server->settings['seerr_api_key']);
+    same([], reportSources([$noSeerr]), 'a Wizarr server without Seerr has nothing to search');
 });
 
 test('reports: search finds titles in the customer\'s libraries; Seerr only what is on the server', function () {
@@ -2988,6 +2992,22 @@ test('Requests tab (Silo): read with the key, and "Request in Silo" opens the ti
     same([], siloState()['sessions'], 'and no sign-in as the account');
     $series = ext()->requestsHtml(['rows' => [['key' => 'trending_series', 'items' => [['type' => 'tv', 'tmdb' => 1399, 'title' => 'Dragon Throne', 'year' => 2011, 'poster' => null, 'state' => 'partial']]]]] + $data + ['libraries' => []]);
     ok(str_contains($series, 'href="https://watch.example.com/title/series/1399"'), 'a partly available show opens in Silo too');
+});
+
+test('top bar: "Open Silo" once the customer has a user, not before; Danish too', function () {
+    global $STUB;
+    $pending = service(30);
+    $pending->status = 'active';
+    $pending->product = (object) ['server' => (object) ['id' => 9, 'extension' => 'Wizarr', 'settings' => ['backend' => 'silo', 'host' => $STUB . '/silo', 'public_url' => 'https://watch.example.com', 'api_key' => 'sa_full']], 'settings' => siloSettings()];
+    silo()->createServer($pending, siloSettings(), props($pending));
+    same(null, ext()->navWatchLink((object) ['id' => 1], [$pending]), 'invitation not used yet: no link (not "Create your user")');
+
+    [$service] = siloWithRequests('', 31);
+    $service->status = 'active';
+    same(['label' => 'Open Silo', 'url' => 'https://watch.example.com'], ext()->navWatchLink((object) ['id' => 1], [$pending, $service]), 'the first subscription with a user');
+    same('Åbn Silo', inLocale('da', fn () => ext()->navWatchLink((object) ['id' => 1], [$service]))['label'], 'Danish');
+    $service->status = 'suspended';
+    same(null, ext()->navWatchLink((object) ['id' => 1], [$service]), 'not while suspended');
 });
 
 test('Requests tab: not ready before the customer has a user, and "every active customer" gives everyone requests', function () {
