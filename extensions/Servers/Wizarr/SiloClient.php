@@ -346,19 +346,6 @@ class SiloClient
         return $rows;
     }
 
-    /** A series: title, year, poster, and its seasons: number, name, episodes, state. */
-    public function requestSeasons(int $tmdb): array
-    {
-        $detail = $this->requestDetail('series', $tmdb) ?? [];
-
-        return ['title' => (string) ($detail['title'] ?? ''), 'year' => isset($detail['year']) ? (int) $detail['year'] : null, 'poster' => self::posterUrl($detail['poster_path'] ?? null), 'seasons' => array_map(fn ($season) => [
-            'number' => (int) $season['season_number'], 'name' => (string) ($season['name'] ?? ''), 'episodes' => (int) ($season['episode_count'] ?? 0),
-            'state' => !empty($season['requested']) && ($season['availability'] ?? '') !== 'available' ? 'requested' : match ($season['availability'] ?? '') {
-                'available' => 'available', 'partial' => 'partial', default => 'none',
-            },
-        ], $detail['seasons'] ?? [])];
-    }
-
     /** The account's own requests, newest first. */
     public function myRequests(int $id, int $count = 20): array
     {
@@ -386,64 +373,6 @@ class SiloClient
         }
 
         return $mine;
-    }
-
-    /**
-     * Requests a movie or a series' seasons as the account itself, so it is
-     * theirs in Silo: its limit, its name, Silo's approval rules. Silo has no
-     * "on behalf of" for API keys, so this signs in as the account for the one
-     * call (an impersonation session, in Silo's audit log) and signs out again.
-     */
-    public function createRequestAs(int $id, string $type, int $tmdb, array|string $seasons = 'all'): void
-    {
-        $mediaType = $type === 'tv' ? 'series' : 'movie';
-        $detail = $this->requestDetail($mediaType, $tmdb);
-        if (!$detail) {
-            throw new WizarrException('Silo does not know that title.', 404);
-        }
-        $body = ['media_type' => $mediaType, 'tmdb_id' => $tmdb, 'title' => (string) $detail['title']];
-        foreach (['year', 'poster_path', 'backdrop_path', 'overview', 'imdb_id', 'tvdb_id'] as $field) {
-            if (isset($detail[$field]) && $detail[$field] !== '' && $detail[$field] !== null) {
-                $body[$field] = $detail[$field];
-            }
-        }
-        if ($mediaType === 'series' && is_array($seasons) && $seasons) {
-            $body['seasons'] = array_values(array_map('intval', $seasons));
-        }
-
-        $session = $this->request('post-empty', '/api/v2/admin/users/' . $id . '/impersonate', retry: false);
-        $token = (string) ($session['access_token'] ?? '');
-        if ($token === '' || (string) ($session['user']['id'] ?? $id) !== (string) $id) {
-            throw new WizarrException('Silo did not open a session for account ' . $id . '.');
-        }
-        $as = ['Authorization' => 'Bearer ' . $token];
-        try {
-            $profile = '';
-            foreach ($this->request('get', '/api/v2/profiles', headers: $as)['items'] ?? [] as $candidate) {
-                if (!empty($candidate['is_primary'])) {
-                    $profile = (string) $candidate['id'];
-                }
-            }
-            $this->request('post', '/api/v2/requests', $body, retry: false, headers: $as + ['X-Profile-Id' => $profile]);
-        } finally {
-            try {
-                $this->request('post-empty', '/api/v2/auth/impersonation/end', retry: false, headers: $as);
-            } catch (Throwable $e) {
-                // The session ends by itself when its token expires.
-            }
-        }
-    }
-
-    private function requestDetail(string $mediaType, int $tmdb): ?array
-    {
-        try {
-            return $this->request('get', '/api/v2/requests/detail/' . $mediaType . '/' . $tmdb, headers: $this->asOwner());
-        } catch (WizarrException $e) {
-            if ($e->isNotFound()) {
-                return null;
-            }
-            throw $e;
-        }
     }
 
     /** Silo's request result as the tab shows it. */

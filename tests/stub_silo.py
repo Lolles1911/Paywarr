@@ -128,14 +128,8 @@ def handle(state: dict, method: str, path: str, query: dict, body, headers) -> t
     if method == "GET" and path.startswith("/img/"):
         return 200, {"image": path}, {"Content-Type": "image/jpeg"}
     if method == "POST" and len(parts) == 6 and parts[2:4] == ["admin", "users"] and parts[5] == "impersonate":
-        if body:
-            return (*problem(422, "validation_failed", "no body expected"), {})
-        acc = next((a for a in silo["accounts"] if a["id"] == parts[4]), None)
-        if not acc:
-            return (*problem(404, "not_found"), {})
-        token = f"imp-{acc['id']}-{len(silo['sessions']) + 1}"
-        silo["sessions"][token] = {"account": acc["id"], "ended": False}
-        return 200, {"access_token": token, "refresh_token": "r", "expires_in": 3600, "user": {"id": acc["id"], "username": acc["username"], "role": acc["role"]}}, {}
+        # As Silo: an API key may never act as another account (auth.StartImpersonation).
+        return (*problem(403, "permission_denied", "Impersonation is not allowed."), {})
     if method == "GET" and len(parts) == 6 and parts[2:4] == ["admin", "request-users"] and parts[5] == "usage":
         acc = next((a for a in silo["accounts"] if a["id"] == parts[4]), None)
         if not acc:

@@ -745,18 +745,23 @@ Customers with requests get **Requests** in the client area menu
   Seerr movies and TV seasons apart, as Seerr counts them).
 - **Search** for movies and shows, each marked *Available*, *Partly
   available*, *Requested* or *Processing*; the others have a **Request**
-  button. For a show the customer chooses the seasons.
+  button. For a show the customer chooses the seasons (on Silo, in Silo).
 - **Discover:** rows of trending, popular and upcoming movies and shows.
 - **My requests:** their own, with their state (requested, approved,
   processing, available, declined).
 - With subscriptions on more than one server, a tab per library.
 
 **With Seerr** everything happens as the customer (Seerr's `X-API-User`), so
-their own limit, name and Seerr's approval rules apply. **On Silo** the page is
-read with the server's key, and a request is placed as the customer: Paywarr
-signs in as their account for that one call and signs out again (an
-impersonation session, which Silo's audit log shows). Silo's own limit and
-approval rules apply.
+their own limit, name and Seerr's approval rules apply.
+
+**On Silo** the page is read with the server's key, and the button is
+**Request in Silo**: it opens the title in Silo (`<public URL>/title/movie/603`),
+where the customer is signed in and requests it with their own account, and
+chooses a show's seasons. Silo doesn't let an API key request for someone else,
+so the request itself is made in Silo; their own limit, name and Silo's
+approval rules apply. The address is the server's *Wizarr or Silo URL
+(public)*. Requests must be switched on in Silo (*Admin → Settings → Requests →
+Allow requests*), or search and Discover stay empty.
 
 **Who may request** is a server setting, *Requests: who may request*:
 

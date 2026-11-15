@@ -3,6 +3,16 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.20.2 (2026-11-15)
+
+- **Fixed:** on Silo, requesting from the Requests tab failed ("your limit is
+  used"), as Silo never lets an API key act as another account. On Silo the
+  button is now **Request in Silo**: it opens the title in Silo, where the
+  customer is signed in and requests it with their own account. Search,
+  Discover, the limit and "My requests" stay in Paymenter. Seerr is unchanged.
+- Silo's requests must be switched on in Silo (*Settings → Requests → Allow
+  requests*); the README says so now.
+
 ## 1.20.1 (2026-11-15)
 
 - **Fixed:** a customer who signed up with Discord using a single name (no

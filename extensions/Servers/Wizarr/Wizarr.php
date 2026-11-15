@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.20.1',
+    version: '1.20.2',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -2456,7 +2456,10 @@ HTML;
     {
         $data = ['label' => $source['label'], 'service' => (int) $source['service']->id, 'kind' => $source['kind'], 'ready' => $source['user'] !== null,
             'quota' => null, 'results' => [], 'rows' => [], 'mine' => [], 'show' => null, 'seasons' => [], 'query' => $query, 'errors' => 0,
-            'more' => trim((string) $source['ext']->config('more_requests_url'))];
+            'more' => trim((string) $source['ext']->config('more_requests_url')),
+            // Silo only lets an account request for itself (an API key can't act as one), so on Silo the
+            // Request button opens the title in Silo, where the customer is signed in.
+            'silo_url' => $source['kind'] === 'silo' ? $source['ext']->webAddress((string) $source['ext']->config('public_url')) : ''];
         if ($source['user'] === null) {
             return $data;
         }
@@ -2475,9 +2478,8 @@ HTML;
             $client = $source['ext']->client();
             $data['quota'] = $read(fn () => $client->requestQuota($user), null);
             $data['mine'] = $read(fn () => $client->myRequests($user), []);
-            if ($show !== null) {
-                $data['show'] = $read(fn () => $client->requestSeasons($show), null);
-            } elseif (mb_strlen(trim($query)) >= 2) {
+            $show = null; // seasons are chosen in Silo
+            if (mb_strlen(trim($query)) >= 2) {
                 $data['results'] = $read(fn () => $client->requestSearch(trim(mb_substr($query, 0, 100))), []);
             } else {
                 $data['rows'] = $read(fn () => $client->requestDiscover(), []);
@@ -2525,12 +2527,12 @@ HTML;
                 throw new DisplayException(self::t('Choose at least one season.'));
             }
         }
+        if ($source['kind'] === 'silo') {
+            // Requested in Silo itself (see requestsData()).
+            throw new DisplayException(self::t('That can\'t be requested right now.'));
+        }
         try {
-            if ($source['kind'] === 'silo') {
-                $source['ext']->client()->createRequestAs((int) $source['user'], $type, $tmdb, $seasons);
-            } else {
-                $source['ext']->seerr($source['ext']->seerrInstanceOf($source['service']))->createRequest((int) $source['user'], $type, $tmdb, $seasons);
-            }
+            $source['ext']->seerr($source['ext']->seerrInstanceOf($source['service']))->createRequest((int) $source['user'], $type, $tmdb, $seasons);
         } catch (SeerrException|WizarrException $e) {
             $status = $e instanceof SeerrException ? $e->status : $e->status;
             Log::info('Wizarr: request by service ' . $serviceId . ' refused: ' . $e->getMessage());
@@ -2644,7 +2646,8 @@ HTML;
 
         $html .= '<form class="pr-search" method="GET" action="' . $e($base) . '"><input type="hidden" name="library" value="' . $e($library) . '">'
             . '<input type="search" name="q" value="' . $e($data['query']) . '" minlength="2" maxlength="100" placeholder="' . $e(self::t('Search for a movie or show')) . '">'
-            . '<button type="submit">' . $e(self::t('Search')) . '</button></form>';
+            . '<button type="submit">' . $e(self::t('Search')) . '</button></form>'
+            . ($data['kind'] === 'silo' ? '<p class="pr-muted pr-tiny">' . $e(self::t('"Request in Silo" opens the title in Silo, where you request it with your own account.')) . '</p>' : '');
 
         $badge = fn (string $state) => match ($state) {
             'available' => '<span class="pr-badge pr-b-ok">' . $e(self::t('Available')) . '</span>',
@@ -2661,7 +2664,11 @@ HTML;
             $cover = '<span class="pr-cover"><span class="pr-letter">' . $e(mb_strtoupper(mb_substr($item['title'] ?: '?', 0, 1))) . '</span>'
                 . ($item['poster'] ? '<img loading="lazy" alt="" referrerpolicy="no-referrer" src="' . $e($item['poster']) . '" onerror="this.remove()">' : '') . $badge($item['state']) . '</span>';
             $action = '';
-            if (in_array($item['state'], ['none'], true) || ($item['type'] === 'tv' && $item['state'] === 'partial')) {
+            if ($data['kind'] === 'silo') {
+                if ($data['silo_url'] !== '' && ($item['state'] === 'none' || ($item['type'] === 'tv' && $item['state'] === 'partial'))) {
+                    $action = '<a class="pr-button pr-small-button" target="_blank" rel="noopener" href="' . $e(rtrim($data['silo_url'], '/') . '/title/' . ($item['type'] === 'tv' ? 'series' : 'movie') . '/' . (int) $item['tmdb']) . '">' . $e(self::t('Request in Silo')) . '</a>';
+                }
+            } elseif (in_array($item['state'], ['none'], true) || ($item['type'] === 'tv' && $item['state'] === 'partial')) {
                 $action = $item['type'] === 'tv'
                     ? '<a class="pr-button pr-small-button" href="' . $e($url(['library' => $library, 'show' => $item['tmdb'], 'q' => $data['query']])) . '">' . $e(self::t('Request')) . '</a>'
                     : '<form method="POST" action="' . $e($base) . '">' . $hidden . '<input type="hidden" name="type" value="movie"><input type="hidden" name="tmdb" value="' . $e($item['tmdb']) . '">'
@@ -4119,7 +4126,7 @@ HTML;
     }
 
     /** "emby.example.com" becomes "https://emby.example.com"; empty stays empty. */
-    private function webAddress(string $url): string
+    public function webAddress(string $url): string
     {
         $url = trim($url);
 

@@ -2968,7 +2968,7 @@ test('Requests tab (Seerr): the customer\'s own limit decides', function () {
     tellsCustomer(fn () => ext()->placeRequest($sources, $service->id, 'tv', 1399), 'your limit is used', 'over the limit');
 });
 
-test('Requests tab (Silo): read with the key, requested as the account itself, the session ended again', function () {
+test('Requests tab (Silo): read with the key, and "Request in Silo" opens the title in Silo', function () {
     [$service, $account] = siloWithRequests('10/30', 1);
     $service->status = 'active';
     $source = ext()->requestsSources((object) ['id' => 1], [$service])[0];
@@ -2977,16 +2977,17 @@ test('Requests tab (Silo): read with the key, requested as the account itself, t
     same([['requests', 10, 10, 30]], array_map(fn ($p) => [$p['label'], $p['limit'], $p['remaining'], $p['days']], $data['quota']['parts']), 'Silo\'s own limit');
     same(['trending_movies', 'trending_series', 'popular_movies', 'popular_series', 'upcoming_movies'], array_column($data['rows'], 'key'), 'Silo\'s rows');
     same([['Heat', 'available'], ['The Matrix', 'none']], array_map(fn ($i) => [$i['title'], $i['state']], $data['rows'][0]['items']), 'states');
-    same([[1, 'available'], [2, 'none']], array_map(fn ($x) => [$x['number'], $x['state']], ext()->requestsData($source, '', 1399)['seasons']), 'seasons');
 
-    ext()->placeRequest([$source], $service->id, 'movie', 603);
-    ext()->placeRequest([$source], $service->id, 'tv', 1399, ['2']);
-    same([[$account, 'p-' . $account, 'The Matrix', []], [$account, 'p-' . $account, 'Dragon Throne', [2]]],
-        array_map(fn ($r) => [$r['requested_by_user_id'], $r['requested_by_profile_id'], $r['title'], $r['seasons']], siloState()['media_requests']), 'theirs, made with their own profile');
-    same([true, true], array_values(array_map(fn ($x) => $x['ended'], siloState()['sessions'])), 'each sign-in as the account ended again');
-    same(['Dragon Throne', 'The Matrix'], array_column(ext()->requestsData($source)['mine'], 'title'), 'my requests');
-    same(8, ext()->requestsData($source)['quota']['parts'][0]['remaining'], 'counted');
-    tellsCustomer(fn () => ext()->placeRequest([$source], $service->id, 'movie', 603), 'already been requested', 'twice');
+    $html = ext()->requestsHtml($data + ['libraries' => []], '/wizarr/requests', 'TOKEN');
+    ok(str_contains($html, 'href="https://watch.example.com/title/movie/603"') && str_contains($html, 'Request in Silo'), 'a movie opens in Silo');
+    ok(!str_contains($html, 'href="https://watch.example.com/title/movie/949"'), 'not one that is available');
+    ok(!str_contains($html, 'name="tmdb"'), 'no request form on Silo');
+    same(null, ext()->requestsData($source, '', 1399)['show'], 'no season page on Silo: seasons are chosen in Silo');
+    tellsCustomer(fn () => ext()->placeRequest([$source], $service->id, 'movie', 603), 'can\'t be requested', 'a request posted anyway is refused');
+    same([], siloState()['media_requests'], 'nothing requested in Silo');
+    same([], siloState()['sessions'], 'and no sign-in as the account');
+    $series = ext()->requestsHtml(['rows' => [['key' => 'trending_series', 'items' => [['type' => 'tv', 'tmdb' => 1399, 'title' => 'Dragon Throne', 'year' => 2011, 'poster' => null, 'state' => 'partial']]]]] + $data + ['libraries' => []]);
+    ok(str_contains($series, 'href="https://watch.example.com/title/series/1399"'), 'a partly available show opens in Silo too');
 });
 
 test('Requests tab: not ready before the customer has a user, and "every active customer" gives everyone requests', function () {
