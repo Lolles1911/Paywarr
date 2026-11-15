@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.20.2',
+    version: '1.20.3',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -2738,9 +2738,9 @@ HTML;
         return $html . '</div>';
     }
 
-    private function requestsCss(): string
+    /** The Requests tab's look, also used by "Report a problem" (under another ID). */
+    public function requestsCss(string $c = '#paywarr-requests'): string
     {
-        $c = '#paywarr-requests';
 
         return "$c{max-width:72rem;margin:0 auto;padding:0 1rem 3rem;color:hsl(var(--color-base))}$c *{box-sizing:border-box}$c svg,$c img{display:block}"
             . "$c h1{font-size:1.9rem;font-weight:800;margin:0}$c h2{font-size:1.05rem;font-weight:700;margin:0 0 .8rem}$c .pr-h{margin:2rem 0 .9rem;font-size:1.15rem}"
@@ -2879,6 +2879,29 @@ HTML;
      * ----------------------------------------------------------------- */
 
     /** What the customer can report, in their words; staff read the key. */
+    /** What "Report a problem" adds to the Requests tab's look: steps, the problem choices, fields. */
+    private const REPORT_CSS = '#paywarr-report{max-width:56rem}'
+        . '#paywarr-report .pr-steps{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1.5rem;padding:0;list-style:none;font-size:.85rem}'
+        . '#paywarr-report .pr-steps li{display:flex;gap:.45rem;align-items:center;padding:.35rem .8rem .35rem .4rem;border-radius:9999px;border:1px solid hsl(var(--color-neutral));opacity:.65}'
+        . '#paywarr-report .pr-steps li b{display:inline-flex;width:1.4rem;height:1.4rem;border-radius:9999px;align-items:center;justify-content:center;background:hsl(var(--color-neutral));font-size:.75rem}'
+        . '#paywarr-report .pr-steps li.pr-on{opacity:1;border-color:hsl(var(--color-primary))}#paywarr-report .pr-steps li.pr-on b{background:hsl(var(--color-primary));color:hsl(var(--color-background))}'
+        . '#paywarr-report a.pr-tile{display:block;color:inherit;text-decoration:none}#paywarr-report a.pr-tile .pr-cover{transition:transform .15s,box-shadow .15s}'
+        . '#paywarr-report a.pr-tile:hover .pr-cover,#paywarr-report a.pr-tile:focus-visible .pr-cover{transform:translateY(-3px);box-shadow:0 0 0 2px hsl(var(--color-primary)),0 10px 26px rgb(0 0 0 / .35)}'
+        . '#paywarr-report a.pr-tile:hover .pr-title{color:hsl(var(--color-primary))}'
+        . '#paywarr-report .pr-form{display:flex;flex-direction:column;gap:1.25rem}#paywarr-report .pr-label{display:block;font-weight:700;font-size:.9rem;margin-bottom:.5rem}'
+        . '#paywarr-report .pr-choices{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:.5rem}'
+        . '#paywarr-report .pr-choice{position:relative;display:block;cursor:pointer}#paywarr-report .pr-choice input{position:absolute;opacity:0;pointer-events:none}'
+        . '#paywarr-report .pr-choice>span{display:block;height:100%;padding:.7rem .9rem;border-radius:.75rem;border:1px solid hsl(var(--color-neutral));font-size:.9rem;line-height:1.35}'
+        . '#paywarr-report .pr-choice input:checked+span{border-color:hsl(var(--color-primary));background:hsl(var(--color-primary) / .12);box-shadow:inset 0 0 0 1px hsl(var(--color-primary))}'
+        . '#paywarr-report .pr-choice input:focus-visible+span{outline:2px solid hsl(var(--color-primary));outline-offset:2px}'
+        . '#paywarr-report .pr-fields{display:grid;grid-template-columns:1fr 1fr;gap:1rem}'
+        . '#paywarr-report .pr-input{width:100%;padding:.65rem .9rem;border-radius:.75rem;border:1px solid hsl(var(--color-neutral));background:hsl(var(--color-background));color:inherit;font:inherit}'
+        . '#paywarr-report .pr-input:focus{outline:none;border-color:hsl(var(--color-primary))}#paywarr-report textarea.pr-input{resize:vertical;min-height:6rem}'
+        . '#paywarr-report .pr-show{justify-content:space-between}#paywarr-report .pr-show>div{display:flex;gap:1rem;align-items:center;min-width:0}'
+        . '#paywarr-report .pr-link{color:hsl(var(--color-primary));font-size:.9rem;white-space:nowrap}#paywarr-report .pr-link:hover{text-decoration:underline}'
+        . '@media (max-width:640px){#paywarr-report .pr-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem}#paywarr-report .pr-title{font-size:.85rem}'
+        . '#paywarr-report .pr-show{flex-wrap:wrap;gap:.75rem}#paywarr-report .pr-card{padding:1rem}}';
+
     public const REPORT_PROBLEMS = [
         'video' => 'Picture (stutters, wrong quality, won\'t play)',
         'audio' => 'Sound (missing, out of sync, wrong language)',
@@ -2983,7 +3006,7 @@ HTML;
                 }
 
                 return ['title' => (string) $item['title'], 'year' => isset($item['year']) ? (int) $item['year'] : null, 'kind' => $item['type'] === 'series' ? 'show' : 'movie',
-                    'where' => 'Silo, catalog item ' . $m[3], 'service' => $source['service']];
+                    'where' => 'Silo, catalog item ' . $m[3], 'service' => $source['service'], 'silo_item' => $m[3], 'poster' => null];
             }
             if (!ctype_digit($m[3])) {
                 return null;
@@ -2991,7 +3014,8 @@ HTML;
             $item = $source['ext']->seerr($source['ext']->seerrInstanceOf($source['service']))->title($m[2], (int) $m[3]);
 
             return $item === null ? null : ['title' => $item['title'], 'year' => $item['year'], 'kind' => $m[2] === 'tv' ? 'show' : 'movie',
-                'where' => 'Seerr, TMDB ' . $m[2] . ' ' . $m[3], 'service' => $source['service']];
+                'where' => 'Seerr, TMDB ' . $m[2] . ' ' . $m[3], 'service' => $source['service'],
+                'poster' => $item['posterPath'] ? 'https://image.tmdb.org/t/p/w300' . $item['posterPath'] : null];
         }
 
         return null;
@@ -3067,8 +3091,12 @@ HTML;
         $query = (string) request()->query('q', '');
         $pick = (string) request()->query('pick', '');
         $chosen = $pick !== '' ? $this->reportTitle($sources, $pick) : null;
+        if ($chosen !== null && isset($chosen['silo_item'])) {
+            $chosen['poster'] = route('extensions.wizarr.report.poster', ['service' => $chosen['service']->id]) . '?item=' . rawurlencode($chosen['silo_item']);
+        }
 
         $content = view('wizarr::report', [
+            'css' => $this->requestsCss('#paywarr-report') . self::REPORT_CSS,
             'query' => $query,
             'results' => $chosen === null ? $this->reportSearch($sources, $query) : [],
             'pick' => $chosen === null ? '' : $pick,

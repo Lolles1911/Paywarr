@@ -1,89 +1,106 @@
-{{-- Customer page: report a problem with a movie or show. Search, choose, describe; it becomes a support ticket. Uses the active theme's colours. --}}
-<div class="container mt-14 max-w-3xl">
-    <h1 class="text-2xl font-bold">{{ $t('Report a problem') }}</h1>
-    <p class="mt-2 text-base/70">
-        {{ $t('Something wrong with a movie or show? Find it, tell us what\'s wrong, and we\'ll look into it. You\'ll get our answer as a support ticket.') }}
-    </p>
+{{-- Customer page: report a problem with a movie or show. Search, choose, describe; it becomes a support ticket.
+     Styled by its own CSS (the Requests tab's look), so it doesn't depend on the theme's Tailwind build. --}}
+<div id="paywarr-report" class="container mt-14">
+    <style>{!! $css !!}</style>
+
+    <header class="pr-head">
+        <div>
+            <h1>{{ $t('Report a problem') }}</h1>
+            <p class="pr-muted">{{ $t('Something wrong with a movie or show? Find it, tell us what\'s wrong, and we\'ll look into it. You\'ll get our answer as a support ticket.') }}</p>
+        </div>
+    </header>
+
+    <ol class="pr-steps">
+        <li class="{{ $chosen ? '' : 'pr-on' }}"><b>1</b>{{ $t('Find the title') }}</li>
+        <li class="{{ $chosen ? 'pr-on' : '' }}"><b>2</b>{{ $t('Describe the problem') }}</li>
+    </ol>
 
     @if ($error)
-        <p class="mt-6 rounded-lg border border-error text-error px-4 py-3 text-sm">{{ $error }}</p>
+        <p class="pr-flash pr-error">{{ $error }}</p>
     @endif
 
     @if (!$chosen)
-        <form method="GET" action="{{ route('extensions.wizarr.report') }}" class="mt-8 flex gap-3">
-            <input type="search" name="q" value="{{ $query }}" maxlength="100" required minlength="2" autofocus
-                placeholder="{{ $t('Search for a movie or show') }}"
-                class="flex-1 min-w-0 rounded-md border border-neutral bg-background-secondary px-4 py-2.5 text-base focus:outline-none focus:border-primary">
-            <button type="submit" class="rounded-md bg-primary text-white px-4 py-2.5 text-sm font-semibold hover:bg-primary/80">{{ $t('Search') }}</button>
+        <form method="GET" action="{{ route('extensions.wizarr.report') }}" class="pr-search">
+            <input type="search" name="q" value="{{ $query }}" maxlength="100" required minlength="2" @if ($query === '') autofocus @endif
+                placeholder="{{ $t('Search for a movie or show') }}">
+            <button type="submit">{{ $t('Search') }}</button>
         </form>
 
         @if ($query !== '' && !$results)
-            <p class="mt-6 text-base/70">{{ $t('Nothing found in the library. Try another spelling, or the original title.') }}</p>
+            <p class="pr-muted" style="margin-top:1.5rem">{{ $t('Nothing found in the library. Try another spelling, or the original title.') }}</p>
         @endif
 
         @if ($results)
-            <p class="mt-6 text-sm text-base/70">{{ $t('Choose the one with the problem:') }}</p>
-            <div class="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            <h2 class="pr-h">{{ $t('Choose the one with the problem:') }}</h2>
+            <div class="pr-grid">
                 @foreach ($results as $result)
-                    <a href="{{ route('extensions.wizarr.report', ['pick' => $result['key']]) }}"
-                        class="group rounded-lg border border-neutral bg-background-secondary overflow-hidden hover:border-primary">
-                        <div class="relative aspect-[2/3] bg-neutral/40 flex items-center justify-center text-3xl font-bold text-base/40">
-                            {{ mb_strtoupper(mb_substr($result['title'] ?: '?', 0, 1)) }}
+                    <a class="pr-tile" href="{{ route('extensions.wizarr.report', ['pick' => $result['key']]) }}">
+                        <span class="pr-cover">
+                            <span class="pr-letter">{{ mb_strtoupper(mb_substr($result['title'] ?: '?', 0, 1)) }}</span>
                             @if ($result['poster'])
-                                <img src="{{ $result['poster'] }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()" class="absolute inset-0 w-full h-full object-cover">
+                                <img src="{{ $result['poster'] }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
                             @endif
-                        </div>
-                        <div class="p-3">
-                            <p class="font-semibold text-sm truncate group-hover:text-primary">{{ $result['title'] }}</p>
-                            <p class="text-xs text-base/60">{{ implode(' · ', array_filter([$result['year'], $result['kind'] === 'show' ? $t('Show') : $t('Movie')])) }}</p>
-                        </div>
+                        </span>
+                        <span class="pr-title pr-clip" style="display:block" title="{{ $result['title'] }}">{{ $result['title'] }}</span>
+                        <span class="pr-muted pr-tiny">{{ implode(' · ', array_filter([$result['year'], $result['kind'] === 'show' ? $t('Show') : $t('Movie')])) }}</span>
                     </a>
                 @endforeach
             </div>
         @endif
     @else
-        <form method="POST" action="{{ route('extensions.wizarr.report.submit') }}" class="mt-8 bg-background-secondary border border-neutral rounded-lg p-6 flex flex-col gap-5">
+        <form method="POST" action="{{ route('extensions.wizarr.report.submit') }}" class="pr-card pr-form">
             @csrf
             <input type="hidden" name="pick" value="{{ $pick }}">
-            <div class="flex items-start justify-between gap-4">
+
+            <div class="pr-show" style="margin:0">
                 <div>
-                    <p class="text-sm text-base/70">{{ $chosen['kind'] === 'show' ? $t('Show') : $t('Movie') }}</p>
-                    <p class="font-semibold text-lg">{{ $chosen['title'] }}@if ($chosen['year']) ({{ $chosen['year'] }})@endif</p>
+                    <span class="pr-thumb pr-thumb-big">
+                        <span class="pr-letter">{{ mb_strtoupper(mb_substr($chosen['title'] ?: '?', 0, 1)) }}</span>
+                        @if ($chosen['poster'] ?? null)
+                            <img src="{{ $chosen['poster'] }}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">
+                        @endif
+                    </span>
+                    <div style="min-width:0">
+                        <div class="pr-muted pr-tiny">{{ $chosen['kind'] === 'show' ? $t('Show') : $t('Movie') }}</div>
+                        <div class="pr-title pr-big">{{ $chosen['title'] }}@if ($chosen['year']) <span class="pr-muted">({{ $chosen['year'] }})</span>@endif</div>
+                    </div>
                 </div>
-                <a href="{{ route('extensions.wizarr.report') }}" class="text-sm text-primary hover:underline">{{ $t('Choose another') }}</a>
+                <a class="pr-link" href="{{ route('extensions.wizarr.report') }}">{{ $t('Choose another') }}</a>
             </div>
 
-            <label class="flex flex-col gap-1.5">
-                <span class="text-sm font-semibold">{{ $t('What is the problem?') }}</span>
-                <select name="problem" required class="rounded-md border border-neutral bg-background px-3 py-2.5">
-                    <option value="" disabled selected>{{ $t('Choose') }}</option>
+            <div>
+                <span class="pr-label">{{ $t('What is the problem?') }}</span>
+                <div class="pr-choices">
                     @foreach ($problems as $value => $label)
-                        <option value="{{ $value }}">{{ $label }}</option>
+                        @php([$head, $detail] = preg_match('/^(.*?)\s*\((.+)\)$/u', $label, $m) ? [$m[1], $m[2]] : [$label, ''])
+                        <label class="pr-choice">
+                            <input type="radio" name="problem" value="{{ $value }}" required>
+                            <span><b>{{ $head }}</b>@if ($detail !== '')<br><span class="pr-muted pr-tiny">{{ $detail }}</span>@endif</span>
+                        </label>
                     @endforeach
-                </select>
-            </label>
+                </div>
+            </div>
 
             @if ($chosen['kind'] === 'show')
-                <div class="grid grid-cols-2 gap-4">
-                    <label class="flex flex-col gap-1.5">
-                        <span class="text-sm font-semibold">{{ $t('Season') }}</span>
-                        <input type="number" name="season" min="0" max="9999" class="rounded-md border border-neutral bg-background px-3 py-2.5">
+                <div class="pr-fields">
+                    <label>
+                        <span class="pr-label">{{ $t('Season') }}</span>
+                        <input class="pr-input" type="number" name="season" min="0" max="9999" inputmode="numeric">
                     </label>
-                    <label class="flex flex-col gap-1.5">
-                        <span class="text-sm font-semibold">{{ $t('Episode') }}</span>
-                        <input type="number" name="episode" min="0" max="9999" class="rounded-md border border-neutral bg-background px-3 py-2.5">
+                    <label>
+                        <span class="pr-label">{{ $t('Episode') }}</span>
+                        <input class="pr-input" type="number" name="episode" min="0" max="9999" inputmode="numeric">
                     </label>
                 </div>
             @endif
 
-            <label class="flex flex-col gap-1.5">
-                <span class="text-sm font-semibold">{{ $t('Tell us more (optional)') }}</span>
-                <textarea name="description" rows="4" maxlength="2000"
-                    placeholder="{{ $t('E.g. the sound disappears after 20 minutes, on the TV app.') }}"
-                    class="rounded-md border border-neutral bg-background px-3 py-2.5"></textarea>
+            <label>
+                <span class="pr-label">{{ $t('Tell us more (optional)') }}</span>
+                <textarea class="pr-input" name="description" rows="4" maxlength="2000"
+                    placeholder="{{ $t('E.g. the sound disappears after 20 minutes, on the TV app.') }}"></textarea>
             </label>
 
-            <button type="submit" class="w-fit rounded-md bg-primary text-white px-4 py-2.5 text-sm font-semibold hover:bg-primary/80">{{ $t('Send report') }}</button>
+            <div><button type="submit" class="pr-button">{{ $t('Send report') }}</button></div>
         </form>
     @endif
 </div>

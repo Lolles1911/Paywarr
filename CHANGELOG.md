@@ -3,6 +3,15 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.20.3 (2026-11-15)
+
+- **Fixed:** the posters on "Report a problem" were cut to a thin strip with
+  themes that don't include the Tailwind classes the page used. The page now
+  brings its own styles, like the Requests tab.
+- **Report a problem** has a new look: two steps at the top, full posters
+  (three across on a phone), the chosen title with its poster, and the
+  problems as large choices with a short explanation instead of a list.
+
 ## 1.20.2 (2026-11-15)
 
 - **Fixed:** on Silo, requesting from the Requests tab failed ("your limit is
