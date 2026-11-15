@@ -2839,7 +2839,7 @@ function reportSources(array $services): array
     return ext()->reportSources((object) ['id' => 1], $services);
 }
 
-test('reports: only active subscriptions with requests can report, on Silo or with Seerr', function () {
+test('reports: every active subscription can report, on Silo or with Seerr; the Requests tab only with requests', function () {
     [$silo] = siloWithRequests('10/30', 1);
     $silo->status = 'active';
     [$noRequests] = siloWithRequests('', 2);
@@ -2847,7 +2847,11 @@ test('reports: only active subscriptions with requests can report, on Silo or wi
     $seerr = reportCustomer('yes', 3);
     $suspended = reportCustomer('yes', 4, 'suspended');
     $plain = reportCustomer('', 5);
-    same([[1, 'silo'], [3, 'seerr']], array_map(fn ($s) => [$s['service']->id, $s['kind']], reportSources([$silo, $noRequests, $seerr, $suspended, $plain])), 'Silo with requests, and Seerr with requests');
+    same([[1, 'silo'], [2, 'silo'], [3, 'seerr'], [5, 'seerr']], array_map(fn ($s) => [$s['service']->id, $s['kind']], reportSources([$silo, $noRequests, $seerr, $suspended, $plain])), 'with or without requests; not suspended');
+    same([1, 3], array_map(fn ($s) => $s['service']->id, ext()->requestsSources((object) ['id' => 1], [$silo, $noRequests, $seerr, $suspended, $plain])), 'the Requests tab: only with requests');
+    $noSeerr = reportCustomer('', 6);
+    unset($noSeerr->product->server->settings['seerr_url'], $noSeerr->product->server->settings['seerr_api_key']);
+    same([], reportSources([$noSeerr]), 'a Wizarr server without Seerr has nothing to search');
 });
 
 test('reports: search finds titles in the customer\'s libraries; Seerr only what is on the server', function () {

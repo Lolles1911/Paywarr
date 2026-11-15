@@ -580,10 +580,10 @@ class Wizarr extends Server
             'route' => 'extensions.wizarr.requests',
             'icon' => 'ri-movie-2',
             'priority' => 29,
-            'condition' => Auth::check() && Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== []),
+            'condition' => Auth::check() && Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== []),
         ]);
 
-        // "Report a problem", for customers with requests.
+        // "Report a problem", for every customer with a subscription to report from.
         Event::listen('navigation.dashboard', fn () => [
             'name' => self::t('Report a problem'),
             'route' => 'extensions.wizarr.report',
@@ -598,8 +598,10 @@ class Wizarr extends Server
                 return [];
             }
             $items = [];
-            if (Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== [])) {
+            if (Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== [])) {
                 $items[] = ['name' => self::t('Requests'), 'url' => route('extensions.wizarr.requests'), 'icon' => 'ri-movie-2', 'priority' => 10];
+            }
+            if (Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== [])) {
                 $items[] = ['name' => self::t('Report a problem'), 'url' => route('extensions.wizarr.report'), 'icon' => 'ri-error-warning', 'priority' => 12];
             }
             if ($watch = $this->navWatchLink(Auth::user())) {
@@ -2504,7 +2506,7 @@ HTML;
     public function requestsSources($user, ?iterable $services = null): array
     {
         $sources = [];
-        foreach ($this->reportSources($user, $services) as $source) {
+        foreach ($this->librarySources($user, $services, true) as $source) {
             $properties = ExtensionHelper::getServiceProperties($source['service']);
             if ($source['kind'] === 'silo') {
                 $silo = array_values(array_filter($source['ext']->allUsers($properties, resolve: false), fn ($u) => $u['type'] === 'silo'));
@@ -2982,12 +2984,19 @@ HTML;
     ];
 
     /**
-     * Where this customer can report from: one entry per active subscription
-     * with requests, on Silo (its catalog) or with Seerr (titles on the server).
+     * Where this customer can report from: one entry per active subscription,
+     * on Silo (its catalog) or with Seerr (titles on the server). Without a
+     * Seerr, a Wizarr server has nothing to search, so it isn't one.
      *
      * @return array<int, array{service: Service, ext: static, kind: string}>
      */
     public function reportSources($user, ?iterable $services = null): array
+    {
+        return $this->librarySources($user, $services, false);
+    }
+
+    /** As reportSources(), only subscriptions with requests (the "requests" option, "Requests included", or everyone). */
+    private function librarySources($user, ?iterable $services, bool $withRequests): array
     {
         if (!$user) {
             return [];
@@ -2999,7 +3008,7 @@ HTML;
                 continue;
             }
             $ext = $this->forServiceServer($service);
-            if ($ext->seerrPlan(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service)) === null) {
+            if ($withRequests && $ext->seerrPlan(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service)) === null) {
                 continue;
             }
             if ($ext->isSilo()) {
