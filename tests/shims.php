@@ -140,8 +140,48 @@ namespace App\Models {
         }
     }
 
+    /** Service::where(...)->where(...)->with(...)->get() over Service::$all, as Eloquent answers it. */
+    class ServiceQuery
+    {
+        public function __construct(private array $wheres = []) {}
+
+        public function where($column, $operator, $value = null): static
+        {
+            if (func_num_args() === 2) {
+                [$operator, $value] = ['=', $operator];
+            }
+            $this->wheres[] = [$column, $operator, $value];
+
+            return $this;
+        }
+
+        public function with($relations): static
+        {
+            return $this;
+        }
+
+        public function get(): array
+        {
+            return array_values(array_filter(Service::$all, function ($service) {
+                foreach ($this->wheres as [$column, $operator, $value]) {
+                    $have = $service->{$column};
+                    if ($operator === '=' ? $have != $value : $have == $value) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }));
+        }
+    }
+
     class Service
     {
+        public static function where($column, $operator, $value = null): ServiceQuery
+        {
+            return (new ServiceQuery)->where(...func_get_args());
+        }
+
         public const STATUS_ACTIVE = 'active';
 
         public const STATUS_SUSPENDED = 'suspended';
@@ -170,9 +210,15 @@ namespace App\Models {
 
         private PropertyBag $bag;
 
+        /** As Paymenter's columns. */
+        public ?int $user_id = null;
+
+        public int $quantity = 1;
+
         public function __construct(public int $id, public User $user)
         {
             $this->bag = new PropertyBag;
+            $this->user_id = $user->id;
         }
 
         public function properties(): PropertyBag
@@ -358,25 +404,31 @@ namespace Illuminate\Support\Facades {
 
         public function get(string $url): Response
         {
-            return $this->send('GET', $url);
+            return $this->sendRaw('GET', $url);
         }
 
         public function delete(string $url): Response
         {
-            return $this->send('DELETE', $url);
+            return $this->sendRaw('DELETE', $url);
         }
 
         public function post(string $url, array $data = []): Response
         {
-            return $this->send('POST', $url, $data);
+            return $this->sendRaw('POST', $url, $data);
         }
 
         public function put(string $url, array $data = []): Response
         {
-            return $this->send('PUT', $url, $data);
+            return $this->sendRaw('PUT', $url, $data);
         }
 
-        private function send(string $method, string $url, ?array $data = null): Response
+        /** As Laravel's: a request with the options given, here none (no body). */
+        public function send(string $method, string $url, array $options = []): Response
+        {
+            return $this->sendRaw(strtoupper($method), $url);
+        }
+
+        private function sendRaw(string $method, string $url, ?array $data = null): Response
         {
             $headers = [];
             foreach ($this->headers as $name => $value) {

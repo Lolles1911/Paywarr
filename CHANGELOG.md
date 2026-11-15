@@ -3,6 +3,19 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.20.0 (2026-11-15)
+
+- **New: the Requests tab.** Customers with requests can search, discover and
+  request movies and shows inside Paymenter, choose a show's seasons, see what
+  is left of their limit and follow their own requests. With Seerr everything
+  happens as the customer; on Silo the request is placed as the customer's
+  own account. A server setting chooses who may request: customers who bought
+  requests, or every active customer.
+- **New: extra requests.** A top-up product ("Extra requests" per unit, with
+  quantity) adds requests to the customer's package for the package's period,
+  e.g. 30 days. The Requests tab offers "Buy more requests" when the limit is
+  used. Refunded top-ups come off again.
+
 ## 1.19.0 (2026-11-15)
 
 - **New: Report a problem.** Customers with requests can report a movie or

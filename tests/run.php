@@ -116,6 +116,7 @@ function test(string $name, callable $fn): void
     \Illuminate\Support\Facades\Cache::$store = [];
     NotificationHelper::$sent = [];
     NotificationHelper::$fail = false;
+    \App\Models\Service::$all = [];
     Log::$warnings = [];
     Log::$infos = [];
 
@@ -1009,13 +1010,16 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/report extensions.wizarr.report',
         'POST wizarr/report extensions.wizarr.report.submit',
         'GET wizarr/report/poster/{service} extensions.wizarr.report.poster',
+        'GET wizarr/requests extensions.wizarr.requests',
+        'POST wizarr/requests extensions.wizarr.requests.submit',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
     same(['web'], $byName['extensions.wizarr.discord.callback'], 'callback serves guests and logged-in customers');
     same(['web', 'auth', 'throttle:40,1'], $byName['extensions.wizarr.status'], 'status check is throttled');
     same([['web', 'auth'], ['web', 'auth'], ['web', 'auth', 'throttle:120,1'], ['service' => '[0-9]+']],
-        [$byName['extensions.wizarr.report'], $byName['extensions.wizarr.report.submit'], $byName['extensions.wizarr.report.poster'], end(\Illuminate\Support\Facades\Route::$routes)->wheres], 'reports: logged in; posters throttled, by number');
+        [$byName['extensions.wizarr.report'], $byName['extensions.wizarr.report.submit'], $byName['extensions.wizarr.report.poster'], \Illuminate\Support\Facades\Route::$routes[8]->wheres], 'reports: logged in; posters throttled, by number');
+    same([['web', 'auth'], ['web', 'auth']], [$byName['extensions.wizarr.requests'], $byName['extensions.wizarr.requests.submit']], 'the Requests tab: logged in');
     same(['web', 'auth'], \Illuminate\Support\Facades\Route::$routes[0]->middleware, 'logged-in customers only');
     ok(isset(\Illuminate\Support\Facades\View::$namespaces['wizarr']), 'view namespace');
 
@@ -2900,6 +2904,179 @@ test('reports: Silo posters come through Paymenter, with the key only for Silo\'
     same('image/jpeg', $client->poster('movie:heat-1995')['type'] ?? null, 'a poster');
     same(null, $client->poster('episode:missing'), 'none for an unknown item');
     same(null, $client->poster('../../x'), 'nothing for a strange ID');
+});
+
+/* ---------- the Requests tab ---------- */
+
+/** A Seerr customer whose Seerr account exists (imported as Paywarr does), with $option as requests. */
+function seerrTabCustomer(string $option = '10/30', int $id = 60): array
+{
+    global $STUB;
+    $service = subscribed(settings(), 'tab' . $id, service($id));
+    $service->status = 'active';
+    $service->configs = [Wizarr::REQUESTS_OPTION => $option];
+    $service->product = (object) ['name' => 'Jellyfin Plus', 'server' => (object) ['id' => 1, 'extension' => 'Wizarr', 'settings' => seerrSettings([
+        'host' => $STUB . '/', 'public_url' => 'https://join.example.com/', 'api_key' => 'stub-key'])], 'settings' => settings()];
+    ext(seerrSettings())->syncSeerr($service, settings(), props($service), 'active');
+
+    return [$service, (int) ($service->propertyArray()['seerr_user_id'] ?? 0)];
+}
+
+function tabSource(Service $service): array
+{
+    return ext()->requestsSources((object) ['id' => 1], [$service])[0];
+}
+
+test('Requests tab (Seerr): quota, discovery, search and a show\'s seasons, all as the customer', function () {
+    [$service, $seerrUser] = seerrTabCustomer('10/30');
+    ok($seerrUser > 1, 'the customer has a Seerr account: ' . $seerrUser);
+    $data = ext()->requestsData(tabSource($service));
+    same([['movies', 10, 10, 30], ['tv', 10, 10, 30]], array_map(fn ($p) => [$p['label'], $p['limit'], $p['remaining'], $p['days']], $data['quota']['parts']), 'movies and TV seasons, 10 per 30 days');
+    same(['trending', 'popular_movies', 'popular_series', 'upcoming_movies'], array_column($data['rows'], 'key'), 'discovery rows');
+    same([['Heat', 'available'], ['Breaking Heat', 'partial'], ['The Matrix', 'none'], ['Dragon Throne', 'none']],
+        array_map(fn ($i) => [$i['title'], $i['state']], $data['rows'][0]['items']), 'with their state');
+    same('https://image.tmdb.org/t/p/w300/heat.jpg', $data['rows'][0]['items'][0]['poster'], 'TMDB posters');
+    $seerrCalls = array_filter(state()['requests'], fn ($r) => str_starts_with($r['path'], 'seerr:/discover') || str_starts_with($r['path'], 'seerr:/request'));
+    ok($seerrCalls && !array_filter($seerrCalls, fn ($r) => ($r['as'] ?? 1) !== $seerrUser), 'every call as the customer (X-API-User)');
+
+    $search = ext()->requestsData(tabSource($service), 'matrix');
+    same([['The Matrix', 'movie', 603]], array_map(fn ($i) => [$i['title'], $i['type'], $i['tmdb']], $search['results']), 'search');
+    $show = ext()->requestsData(tabSource($service), '', 1396)['show'];
+    same(['Breaking Heat', 2008, 1396], [$show['title'], $show['year'], $show['tmdb']], 'the show');
+    same([[1, 'available'], [2, 'none'], [3, 'none']], array_map(fn ($x) => [$x['number'], $x['state']], $show['seasons']), 'seasons, no specials, season 1 already there');
+});
+
+test('Requests tab (Seerr): a movie and seasons are requested as the customer, and show up under "My requests"', function () {
+    [$service, $seerrUser] = seerrTabCustomer('10/30');
+    $sources = [tabSource($service)];
+    ext()->placeRequest($sources, $service->id, 'movie', 603);
+    ext()->placeRequest($sources, $service->id, 'tv', 1396, ['2', '3', 'x']);
+    $made = state()['seerr']['requests'];
+    same([[$seerrUser, 'movie', 603, []], [$seerrUser, 'tv', 1396, [2, 3]]], array_map(fn ($r) => [$r['requestedBy'], $r['media']['mediaType'], $r['media']['tmdbId'], array_column($r['seasons'], 'seasonNumber')], $made), 'made by the customer');
+    $data = ext()->requestsData(tabSource($service));
+    same([['Breaking Heat', 'pending', [2, 3]], ['The Matrix', 'pending', []]], array_map(fn ($r) => [$r['title'], $r['status'], $r['seasons']], $data['mine']), 'my requests, newest first');
+    same([9, 8], array_column($data['quota']['parts'], 'remaining'), 'the limit counts them: 1 movie, 2 seasons');
+    tellsCustomer(fn () => ext()->placeRequest($sources, $service->id, 'movie', 603), 'already been requested', 'twice');
+    tellsCustomer(fn () => ext()->placeRequest($sources, $service->id, 'tv', 1396, []), 'at least one season', 'no season');
+    tellsCustomer(fn () => ext()->placeRequest($sources, 999, 'movie', 949), 'can\'t be requested', 'another customer\'s library');
+});
+
+test('Requests tab (Seerr): the customer\'s own limit decides', function () {
+    [$service] = seerrTabCustomer('1/7');
+    $sources = [tabSource($service)];
+    ext()->placeRequest($sources, $service->id, 'movie', 603);
+    tellsCustomer(fn () => ext()->placeRequest($sources, $service->id, 'tv', 1399), 'your limit is used', 'over the limit');
+});
+
+test('Requests tab (Silo): read with the key, requested as the account itself, the session ended again', function () {
+    [$service, $account] = siloWithRequests('10/30', 1);
+    $service->status = 'active';
+    $source = ext()->requestsSources((object) ['id' => 1], [$service])[0];
+    same(['silo', (int) $account], [$source['kind'], $source['user']], 'the Silo account');
+    $data = ext()->requestsData($source);
+    same([['requests', 10, 10, 30]], array_map(fn ($p) => [$p['label'], $p['limit'], $p['remaining'], $p['days']], $data['quota']['parts']), 'Silo\'s own limit');
+    same(['trending_movies', 'trending_series', 'popular_movies', 'popular_series', 'upcoming_movies'], array_column($data['rows'], 'key'), 'Silo\'s rows');
+    same([['Heat', 'available'], ['The Matrix', 'none']], array_map(fn ($i) => [$i['title'], $i['state']], $data['rows'][0]['items']), 'states');
+    same([[1, 'available'], [2, 'none']], array_map(fn ($x) => [$x['number'], $x['state']], ext()->requestsData($source, '', 1399)['seasons']), 'seasons');
+
+    ext()->placeRequest([$source], $service->id, 'movie', 603);
+    ext()->placeRequest([$source], $service->id, 'tv', 1399, ['2']);
+    same([[$account, 'p-' . $account, 'The Matrix', []], [$account, 'p-' . $account, 'Dragon Throne', [2]]],
+        array_map(fn ($r) => [$r['requested_by_user_id'], $r['requested_by_profile_id'], $r['title'], $r['seasons']], siloState()['media_requests']), 'theirs, made with their own profile');
+    same([true, true], array_values(array_map(fn ($x) => $x['ended'], siloState()['sessions'])), 'each sign-in as the account ended again');
+    same(['Dragon Throne', 'The Matrix'], array_column(ext()->requestsData($source)['mine'], 'title'), 'my requests');
+    same(8, ext()->requestsData($source)['quota']['parts'][0]['remaining'], 'counted');
+    tellsCustomer(fn () => ext()->placeRequest([$source], $service->id, 'movie', 603), 'already been requested', 'twice');
+});
+
+test('Requests tab: not ready before the customer has a user, and "every active customer" gives everyone requests', function () {
+    $service = reportCustomer('', 70);
+    same([], ext()->requestsSources((object) ['id' => 1], [$service]), 'no requests bought: no tab');
+    $service->product->server->settings['requests_page_for'] = 'all';
+    $source = ext()->requestsSources((object) ['id' => 1], [$service]);
+    same([1, null], [count($source), $source[0]['user']], 'everyone: the tab, but no Seerr account before a user exists');
+    same(false, ext()->requestsData($source[0])['ready'], 'not ready yet');
+    ok(str_contains(ext()->requestsHtml(ext()->requestsData($source[0]) + ['libraries' => []]), 'being set up'), 'says so');
+});
+
+test('Requests tab: the page shows it all, escapes what it prints, offers "Buy more" when used up, and speaks Danish', function () {
+    [$service] = seerrTabCustomer('1/7');
+    $service->product->server->settings['more_requests_url'] = 'https://shop.example.com/extra';
+    ext()->placeRequest([tabSource($service)], $service->id, 'movie', 603);
+    $data = ext()->requestsData(tabSource($service)) + ['libraries' => []];
+    $html = ext()->requestsHtml($data, '/wizarr/requests', 'TOKEN');
+    foreach (['Requests', '0</b> of 1 movies left', 'Buy more requests', 'https://shop.example.com/extra', 'Trending', 'My requests', 'The Matrix', 'Available'] as $needle) {
+        ok(str_contains($html, $needle), "shows \"$needle\"");
+    }
+    $seasons = ext()->requestsHtml(ext()->requestsData(tabSource($service), '', 1399) + ['libraries' => []], '/wizarr/requests', 'TOKEN');
+    ok(str_contains($seasons, 'name="_token" value="TOKEN"') && str_contains($seasons, 'name="seasons[]" value="2"'), 'the seasons form, with the CSRF token');
+    $data['rows'][0]['items'][0]['title'] = '<script>x</script>';
+    ok(!str_contains(ext()->requestsHtml($data), '<script>x'), 'escaped');
+    ok(str_contains(inLocale('da', fn () => ext()->requestsHtml($data)), 'Mine anmodninger'), 'Danish');
+});
+
+/* ---------- extra requests: a top-up product ---------- */
+
+function topUpService(int $id, int $quantity = 1, int $extra = 5): Service
+{
+    global $STUB;
+    $topUp = service($id);
+    $topUp->status = 'active';
+    $topUp->quantity = $quantity;
+    $topUp->product = (object) ['name' => 'Extra requests', 'server' => (object) ['id' => 9, 'extension' => 'Wizarr', 'settings' => ['backend' => 'silo', 'host' => $STUB . '/silo', 'public_url' => 'https://watch.example.com', 'api_key' => 'sa_full']],
+        'settings' => siloSettings(['extra_requests' => (string) $extra])];
+
+    return $topUp;
+}
+
+test('extra requests: a top-up adds to the package for its period, times the quantity, once', function () {
+    [$service, $account] = siloWithRequests('10/30', 1);
+    $service->status = 'active';
+    $topUp = topUpService(80, 2);
+    $now = time();
+    same(10, silo()->applyTopUp($topUp, $topUp->product->settings, [$service, $topUp], $now), '2 x 5');
+    same(['custom', 20, 30], array_slice(siloLimit($account), 1), 'the limit in Silo: 10 + 10 for 30 days');
+    $until = strtotime((string) $topUp->propertyArray()['topup_until']);
+    ok(abs($until - ($now + 30 * 86400)) < 5, 'until the package\'s period from now');
+    ok(str_contains(json_encode(labels(silo()->getActions($topUp, $topUp->product->settings, props($topUp)))), 'Added to subscription #1'), 'the top-up\'s client area says where');
+    \App\Models\Service::$all = [$service, $topUp];
+    same(['invite_url' => '', 'invite_code' => '', 'invite_valid_for' => '', 'login_url' => '', 'extra_requests' => 10], silo()->createServer($topUp, $topUp->product->settings, props($topUp)), 'run again: nothing more, no invitation');
+    same(20, siloLimit($account)[2], 'still 20');
+    same(1, count(json_decode($service->propertyArray()['extra_requests'], true)), 'one entry');
+});
+
+test('extra requests: they expire after the period, and come off again when refunded', function () {
+    [$service, $account] = siloWithRequests('10/30', 1);
+    $service->status = 'active';
+    $topUp = topUpService(81);
+    silo()->applyTopUp($topUp, $topUp->product->settings, [$service, $topUp]);
+    same(15, siloLimit($account)[2], 'added');
+    // 31 days later the hourly run finds the entry expired.
+    $list = json_decode($service->propertyArray()['extra_requests'], true);
+    $list[0]['until'] = time() - 60;
+    $service->properties()->updateOrCreate(['key' => 'extra_requests'], ['name' => 'Extra requests', 'value' => json_encode($list)]);
+    $service->unsetRelation('properties');
+    $service->loadedProperties = null;
+    ext()->reconcileSeerr([$service]);
+    same(10, siloLimit($account)[2], 'back to the package');
+
+    $again = topUpService(82);
+    silo()->applyTopUp($again, $again->product->settings, [$service, $again]);
+    same(15, siloLimit($account)[2], 'a new one');
+    \App\Models\Service::$all = [$service, $again];
+    silo()->suspendServer($again, $again->product->settings, props($again)); // refunded
+    same(10, siloLimit($account)[2], 'refunded: off again');
+});
+
+test('extra requests: only on top of a package with a limit, refused at checkout otherwise', function () {
+    [$unlimited] = siloWithRequests('unlimited', 1);
+    $unlimited->status = 'active';
+    $topUp = topUpService(83);
+    same(null, silo()->topUpTarget($topUp, [$unlimited, $topUp]), 'unlimited can\'t grow');
+    tellsCustomer(fn () => silo()->applyTopUp($topUp, $topUp->product->settings, [$unlimited, $topUp]), 'You need one first', 'refused');
+    [$limited] = siloWithRequests('5', 2);
+    $limited->status = 'active';
+    same(2, silo()->topUpTarget($topUp, [$unlimited, $topUp, $limited])->id, 'the one with a limit');
 });
 
 /* ---------- summary ---------- */

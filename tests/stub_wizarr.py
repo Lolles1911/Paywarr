@@ -36,7 +36,13 @@ API_KEY = "stub-key"
 # 4 partly, 2 pending), as server/routes/search.ts answers.
 SEERR_CATALOG = [
     {"id": 949, "mediaType": "movie", "title": "Heat", "releaseDate": "1995-12-15", "posterPath": "/heat.jpg", "mediaInfo": {"status": 5}},
-    {"id": 1396, "mediaType": "tv", "name": "Breaking Heat", "firstAirDate": "2008-01-20", "posterPath": "/bh.jpg", "mediaInfo": {"status": 4}},
+    {"id": 1396, "mediaType": "tv", "name": "Breaking Heat", "firstAirDate": "2008-01-20", "posterPath": "/bh.jpg", "mediaInfo": {"status": 4,
+     "seasons": [{"seasonNumber": 1, "status": 5}]},
+     "seasons": [{"seasonNumber": 0, "name": "Specials", "episodeCount": 3}, {"seasonNumber": 1, "name": "Season 1", "episodeCount": 8},
+                 {"seasonNumber": 2, "name": "Season 2", "episodeCount": 10}, {"seasonNumber": 3, "name": "Season 3", "episodeCount": 9}]},
+    {"id": 603, "mediaType": "movie", "title": "The Matrix", "releaseDate": "1999-03-31", "posterPath": "/matrix.jpg"},
+    {"id": 1399, "mediaType": "tv", "name": "Dragon Throne", "firstAirDate": "2011-04-17", "posterPath": "/dt.jpg",
+     "seasons": [{"seasonNumber": 1, "name": "Season 1", "episodeCount": 10}, {"seasonNumber": 2, "name": "Season 2", "episodeCount": 10}]},
     {"id": 5, "mediaType": "movie", "title": "Heat Wave", "releaseDate": "2022-01-01", "posterPath": "/hw.jpg", "mediaInfo": {"status": 2}},
     {"id": 7, "mediaType": "movie", "title": "Heated", "releaseDate": "2010-01-01", "posterPath": "/../../evil"},
     {"id": 31, "mediaType": "person", "name": "Heath Ledger"},
@@ -46,7 +52,7 @@ SEERR_CATALOG = [
 def fresh_seerr(key: str, media: str) -> dict:
     """One Seerr: user 1 is the owner, as in Seerr."""
     return {"key": key, "csrf": False, "default_permissions": 32, "media": media,
-            "users": [{"id": 1, "jellyfinUserId": "jf-owner", "permissions": 2}], "next_id": 2}
+            "users": [{"id": 1, "jellyfinUserId": "jf-owner", "permissions": 2}], "next_id": 2, "requests": [], "next_request": 1}
 
 
 def fresh_state() -> dict:
@@ -70,7 +76,7 @@ def fresh_state() -> dict:
         # Seerr (served under /seerr/api/v1). User 1 is the owner, as in Seerr.
         # "media": the one media server type Seerr is connected to (Jellyfin or Emby).
         "seerr": {"key": "seerr-key", "csrf": False, "default_permissions": 32, "media": "jellyfin",
-                  "users": [{"id": 1, "jellyfinUserId": "jf-owner", "permissions": 2}], "next_id": 2},
+                  "users": [{"id": 1, "jellyfinUserId": "jf-owner", "permissions": 2}], "next_id": 2, "requests": [], "next_request": 1},
         "discord": {
             "token": "bot-token", "bot_id": "999", "guild": "100000000000000111", "members": ["999"], "down": False,
             # role id -> position; the bot's own role sits at 50
@@ -305,16 +311,95 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "GET" and path == "/status":
             return self.send_json(200, {"version": "3.5.1"})
+        # The Requests tab, as Seerr answers it: X-API-User picks the user (middleware/auth.ts).
+        acting = int(self.headers.get("X-API-User") or 1)
+        STATE["requests"][-1]["as"] = acting
+        if acting != 1 and not find(acting):
+            return self.send_json(500, {"message": "user not found"})
+
+        def media_state(entry: dict) -> dict:
+            info = dict(entry.get("mediaInfo") or {})
+            mine = [r for r in st["requests"] if r["media"]["tmdbId"] == entry["id"] and r["media"]["mediaType"] == entry["mediaType"] and r["status"] in (1, 2)]
+            if mine:
+                info.setdefault("status", 2)
+                info["requests"] = [{"status": r["status"], "seasons": r["seasons"]} for r in mine]
+            return info
+
+        def with_state(entry: dict) -> dict:
+            out = dict(entry)
+            info = media_state(entry)
+            if info:
+                out["mediaInfo"] = info
+            else:
+                out.pop("mediaInfo", None)
+            return out
+
+        def quota_of(u: dict, kind: str) -> dict:
+            limit = u.get(kind + "QuotaLimit") if u.get(kind + "QuotaLimit") is not None else (3 if kind == "movie" else 1)
+            days = u.get(kind + "QuotaDays") if u.get(kind + "QuotaDays") is not None else 7
+            mine = [r for r in st["requests"] if r["requestedBy"] == u["id"] and r["media"]["mediaType"] == ("movie" if kind == "movie" else "tv") and r["status"] != 3]
+            used = len(mine) if kind == "movie" else sum(len(r["seasons"]) for r in mine)  # Seerr counts each season
+            if not limit:
+                return {"used": used, "restricted": False}
+            return {"days": days, "limit": limit, "used": used, "remaining": max(0, limit - used), "restricted": used >= limit}
+
+        if method == "GET" and len(parts) == 3 and parts[0] == "user" and parts[2] == "quota":
+            u = find(int(parts[1]))
+            return self.send_json(200, {"movie": quota_of(u, "movie"), "tv": quota_of(u, "tv")}) if u else self.send_json(404, {"message": "User not found."})
+        if method == "GET" and path.startswith("/discover/"):
+            rows = {"/discover/trending": [949, 1396, 603, 1399], "/discover/movies": [603, 949], "/discover/tv": [1399, 1396], "/discover/movies/upcoming": [5]}
+            ids = rows.get(path)
+            if ids is None:
+                return self.send_json(404, {"message": "not found"})
+            hits = [with_state(r) for i in ids for r in SEERR_CATALOG if r["id"] == i]
+            return self.send_json(200, {"page": 1, "totalPages": 1, "totalResults": len(hits), "results": hits})
+        if method == "GET" and path == "/request":
+            q = parse_qs(self.path.partition("?")[2])
+            by = int((q.get("requestedBy") or ["0"])[0])
+            if by and acting != 1 and by != acting:
+                return self.send_json(403, {"message": "You do not have permission to view this user's requests."})
+            rows = [r for r in reversed(st["requests"]) if not by or r["requestedBy"] == by][: int((q.get("take") or ["10"])[0])]
+            return self.send_json(200, {"pageInfo": {"results": len(rows)}, "results": rows})
+        if method == "POST" and path == "/request":
+            u = find(acting)
+            if acting == 1 or not u or not (u["permissions"] & 32):
+                return self.send_json(403, {"message": "You do not have permission to make movie requests."})
+            kind = body.get("mediaType")
+            entry = next((r for r in SEERR_CATALOG if r["id"] == body.get("mediaId") and r["mediaType"] == kind), None)
+            if not entry:
+                return self.send_json(500, {"message": "not found"})
+            seasons = []
+            if kind == "tv":
+                wanted = body.get("seasons")
+                all_seasons = [x["seasonNumber"] for x in entry.get("seasons", []) if x["seasonNumber"] > 0]
+                seasons = all_seasons if wanted == "all" else [int(x) for x in wanted or []]
+                taken = {x["seasonNumber"] for x in (entry.get("mediaInfo") or {}).get("seasons", []) if x.get("status") == 5}
+                taken |= {x["seasonNumber"] for r in st["requests"] if r["media"]["tmdbId"] == entry["id"] and r["status"] in (1, 2) for x in r["seasons"]}
+                seasons = [n for n in seasons if n not in taken]
+                if not seasons:
+                    return self.send_json(202, {"message": "No seasons available to request"})
+            elif (entry.get("mediaInfo") or {}).get("status") == 5 or any(r["media"]["tmdbId"] == entry["id"] and r["status"] in (1, 2) for r in st["requests"]):
+                return self.send_json(409, {"message": "Request for this media already exists."})
+            q = quota_of(u, "movie" if kind == "movie" else "tv")
+            if q.get("limit") and q["used"] + (1 if kind == "movie" else len(seasons)) > q["limit"]:
+                return self.send_json(403, {"message": "Quota exceeded."})
+            r = {"id": st["next_request"], "status": 1, "createdAt": "2026-11-15T10:00:00.000Z", "requestedBy": acting, "type": kind,
+                 "media": {"tmdbId": entry["id"], "mediaType": kind, "status": 2},
+                 "seasons": [{"id": n, "seasonNumber": n, "status": 1} for n in seasons]}  # as entity/SeasonRequest
+            st["next_request"] += 1
+            st["requests"].append(r)
+            return self.send_json(201, r)
+
         if method == "GET" and path == "/search":
             raw = self.path.partition("?")[2]
             if "+" in raw:  # Seerr's request validation wants %20, as encodeURIComponent writes it
                 return self.send_json(400, {"message": "query must be URL encoded"})
             q = (parse_qs(raw).get("query") or [""])[0].lower()
-            hits = [r for r in SEERR_CATALOG if q in (r.get("title") or r.get("name") or "").lower()]
+            hits = [with_state(r) for r in SEERR_CATALOG if q in (r.get("title") or r.get("name") or "").lower()]
             return self.send_json(200, {"page": 1, "totalPages": 1, "totalResults": len(hits), "results": hits})
         if method == "GET" and len(parts) == 2 and parts[0] in ("movie", "tv") and parts[1].isdigit():
             hit = next((r for r in SEERR_CATALOG if r["id"] == int(parts[1]) and r["mediaType"] == parts[0]), None)
-            return self.send_json(200, hit) if hit else self.send_json(404, {"message": "Unable to retrieve"})
+            return self.send_json(200, with_state(hit)) if hit else self.send_json(404, {"message": "Unable to retrieve"})
         if method == "GET" and path == "/settings/main":
             # server/constants/server.ts: PLEX = 1, JELLYFIN = 2, EMBY = 3
             return self.send_json(200, {"mediaServerType": {"plex": 1, "jellyfin": 2, "emby": 3}.get(st["media"], 4), "applicationTitle": "Seerr"})

@@ -302,6 +302,180 @@ class SiloClient
             ? ['body' => $response->body(), 'type' => $type] : null;
     }
 
+    /* ------------------------------------------------------------------
+     | The Requests tab
+     * ----------------------------------------------------------------- */
+
+    /** How much the account may still request (Silo counts requests, movies and series alike). */
+    public function requestQuota(int $id): array
+    {
+        $usage = $this->request('get', '/api/v2/admin/request-users/' . $id . '/usage');
+        if (!empty($usage['unlimited'])) {
+            return ['unlimited' => true, 'parts' => [], 'allowed' => !empty($usage['allowed'])];
+        }
+
+        return ['unlimited' => false, 'allowed' => !empty($usage['allowed']), 'parts' => [[
+            'label' => 'requests', 'used' => (int) ($usage['used'] ?? 0), 'limit' => (int) ($usage['max_requests'] ?? 0),
+            'remaining' => max(0, (int) ($usage['remaining'] ?? 0)), 'days' => (int) ($usage['window_days'] ?? 0),
+        ]]];
+    }
+
+    /** Movies and series matching $query, with their state in Silo. */
+    public function requestSearch(string $query): array
+    {
+        $answer = $this->request('get', '/api/v2/requests/search?' . http_build_query(['q' => $query, 'page' => 1]), headers: $this->asOwner());
+
+        return array_map(fn ($result) => $this->requestRow($result), array_values(array_filter($answer['results'] ?? [], fn ($r) => in_array($r['media_type'] ?? '', ['movie', 'series'], true))));
+    }
+
+    /** Silo's discovery rows. */
+    public function requestDiscover(): array
+    {
+        $rows = [];
+        foreach (['trending_movies', 'trending_series', 'popular_movies', 'popular_series', 'upcoming_movies'] as $section) {
+            try {
+                $items = array_map(fn ($result) => $this->requestRow($result), $this->request('get', '/api/v2/requests/discover/' . $section . '?page=1', headers: $this->asOwner())['results'] ?? []);
+            } catch (WizarrException $e) {
+                $items = [];
+            }
+            if ($items) {
+                $rows[] = ['key' => $section, 'items' => array_slice($items, 0, 20)];
+            }
+        }
+
+        return $rows;
+    }
+
+    /** A series: title, year, poster, and its seasons: number, name, episodes, state. */
+    public function requestSeasons(int $tmdb): array
+    {
+        $detail = $this->requestDetail('series', $tmdb) ?? [];
+
+        return ['title' => (string) ($detail['title'] ?? ''), 'year' => isset($detail['year']) ? (int) $detail['year'] : null, 'poster' => self::posterUrl($detail['poster_path'] ?? null), 'seasons' => array_map(fn ($season) => [
+            'number' => (int) $season['season_number'], 'name' => (string) ($season['name'] ?? ''), 'episodes' => (int) ($season['episode_count'] ?? 0),
+            'state' => !empty($season['requested']) && ($season['availability'] ?? '') !== 'available' ? 'requested' : match ($season['availability'] ?? '') {
+                'available' => 'available', 'partial' => 'partial', default => 'none',
+            },
+        ], $detail['seasons'] ?? [])];
+    }
+
+    /** The account's own requests, newest first. */
+    public function myRequests(int $id, int $count = 20): array
+    {
+        $answer = $this->request('get', '/api/v2/admin/requests?' . http_build_query(['requested_by_user_id' => $id, 'limit' => $count]));
+        $mine = [];
+        foreach ($answer['items'] ?? [] as $request) {
+            if ((string) ($request['requested_by_user_id'] ?? $id) !== (string) $id) {
+                continue; // only theirs, whatever the filter did
+            }
+            $mine[] = [
+                'type' => ($request['media_type'] ?? '') === 'series' ? 'tv' : 'movie', 'tmdb' => (int) ($request['tmdb_id'] ?? 0),
+                'title' => (string) ($request['title'] ?? ''), 'year' => isset($request['year']) ? (int) $request['year'] : null,
+                'poster' => self::posterUrl($request['poster_path'] ?? null),
+                'date' => (string) ($request['created_at'] ?? ''),
+                'seasons' => array_values(array_map('intval', $request['seasons'] ?? [])),
+                'status' => match (true) {
+                    in_array($request['outcome'] ?? 'active', ['declined', 'cancelled', 'failed'], true) => (string) $request['outcome'],
+                    ($request['state'] ?? '') === 'available' => 'available',
+                    in_array($request['state'] ?? '', ['partially_available', 'partial'], true) => 'partial',
+                    in_array($request['state'] ?? '', ['processing', 'downloading', 'queued'], true) => 'processing',
+                    ($request['state'] ?? '') === 'approved' => 'approved',
+                    default => 'pending',
+                },
+            ];
+        }
+
+        return $mine;
+    }
+
+    /**
+     * Requests a movie or a series' seasons as the account itself, so it is
+     * theirs in Silo: its limit, its name, Silo's approval rules. Silo has no
+     * "on behalf of" for API keys, so this signs in as the account for the one
+     * call (an impersonation session, in Silo's audit log) and signs out again.
+     */
+    public function createRequestAs(int $id, string $type, int $tmdb, array|string $seasons = 'all'): void
+    {
+        $mediaType = $type === 'tv' ? 'series' : 'movie';
+        $detail = $this->requestDetail($mediaType, $tmdb);
+        if (!$detail) {
+            throw new WizarrException('Silo does not know that title.', 404);
+        }
+        $body = ['media_type' => $mediaType, 'tmdb_id' => $tmdb, 'title' => (string) $detail['title']];
+        foreach (['year', 'poster_path', 'backdrop_path', 'overview', 'imdb_id', 'tvdb_id'] as $field) {
+            if (isset($detail[$field]) && $detail[$field] !== '' && $detail[$field] !== null) {
+                $body[$field] = $detail[$field];
+            }
+        }
+        if ($mediaType === 'series' && is_array($seasons) && $seasons) {
+            $body['seasons'] = array_values(array_map('intval', $seasons));
+        }
+
+        $session = $this->request('post-empty', '/api/v2/admin/users/' . $id . '/impersonate', retry: false);
+        $token = (string) ($session['access_token'] ?? '');
+        if ($token === '' || (string) ($session['user']['id'] ?? $id) !== (string) $id) {
+            throw new WizarrException('Silo did not open a session for account ' . $id . '.');
+        }
+        $as = ['Authorization' => 'Bearer ' . $token];
+        try {
+            $profile = '';
+            foreach ($this->request('get', '/api/v2/profiles', headers: $as)['items'] ?? [] as $candidate) {
+                if (!empty($candidate['is_primary'])) {
+                    $profile = (string) $candidate['id'];
+                }
+            }
+            $this->request('post', '/api/v2/requests', $body, retry: false, headers: $as + ['X-Profile-Id' => $profile]);
+        } finally {
+            try {
+                $this->request('post-empty', '/api/v2/auth/impersonation/end', retry: false, headers: $as);
+            } catch (Throwable $e) {
+                // The session ends by itself when its token expires.
+            }
+        }
+    }
+
+    private function requestDetail(string $mediaType, int $tmdb): ?array
+    {
+        try {
+            return $this->request('get', '/api/v2/requests/detail/' . $mediaType . '/' . $tmdb, headers: $this->asOwner());
+        } catch (WizarrException $e) {
+            if ($e->isNotFound()) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    /** Silo's request result as the tab shows it. */
+    private function requestRow(array $result): array
+    {
+        $state = ($result['availability'] ?? '') === 'available' ? 'available' : match ($result['request']['state'] ?? '') {
+            '' => 'none',
+            'partially_available', 'partial' => 'partial',
+            'processing', 'downloading', 'queued' => 'processing',
+            'available' => 'available',
+            default => 'requested',
+        };
+
+        return ['type' => ($result['media_type'] ?? '') === 'series' ? 'tv' : 'movie', 'tmdb' => (int) ($result['tmdb_id'] ?? 0),
+            'title' => (string) ($result['title'] ?? ''), 'year' => isset($result['year']) ? (int) $result['year'] : null,
+            'poster' => self::posterUrl($result['poster_path'] ?? null), 'state' => $state];
+    }
+
+    /** A TMDB poster path as an address; null for anything that isn't one. */
+    public static function posterUrl(?string $path): ?string
+    {
+        return $path !== null && preg_match('~^/[A-Za-z0-9._-]+$~', $path) ? 'https://image.tmdb.org/t/p/w300' . $path : null;
+    }
+
+    /** Headers for reads that act as the key owner's primary profile. */
+    private function asOwner(): array
+    {
+        $profile = $this->profileId();
+
+        return $profile === '' ? [] : ['X-Profile-Id' => $profile];
+    }
+
     private ?string $profileId = null;
 
     /** The key owner's primary profile, which catalog reads act as; "" when it has a PIN. */
@@ -408,15 +582,18 @@ class SiloClient
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             try {
-                $pending = Http::withHeaders([
+                // Headers given win: an impersonation session's own Authorization replaces the key's.
+                $pending = Http::withHeaders($headers + [
                     'Authorization' => 'Bearer ' . $this->apiKey,
                     'Accept' => 'application/json',
-                ] + $headers)->timeout($this->timeout);
+                ])->timeout($this->timeout);
 
                 $response = match ($method) {
                     'get' => $pending->get($url),
                     'delete' => $pending->delete($url),
                     'post' => $pending->post($url, $data),
+                    // No body at all: Silo's actions without input refuse even "[]".
+                    'post-empty' => $pending->send('POST', $url),
                     'put' => $pending->put($url, $data),
                 };
                 $lastError = null;

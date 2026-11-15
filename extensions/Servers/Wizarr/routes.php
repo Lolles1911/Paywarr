@@ -32,3 +32,9 @@ Route::middleware(['web', 'auth'])->prefix('wizarr/report')->name('extensions.wi
     Route::post('/', [Wizarr::class, 'reportSubmit'])->name('.submit');
     Route::get('/poster/{service}', [Wizarr::class, 'reportPoster'])->whereNumber('service')->middleware('throttle:120,1')->name('.poster');
 });
+
+// The Requests tab: search, request, discover, my requests. For customers with requests.
+Route::middleware(['web', 'auth'])->prefix('wizarr/requests')->name('extensions.wizarr.requests')->group(function () {
+    Route::get('/', [Wizarr::class, 'requestsPage']);
+    Route::post('/', [Wizarr::class, 'requestsSubmit'])->name('.submit');
+});

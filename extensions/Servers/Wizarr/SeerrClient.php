@@ -194,16 +194,196 @@ class SeerrClient
         ];
     }
 
+    /* ------------------------------------------------------------------
+     | The Requests tab: everything as the customer (X-API-User)
+     * ----------------------------------------------------------------- */
+
+    /**
+     * How much the user may still request: one part for movies, one for TV
+     * seasons (Seerr counts them apart). Unlimited when Seerr sets no limit.
+     */
+    public function requestQuota(int $user): array
+    {
+        $quota = $this->call('get', '/user/' . $user . '/quota') ?? [];
+        $parts = [];
+        foreach (['movie' => 'movies', 'tv' => 'tv'] as $key => $label) {
+            $part = $quota[$key] ?? [];
+            if (!empty($part['limit'])) {
+                $parts[] = ['label' => $label, 'used' => (int) ($part['used'] ?? 0), 'limit' => (int) $part['limit'],
+                    'remaining' => max(0, (int) ($part['remaining'] ?? ((int) $part['limit'] - (int) ($part['used'] ?? 0)))), 'days' => (int) ($part['days'] ?? 0)];
+            }
+        }
+
+        return ['unlimited' => $parts === [], 'parts' => $parts];
+    }
+
+    /** Movies and shows matching $query, with their state on the server. */
+    public function requestSearch(int $user, string $query): array
+    {
+        $answer = $this->call('get', '/search?' . http_build_query(['query' => $query, 'page' => 1], '', '&', PHP_QUERY_RFC3986), asUser: $user) ?? [];
+
+        return $this->requestRows($answer['results'] ?? []);
+    }
+
+    /** Seerr's discovery rows: trending, popular movies and shows, upcoming movies. */
+    public function requestDiscover(int $user): array
+    {
+        $rows = [];
+        foreach (['trending' => '/discover/trending', 'popular_movies' => '/discover/movies', 'popular_series' => '/discover/tv', 'upcoming_movies' => '/discover/movies/upcoming'] as $key => $path) {
+            try {
+                $items = $this->requestRows(($this->call('get', $path . '?page=1', asUser: $user) ?? [])['results'] ?? []);
+            } catch (SeerrException $e) {
+                $items = [];
+            }
+            if ($items) {
+                $rows[] = ['key' => $key, 'items' => array_slice($items, 0, 20)];
+            }
+        }
+
+        return $rows;
+    }
+
+    /** A show: title, year, poster, and its seasons (no specials): number, name, episodes, state. */
+    public function requestSeasons(int $user, int $tmdb): array
+    {
+        $show = $this->call('get', '/tv/' . $tmdb, notFound: true, asUser: $user);
+        if ($show === null) {
+            return ['title' => '', 'year' => null, 'poster' => null, 'seasons' => []];
+        }
+        $row = $this->titleRow('tv', $show);
+        $states = [];
+        foreach ($show['mediaInfo']['seasons'] ?? [] as $season) {
+            $states[(int) $season['seasonNumber']] = $this->stateOf((int) ($season['status'] ?? 1));
+        }
+        foreach ($show['mediaInfo']['requests'] ?? [] as $request) {
+            if (in_array((int) ($request['status'] ?? 0), [1, 2], true)) {
+                foreach ($request['seasons'] ?? [] as $season) {
+                    $number = (int) $season['seasonNumber'];
+                    if (($states[$number] ?? 'none') === 'none') {
+                        $states[$number] = 'requested';
+                    }
+                }
+            }
+        }
+        $seasons = [];
+        foreach ($show['seasons'] ?? [] as $season) {
+            $number = (int) ($season['seasonNumber'] ?? 0);
+            if ($number > 0) {
+                $seasons[] = ['number' => $number, 'name' => (string) ($season['name'] ?? ''), 'episodes' => (int) ($season['episodeCount'] ?? 0), 'state' => $states[$number] ?? 'none'];
+            }
+        }
+
+        return ['title' => $row['title'], 'year' => $row['year'], 'poster' => $row['posterPath'] ? self::poster($row['posterPath']) : null, 'seasons' => $seasons];
+    }
+
+    /** The user's own requests, newest first, with titles and posters. */
+    public function myRequests(int $user, int $count = 20): array
+    {
+        $answer = $this->call('get', '/request?' . http_build_query(['take' => $count, 'skip' => 0, 'filter' => 'all', 'sort' => 'added', 'requestedBy' => $user]), asUser: $user) ?? [];
+        $mine = [];
+        foreach ($answer['results'] ?? [] as $request) {
+            $type = (string) ($request['media']['mediaType'] ?? $request['type'] ?? '');
+            $tmdb = (int) ($request['media']['tmdbId'] ?? 0);
+            if (!in_array($type, ['movie', 'tv'], true) || $tmdb === 0) {
+                continue;
+            }
+            $title = $this->titleCached($type, $tmdb);
+            $media = (int) ($request['media']['status'] ?? 1);
+            $mine[] = [
+                'type' => $type, 'tmdb' => $tmdb,
+                'title' => $title['title'] ?? '#' . $tmdb, 'year' => $title['year'] ?? null,
+                'poster' => isset($title['posterPath']) ? self::poster($title['posterPath']) : null,
+                'date' => (string) ($request['createdAt'] ?? ''),
+                'seasons' => array_values(array_map(fn ($s) => (int) $s['seasonNumber'], $request['seasons'] ?? [])),
+                'status' => match (true) {
+                    (int) ($request['status'] ?? 0) === 3 => 'declined',
+                    (int) ($request['status'] ?? 0) === 4 => 'failed',
+                    $media === 5 => 'available',
+                    $media === 4 => 'partial',
+                    (int) ($request['status'] ?? 0) === 1 => 'pending',
+                    $media === 3 => 'processing',
+                    default => 'approved',
+                },
+            ];
+        }
+
+        return $mine;
+    }
+
+    /**
+     * Requests a movie, or a show's seasons ("all", or numbers), as the user.
+     * Seerr's own rules apply: their permission, limit and auto-approval.
+     */
+    public function createRequest(int $user, string $type, int $tmdb, array|string $seasons = 'all'): void
+    {
+        $body = ['mediaType' => $type, 'mediaId' => $tmdb, 'is4k' => false];
+        if ($type === 'tv') {
+            $body['seasons'] = $seasons;
+        }
+        $this->call('post', '/request', $body, asUser: $user);
+    }
+
+    /** @var array<string, ?array> */
+    private array $titles = [];
+
+    private function titleCached(string $type, int $tmdb): ?array
+    {
+        return $this->titles[$type . $tmdb] ??= $this->title($type, $tmdb);
+    }
+
+    /** Seerr's results as the tab shows them: type, tmdb, title, year, poster, state. */
+    private function requestRows(array $results): array
+    {
+        $rows = [];
+        foreach ($results as $result) {
+            $type = $result['mediaType'] ?? '';
+            if (!in_array($type, ['movie', 'tv'], true)) {
+                continue;
+            }
+            $row = $this->titleRow($type, $result);
+            $state = $this->stateOf((int) ($result['mediaInfo']['status'] ?? 1));
+            if ($state === 'none' && !empty($result['mediaInfo']['requests'])) {
+                $state = 'requested';
+            }
+            $rows[] = ['type' => $type, 'tmdb' => $row['id'], 'title' => $row['title'], 'year' => $row['year'],
+                'poster' => $row['posterPath'] ? self::poster($row['posterPath']) : null, 'state' => $state];
+        }
+
+        return $rows;
+    }
+
+    /** Seerr's media status (constants/media.ts) as the tab names it. */
+    private function stateOf(int $status): string
+    {
+        return match ($status) {
+            5 => 'available',
+            4 => 'partial',
+            3 => 'processing',
+            2 => 'requested',
+            default => 'none',
+        };
+    }
+
+    /** A TMDB poster path as an address (the path is checked by titleRow()). */
+    public static function poster(string $path): string
+    {
+        return 'https://image.tmdb.org/t/p/w300' . $path;
+    }
+
     public function deleteUser(int $id): void
     {
         $this->call('delete', '/user/' . $id, notFound: true);
     }
 
-    private function call(string $method, string $path, ?array $data = null, bool $notFound = false): ?array
+    /**
+     * @param  int|null  $asUser  act as this Seerr user (X-API-User): their permissions,
+     *                            limits and name, as Seerr's middleware/auth.ts allows the API key
+     */
+    private function call(string $method, string $path, ?array $data = null, bool $notFound = false, ?int $asUser = null): ?array
     {
         $url = rtrim($this->baseUrl, '/') . '/api/v1' . $path;
         try {
-            $request = Http::withHeaders(['X-Api-Key' => $this->apiKey, 'Accept' => 'application/json'])->timeout($this->timeout);
+            $request = Http::withHeaders(['X-Api-Key' => $this->apiKey, 'Accept' => 'application/json'] + ($asUser !== null ? ['X-API-User' => (string) $asUser] : []))->timeout($this->timeout);
             $response = match ($method) {
                 'get' => $request->get($url),
                 'post' => $request->post($url, $data ?? []),
@@ -224,7 +404,7 @@ class SeerrClient
         }
 
         $message = is_array($body) ? (string) ($body['message'] ?? '') : '';
-        throw new SeerrException(match (true) {
+        throw new SeerrException(status: $status, seerrMessage: $message, message: match (true) {
             $status === 401 || $status === 403 && $message === '' => 'Seerr rejected the API key (' . $status . '). Check "Seerr API key" on the Wizarr server.',
             stripos($message, 'csrf') !== false => 'Seerr\'s "CSRF Protection" blocks API calls. Turn it off in Seerr: Settings -> Network.',
             default => 'Seerr answered ' . $status . ' for ' . strtoupper($method) . ' ' . $path . ($message !== '' ? ': ' . $message : '') . '.',

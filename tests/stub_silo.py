@@ -45,6 +45,16 @@ def fresh() -> dict:
         "accounts": [{"id": "1", "username": "owner", "email": "owner@example.com", "role": "admin", "enabled": True, "password_login": True, "rev": 1, "is_owner": True}],
         "reset_links": [],
         "profiles": [{"id": "p-owner", "is_primary": True, "has_pin": False}],
+        # The request side (TMDB titles), as /api/v2/requests/* answer them.
+        "request_catalog": [
+            {"media_type": "movie", "tmdb_id": 949, "title": "Heat", "year": 1995, "poster_path": "/heat.jpg", "availability": "available"},
+            {"media_type": "movie", "tmdb_id": 603, "title": "The Matrix", "year": 1999, "poster_path": "/matrix.jpg", "availability": "missing"},
+            {"media_type": "series", "tmdb_id": 1399, "title": "Dragon Throne", "year": 2011, "poster_path": "/dt.jpg", "availability": "missing",
+             "seasons": [{"season_number": 1, "name": "Season 1", "episode_count": 10, "availability": "available"},
+                         {"season_number": 2, "name": "Season 2", "episode_count": 10, "availability": "missing"}]},
+        ],
+        "media_requests": [],
+        "sessions": {},
         "catalog": [
             {"content_id": "movie:heat-1995", "type": "movie", "title": "Heat", "year": 1995, "poster_url": "/img/heat.jpg"},
             {"content_id": "series:heat-house", "type": "series", "title": "Heat House", "year": 2024, "series_poster_url": "/img/heat-house.jpg"},
@@ -99,6 +109,9 @@ def handle(state: dict, method: str, path: str, query: dict, body, headers) -> t
                              "if_match": headers.get("If-Match")})
 
     auth = headers.get("Authorization") or ""
+    session = silo["sessions"].get(auth[7:]) if auth.startswith("Bearer imp-") else None
+    if session is not None:
+        return as_account(silo, session, auth[7:], method, path, body, headers)
     if auth not in (f"Bearer {KEY}", f"Bearer {SCOPED_KEY}"):
         return (*problem(401, "authentication_required"), {})
     scoped = auth == f"Bearer {SCOPED_KEY}"
@@ -114,6 +127,49 @@ def handle(state: dict, method: str, path: str, query: dict, body, headers) -> t
 
     if method == "GET" and path.startswith("/img/"):
         return 200, {"image": path}, {"Content-Type": "image/jpeg"}
+    if method == "POST" and len(parts) == 6 and parts[2:4] == ["admin", "users"] and parts[5] == "impersonate":
+        if body:
+            return (*problem(422, "validation_failed", "no body expected"), {})
+        acc = next((a for a in silo["accounts"] if a["id"] == parts[4]), None)
+        if not acc:
+            return (*problem(404, "not_found"), {})
+        token = f"imp-{acc['id']}-{len(silo['sessions']) + 1}"
+        silo["sessions"][token] = {"account": acc["id"], "ended": False}
+        return 200, {"access_token": token, "refresh_token": "r", "expires_in": 3600, "user": {"id": acc["id"], "username": acc["username"], "role": acc["role"]}}, {}
+    if method == "GET" and len(parts) == 6 and parts[2:4] == ["admin", "request-users"] and parts[5] == "usage":
+        acc = next((a for a in silo["accounts"] if a["id"] == parts[4]), None)
+        if not acc:
+            return (*problem(404, "not_found"), {})
+        limit = acc.get("request_limit") or {"limit_mode": "inherit"}
+        used = len([r for r in silo["media_requests"] if r["requested_by_user_id"] == acc["id"]])
+        unlimited = limit["limit_mode"] == "unlimited"
+        maximum = limit.get("max_requests") if limit["limit_mode"] == "custom" else 5
+        return 200, {"allowed": acc.get("requests_allowed") is not False, "auto_approve": False, "unlimited": unlimited, "max_requests": maximum or 0,
+                     "used": 0 if unlimited else used, "remaining": 0 if unlimited else max(0, (maximum or 0) - used),
+                     "window_days": limit.get("window_days") or 7, "window_start": "2026-11-08T00:00:00.000Z", "requests_enabled": True}, {}
+    if method == "GET" and path.startswith("/api/v2/requests/") and headers.get("X-Profile-Id") != "p-owner":
+        return (*problem(400, "profile_required"), {})
+    if method == "GET" and path == "/api/v2/requests/search":
+        q = query.get("q", "").lower()
+        return 200, {"page": 1, "total_pages": 1, "total_results": 0, "results": [request_result(silo, r) for r in silo["request_catalog"] if q in r["title"].lower()]}, {}
+    if method == "GET" and path.startswith("/api/v2/requests/discover/"):
+        section = parts[4]
+        if section not in ("trending_movies", "trending_series", "popular_movies", "popular_series", "upcoming_movies", "on_air_series"):
+            return (*problem(422, "validation_failed"), {})
+        kind = "series" if "series" in section else "movie"
+        rows = [request_result(silo, r) for r in silo["request_catalog"] if r["media_type"] == kind]
+        return 200, {"key": section, "title": section, "page": 1, "total_pages": 1, "total_results": len(rows), "results": rows}, {}
+    if method == "GET" and len(parts) == 6 and parts[2:4] == ["requests", "detail"]:
+        hit = next((r for r in silo["request_catalog"] if r["media_type"] == parts[4] and str(r["tmdb_id"]) == parts[5]), None)
+        if not hit:
+            return (*problem(404, "not_found"), {})
+        requested = {n for x in silo["media_requests"] if x["tmdb_id"] == hit["tmdb_id"] for n in x["seasons"]}
+        return 200, {**request_result(silo, hit), "seasons": [{**season, "requested": season["season_number"] in requested} for season in hit.get("seasons", [])],
+                     "genres": [], "cast": [], "creators": [], "networks": [], "production_companies": [], "recommendations": []}, {}
+    if method == "GET" and path == "/api/v2/admin/requests":
+        rows = [r for r in reversed(silo["media_requests"]) if "requested_by_user_id" not in query or r["requested_by_user_id"] == query["requested_by_user_id"]]
+        return 200, {"items": rows[: int(query.get("limit", 50))], "page": {"has_more": False}}, {}
+
     if method == "GET" and path == "/api/v2/profiles":
         return 200, {"items": silo["profiles"]}, {}
     if method == "GET" and (path == "/api/v2/catalog" or path.startswith("/api/v2/catalog/items/")):
@@ -246,6 +302,49 @@ def handle(state: dict, method: str, path: str, query: dict, body, headers) -> t
             return 204, None, {}
 
     return (*problem(404, "not_found"), {})
+
+
+def request_result(silo: dict, entry: dict) -> dict:
+    """A request-side title with the state of its active request, if any."""
+    active = next((r for r in silo["media_requests"] if r["tmdb_id"] == entry["tmdb_id"] and r["outcome"] == "active"), None)
+    out = {k: v for k, v in entry.items() if k != "seasons"}
+    out["request"] = {"requestable": active is None and entry["availability"] != "available", "following": False, "requested_by_viewer": False,
+                      **({"request_id": active["id"], "state": active["state"], "status": active["status"]} if active else {})}
+    out["in_watchlist"] = False
+    return out
+
+
+def as_account(silo: dict, session: dict, token: str, method: str, path: str, body, headers) -> tuple[int, object, dict]:
+    """What an impersonation session may do here: its profiles, a request, end."""
+    if session["ended"]:
+        return (*problem(401, "authentication_required"), {})
+    acc = next((a for a in silo["accounts"] if a["id"] == session["account"]), None)
+    if method == "GET" and path == "/api/v2/profiles":
+        return 200, {"items": [{"id": "p-" + acc["id"], "is_primary": True, "has_pin": False}]}, {}
+    if method == "POST" and path == "/api/v2/auth/impersonation/end":
+        session["ended"] = True
+        return 204, None, {}
+    if method == "POST" and path == "/api/v2/requests":
+        if headers.get("X-Profile-Id") != "p-" + acc["id"]:
+            return (*problem(403, "permission_denied", "profile"), {})
+        if not isinstance(body, dict) or not {"media_type", "tmdb_id", "title"} <= set(body):
+            return (*problem(422, "validation_failed"), {})
+        if acc.get("requests_allowed") is False:
+            return (*problem(403, "permission_denied", "requests are off"), {})
+        limit = acc.get("request_limit") or {"limit_mode": "inherit"}
+        used = len([r for r in silo["media_requests"] if r["requested_by_user_id"] == acc["id"]])
+        maximum = limit.get("max_requests") if limit["limit_mode"] == "custom" else (None if limit["limit_mode"] == "unlimited" else 5)
+        if maximum is not None and used >= maximum:
+            return (*problem(403, "quota_exceeded"), {})
+        if any(r["tmdb_id"] == body["tmdb_id"] and r["outcome"] == "active" and not body.get("seasons") for r in silo["media_requests"]):
+            return (*problem(409, "conflict", "already requested"), {})
+        r = {"id": f"r{len(silo['media_requests']) + 1}", "provider": "tmdb", "media_type": body["media_type"], "tmdb_id": body["tmdb_id"], "title": body["title"],
+             "year": body.get("year"), "poster_path": body.get("poster_path"), "status": "pending", "outcome": "active", "state": "pending",
+             "seasons": body.get("seasons", []), "season_progress": [], "source": "direct", "requested_by_user_id": acc["id"],
+             "requested_by_profile_id": headers.get("X-Profile-Id"), "is_anime": False, "targets": [], "created_at": "2026-11-15T10:00:00.000Z", "updated_at": "2026-11-15T10:00:00.000Z"}
+        silo["media_requests"].append(r)
+        return 201, r, {}
+    return (*problem(403, "permission_denied"), {})
 
 
 def handle_test(state: dict, path: str, body: dict) -> object:

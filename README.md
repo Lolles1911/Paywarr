@@ -736,6 +736,55 @@ If it doesn't work, run `tools/seerr-check.php` (see *Troubleshooting*).
 Typically `http://` or the whole internal address is missing, or the "Yes"
 option doesn't have the environment variable `yes`/`ja`.
 
+## The Requests tab
+
+Customers with requests get **Requests** in the client area menu
+(`/wizarr/requests`), a request page inside Paymenter:
+
+- **What is left** of their limit, e.g. "3 of 10 requests left · 30 days" (with
+  Seerr movies and TV seasons apart, as Seerr counts them).
+- **Search** for movies and shows, each marked *Available*, *Partly
+  available*, *Requested* or *Processing*; the others have a **Request**
+  button. For a show the customer chooses the seasons.
+- **Discover:** rows of trending, popular and upcoming movies and shows.
+- **My requests:** their own, with their state (requested, approved,
+  processing, available, declined).
+- With subscriptions on more than one server, a tab per library.
+
+**With Seerr** everything happens as the customer (Seerr's `X-API-User`), so
+their own limit, name and Seerr's approval rules apply. **On Silo** the page is
+read with the server's key, and a request is placed as the customer: Paywarr
+signs in as their account for that one call and signs out again (an
+impersonation session, which Silo's audit log shows). Silo's own limit and
+approval rules apply.
+
+**Who may request** is a server setting, *Requests: who may request*:
+
+| Setting | Who gets the tab, and requests in Seerr or Silo |
+|---|---|
+| Customers who bought requests (default) | Subscriptions with the `requests` option, or *Requests included* on the product |
+| Every active customer on this server | Every active subscription on the server, with the default limit |
+
+### Extra requests (top-ups)
+
+Customers who have used up their requests can buy more:
+
+1. Create a product, e.g. "Extra request", on the same server, with a
+   **one-time** price per request and **Allow quantity: combined**, so the
+   customer chooses how many. (The product page asks for a media server too;
+   choose any, it isn't used.)
+2. On the product, set **Extra requests (top-up product)** to how many one of
+   it gives, e.g. `1`.
+3. On the server, put the product's page in **Requests: link to buy more**.
+   The Requests tab then shows **Buy more requests** when the limit is used.
+
+When paid, the requests are added to the customer's package (number × quantity)
+for the package's period from the purchase, e.g. 30 days, and then expire; no
+invitation is sent. They can only be bought on top of a package with a limit:
+"unlimited", or Seerr's or Silo's default limit, can't grow, and checkout
+refuses a top-up without a package. A refunded top-up comes off again. With
+Seerr the extra requests count for movies and for TV seasons alike.
+
 ## Report a problem with a movie or show
 
 Customers with requests (Seerr, or Silo's own) get **Report a problem** in the
@@ -983,7 +1032,7 @@ They behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-207 scenarios run the extension through the whole lifecycle against
+216 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -992,7 +1041,8 @@ password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
 and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
 Emby or both with one invitation each (including switching later), Seerr
-request packages, up to three Seerr (including Plex), problem reports, Silo without Wizarr
+request packages, up to three Seerr (including Plex), the Requests tab and
+extra requests, problem reports, Silo without Wizarr
 (its edit guard, paging, its own requests, and that administrators are never
 touched), and the
 languages (English, Danish, and that every text in the code has a Danish
