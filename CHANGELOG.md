@@ -9,7 +9,7 @@ release on GitHub (`.github/release-notes.sh` puts it there).
   last name) couldn't open their Account page in Paymenter. New sign-ups get
   an empty last name instead of none. Customers who already signed up are
   fixed with:
-  `cd /opt/paymenter && sudo -u www-data php artisan tinker --execute='App\Models\User::whereNull("last_name")->update(["last_name" => ""]);'`
+  `cd /opt/paymenter && sudo -u www-data XDG_CONFIG_HOME=/tmp php artisan tinker --execute='App\Models\User::whereNull("last_name")->update(["last_name" => ""]);'`
 
 ## 1.20.0 (2026-11-15)
 
