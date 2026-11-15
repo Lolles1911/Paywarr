@@ -3,6 +3,18 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.18.0 (2026-11-15)
+
+- **New: requests on Silo.** On a Silo server, the `seerr` option and its
+  request packages now control Silo's own requests instead of Seerr: switched
+  on per account with the package's limit (e.g. 10 every 30 days, unlimited,
+  or Silo's default), off without the option and while suspended. Changing
+  package changes the limit at once, and the client area shows it.
+- **Fixed:** with both a Wizarr and a Silo server in Paymenter, the hourly run
+  handled every subscription with the first server's settings, so trials and
+  requests of Silo customers could go to the wrong place. Each subscription
+  now uses its own server's settings.
+
 ## 1.17.0 (2026-11-14)
 
 - **New: Silo, directly, without Wizarr.** A server in Paymenter can connect

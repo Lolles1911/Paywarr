@@ -899,8 +899,13 @@ Good to know:
   refused for Silo: use a subscription.
 - "Allow downloads" and "Allow live TV" are Wizarr settings; in Silo, set them
   on the access group or account.
-- Seerr is not used with Silo. Paywarr Stats needs Tracearr, which doesn't know
-  Silo yet.
+- **Requests on Silo** are Silo's own, not Seerr: the same `seerr` option and
+  request packages (see *Request packages*) switch them on per account with
+  the package's limit (`5` = 5 requests a week, `10/30`, `unlimited`, `yes` =
+  Silo's default limit). Without the option they are switched off, and while
+  a subscription is suspended too. Changing package changes the limit. The
+  client area shows the package. No Seerr fields are needed for Silo.
+- Paywarr Stats shows Silo customers' statistics from Silo itself.
 - Paywarr changes an account with Silo's edit guard (`If-Match`), so a change
   made at the same moment in Silo's admin is not overwritten; Paywarr reads the
   account again and retries once.
@@ -957,7 +962,7 @@ They behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-194 scenarios run the extension through the whole lifecycle against
+201 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -967,7 +972,8 @@ cancellation, the safety net, the Discord check at checkout, outages at Wizarr
 and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
 Emby or both with one invitation each (including switching later), Seerr
 request packages, up to three Seerr (including Plex), Silo without Wizarr
-(its edit guard, paging, and that administrators are never touched), and the
+(its edit guard, paging, its own requests, and that administrators are never
+touched), and the
 languages (English, Danish, and that every text in the code has a Danish
 translation).
 

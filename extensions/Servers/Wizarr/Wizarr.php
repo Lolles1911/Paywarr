@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.17.0',
+    version: '1.18.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -116,6 +116,9 @@ class Wizarr extends Server
 
     /** The request limit last set in Seerr ("5/7", "0/" = no limit, "default"), so it is only sent when it changes. */
     private const PROP_SEERR_QUOTA = 'seerr_quota';
+
+    /** On Silo: what its own requests are set to ("off", "default", "10/30", "0/"). */
+    private const PROP_SILO_REQUESTS = 'silo_requests';
 
     /** Paymenter configurable option (its environment variable) that buys the Seerr add-on. */
     public const SEERR_OPTION = 'seerr';
@@ -1749,9 +1752,9 @@ HTML;
     }
 
     /** Hourly: every subscription on a trial product. */
-    public function processTrials(): void
+    public function processTrials(?iterable $services = null): void
     {
-        $services = Service::whereIn('status', ['active', 'cancelled'])
+        $services ??= Service::whereIn('status', ['active', 'cancelled'])
             ->whereHas('product.server', fn ($query) => $query->where('extension', 'Wizarr'))
             ->with(['product.settings'])
             ->get();
@@ -1764,7 +1767,7 @@ HTML;
                 continue;
             }
             try {
-                $this->processTrial($service, $productSettings, ExtensionHelper::getServiceProperties($service));
+                $this->forServiceServer($service)->processTrial($service, $productSettings, ExtensionHelper::getServiceProperties($service));
             } catch (Throwable $e) {
                 Log::warning('Wizarr: trial ' . $service->id . ' not processed, will retry: ' . $e->getMessage());
             }
@@ -1909,6 +1912,11 @@ HTML;
      */
     public function syncSeerr(Service $service, array $productSettings, array $properties, string $state): void
     {
+        if ($this->isSilo()) {
+            $this->syncSiloRequests($service, $productSettings, $properties, $state);
+
+            return;
+        }
         if (!$this->seerrConfigured()) {
             return;
         }
@@ -2093,7 +2101,7 @@ HTML;
     /** Seerr must never break a payment: log it and let the hourly run try again. */
     private function syncSeerrQuietly(Service $service, string $state): void
     {
-        if (!$this->seerrConfigured() || !$service->product) {
+        if ((!$this->seerrConfigured() && !$this->isSilo()) || !$service->product) {
             return;
         }
         try {
@@ -2109,18 +2117,73 @@ HTML;
     }
 
     /** Hourly: every subscription on a Wizarr product. */
-    public function reconcileSeerr(): void
+    public function reconcileSeerr(?iterable $services = null): void
     {
-        if (!$this->seerrConfigured()) {
-            return;
-        }
-        $services = Service::whereIn('status', ['active', 'suspended', 'cancelled'])
+        $services ??= Service::whereIn('status', ['active', 'suspended', 'cancelled'])
             ->whereHas('product.server', fn ($query) => $query->where('extension', 'Wizarr'))
             ->get();
         foreach ($services as $service) {
             $state = ['active' => 'active', 'suspended' => 'suspended', 'cancelled' => 'ended'][$service->status];
-            $this->syncSeerrQuietly($service, $state);
+            // Each subscription with its own server's settings: Wizarr's Seerr, or Silo's requests.
+            $this->forServiceServer($service)->syncSeerrQuietly($service, $state);
         }
+    }
+
+    /** @var array<int, static> */
+    private array $serverInstances = [];
+
+    /**
+     * The extension with the settings of the server a service's product is on.
+     * Paymenter boots one instance, with the first Wizarr server's settings,
+     * for the hourly run; a shop with a Wizarr and a Silo server needs each
+     * subscription handled with its own server's.
+     */
+    private function forServiceServer(Service $service): static
+    {
+        $server = $service->product?->server;
+        if (!$server || !isset($server->id)) {
+            return $this;
+        }
+
+        return $this->serverInstances[(int) $server->id] ??= new static(ExtensionHelper::settingsToArray($server->settings));
+    }
+
+    private function isSilo(): bool
+    {
+        return $this->config('backend') === 'silo';
+    }
+
+    /**
+     * On Silo the "seerr" option sells Silo's own requests: allowed with the
+     * package's limit while active, not allowed otherwise. Sent only when
+     * that changes. The account itself goes when the subscription ends.
+     */
+    private function syncSiloRequests(Service $service, array $productSettings, array $properties, string $state): void
+    {
+        if ($state === 'ended') {
+            $this->setProperty($service, self::PROP_SILO_REQUESTS, '', null);
+
+            return;
+        }
+        $users = array_values(array_filter($this->allUsers($properties, resolve: false), fn ($user) => $user['type'] === 'silo'));
+        if (!$users) {
+            $users = array_values(array_filter($this->allUsers($properties), fn ($user) => $user['type'] === 'silo'));
+        }
+        if (!$users) {
+            return; // no account yet
+        }
+        $plan = $state === 'active' ? $this->seerrPlan($productSettings, $properties) : null;
+        $key = $plan === null ? 'off' : $this->quotaKey($plan);
+        if ((string) ($properties[self::PROP_SILO_REQUESTS] ?? '') === $key) {
+            return;
+        }
+        foreach ($users as $user) {
+            $this->client()->setRequestsAllowed($user['id'], $plan !== null);
+            if ($plan !== null) {
+                $this->client()->setRequestLimit($user['id'], $plan['limit'], $plan['days']);
+            }
+        }
+        $this->setProperty($service, self::PROP_SILO_REQUESTS, 'Silo requests', $key);
     }
 
     private static bool $seerrGuardListener = false;
@@ -2135,7 +2198,8 @@ HTML;
      */
     public function checkSeerrServer(array $productSettings, array $properties, string|array|null $seerrTypes = null): void
     {
-        if (!$this->seerrConfigured() || !$this->wantsSeerr($productSettings, $properties)) {
+        // Silo has its own requests: they always fit.
+        if ($this->isSilo() || !$this->seerrConfigured() || !$this->wantsSeerr($productSettings, $properties)) {
             return;
         }
         try {
@@ -3707,6 +3771,17 @@ HTML;
             $actions[] = ['type' => 'text', 'label' => self::t('Requests'), 'text' => (int) $limit === 0
                 ? self::t('Unlimited')
                 : self::t(':count movies and :count TV seasons every :days days', ['count' => (int) $limit, 'days' => (int) $days])];
+        }
+
+        // Silo's own requests, with the package bought.
+        $silo = (string) ($properties[self::PROP_SILO_REQUESTS] ?? '');
+        if ($silo !== '' && $silo !== 'off') {
+            [$limit, $days] = array_pad(explode('/', $silo, 2), 2, '');
+            $actions[] = ['type' => 'text', 'label' => self::t('Requests'), 'text' => match (true) {
+                $silo === 'default' => self::t('Included, in Silo'),
+                (int) $limit === 0 => self::t('Unlimited'),
+                default => self::t(':count requests every :days days, in Silo', ['count' => (int) $limit, 'days' => (int) $days]),
+            }];
         }
 
         $seerrUrl = trim((string) $this->config($this->seerrPrefix((string) ($properties[self::PROP_SEERR_INSTANCE] ?? '') ?: '1') . 'public_url'));

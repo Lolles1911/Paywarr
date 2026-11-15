@@ -2710,6 +2710,97 @@ test('Silo: a product with "Access expires after" is refused rather than giving 
     same([], siloState()['invitations'], 'no invitation made');
 });
 
+/* ---------- Silo's own requests, sold with the "seerr" option ---------- */
+
+/** A Silo subscription with $option as the "seerr" choice, account created and noted. Returns [service, account ID]. */
+function siloWithRequests(string $option, int $id = 1): array
+{
+    global $STUB;
+    $service = service($id);
+    $service->configs = $option === '' ? [] : [Wizarr::SEERR_OPTION => $option];
+    $service->product = (object) ['server' => (object) ['id' => 9, 'extension' => 'Wizarr', 'settings' => ['backend' => 'silo', 'host' => $STUB . '/silo', 'public_url' => 'https://watch.example.com', 'api_key' => 'sa_full']], 'settings' => siloSettings()];
+    $data = silo()->createServer($service, siloSettings(), props($service));
+    $account = siloAccept($data['invite_url'], 'customer' . $id);
+    silo()->getActions($service, siloSettings(), props($service)); // notes the account, as the client area does
+
+    return [$service, $account];
+}
+
+function siloLimit(string $account): array
+{
+    $limit = siloAccount($account)['request_limit'] ?? ['limit_mode' => 'inherit', 'max_requests' => null, 'window_days' => null];
+
+    return [siloAccount($account)['requests_allowed'] ?? null, $limit['limit_mode'], $limit['max_requests'], $limit['window_days']];
+}
+
+test('Silo requests: a package sets Silo\'s own requests and limit on the account, and the client area says so', function () {
+    [$service, $account] = siloWithRequests('10/30');
+    same([true, 'custom', 10, 30], siloLimit($account), 'allowed, 10 per 30 days');
+    $labels = labels(silo()->getActions($service, siloSettings(), props($service)));
+    ok(in_array('text:Requests=10 requests every 30 days, in Silo', $labels, true), json_encode($labels));
+    $limitWrites = array_filter(siloState()['requests'], fn ($r) => $r['method'] === 'PUT' && str_contains($r['path'], '/request-users/'));
+    ok($limitWrites && !array_filter($limitWrites, fn ($r) => !$r['if_match']), 'with Silo\'s edit guard');
+    same([], array_filter(state()['requests'], fn ($r) => str_starts_with($r['path'], '/seerr')), 'no Seerr involved');
+});
+
+test('Silo requests: unlimited, Yes (Silo\'s default) and none', function () {
+    [, $unlimited] = siloWithRequests('unlimited', 1);
+    [, $yes] = siloWithRequests('yes', 2);
+    [$none, $noneAccount] = siloWithRequests('', 3);
+    same([true, 'unlimited', null, null], siloLimit($unlimited), 'unlimited');
+    same([true, 'inherit', null, null], siloLimit($yes), 'Yes: Silo\'s own default limit');
+    same([false, 'inherit', null, null], siloLimit($noneAccount), 'not bought: requests explicitly off, so a group default gives nothing for free');
+    ok(!in_array('Requests', array_column(silo()->getActions($none, siloSettings(), props($none)), 'label'), true), 'no Requests line without the add-on');
+});
+
+test('Silo requests: off while suspended, back with the package when paid', function () {
+    [$service, $account] = siloWithRequests('5');
+    silo()->suspendServer($service, siloSettings(), props($service));
+    same([false, false], [siloAccount($account)['enabled'], siloAccount($account)['requests_allowed']], 'account and requests off');
+    silo()->unsuspendServer($service, siloSettings(), props($service));
+    same([true, true, 'custom', 5, 7], [siloAccount($account)['enabled'], ...siloLimit($account)], 'both back, 5 a week');
+});
+
+test('Silo requests: a new package changes the limit; the same one costs no call', function () {
+    [$service, $account] = siloWithRequests('5');
+    $service->configs = [Wizarr::SEERR_OPTION => '20/30'];
+    silo()->syncSeerr($service, siloSettings(), props($service), 'active');
+    same([true, 'custom', 20, 30], siloLimit($account), 'upgraded');
+    $before = count(siloState()['requests']);
+    silo()->syncSeerr($service, siloSettings(), props($service), 'active');
+    same($before, count(siloState()['requests']), 'nothing to change: no calls');
+});
+
+test('Silo requests: always fit a Silo product, even with Seerr fields filled in on the Silo server', function () {
+    silo(['seerr_url' => 'http://seerr.example.com', 'seerr_api_key' => 'k'])->checkSeerrServer(siloSettings(), [Wizarr::SEERR_OPTION => '10/30'], ['jellyfin']);
+    ok(true, 'not refused');
+});
+
+test('hourly: a Silo trial ends through Silo, also when the first server is Wizarr', function () {
+    [$service, $account] = siloWithRequests('');
+    $service->product->settings = siloSettings(['trial_days' => '7']);
+    $service->status = 'active';
+    $service->properties()->updateOrCreate(['key' => 'trial_ends_at'], ['name' => 'Trial ends', 'value' => date(DATE_ATOM, time() - 60)]);
+    $service->unsetRelation('properties');
+    $service->loadedProperties = null;
+    ext()->processTrials([$service]);
+    same(false, siloAccount($account)['enabled'], 'the Silo account is disabled at the end of the trial');
+});
+
+test('hourly: each subscription is handled with its own server\'s settings, not the first server\'s', function () {
+    [$service, $account] = siloWithRequests('10/30');
+    // Reset what was sent, then let the hourly run's instance (Wizarr's settings) reconcile it.
+    stub('/_test/silo-set-limit', ['id' => $account, 'requests_allowed' => false]);
+    $service->propertyArray(); // keep the noted account
+    $service->properties()->where('key', 'silo_requests')->delete();
+    $service->unsetRelation('properties');
+    $service->loadedProperties = null;
+    $service->status = 'active';
+    ext()->reconcileSeerr([$service]); // the hourly run's instance has the first server's settings: Wizarr
+    same(true, siloAccount($account)['requests_allowed'], 'Silo\'s requests set, through the Silo server\'s settings');
+    same([], array_values(array_filter(state()['requests'], fn ($r) => str_starts_with($r['path'], '/api/users'))), 'Wizarr was not asked about a Silo customer');
+});
+
 /* ---------- summary ---------- */
 
 echo "\n" . $results['pass'] . ' passed, ' . count($results['fail']) . " failed\n";

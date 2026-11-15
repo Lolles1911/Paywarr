@@ -200,6 +200,26 @@ class SiloClient
         return 'User enabled successfully';
     }
 
+    /** Silo's own requests on or off for this account (an account override). */
+    public function setRequestsAllowed(int $id, bool $allowed): void
+    {
+        $this->guarded('put', $id, ['requests_allowed' => $allowed]);
+    }
+
+    /**
+     * The account's request limit: null for Silo's default (its group's),
+     * 0 for no limit, otherwise $limit requests every $days days.
+     */
+    public function setRequestLimit(int $id, ?int $limit, ?int $days): void
+    {
+        $body = match (true) {
+            $limit === null => ['limit_mode' => 'inherit', 'max_requests' => null, 'window_days' => null, 'approval_mode' => 'inherit'],
+            $limit === 0 => ['limit_mode' => 'unlimited', 'max_requests' => null, 'window_days' => null, 'approval_mode' => 'inherit'],
+            default => ['limit_mode' => 'custom', 'max_requests' => $limit, 'window_days' => max(1, (int) ($days ?: 7)), 'approval_mode' => 'inherit'],
+        };
+        $this->guardedPath('put', '/api/v2/admin/request-users/' . $id . '/limit', $body, $id);
+    }
+
     /**
      * A link where the customer chooses a new password, valid for 24 hours.
      * A new link replaces the account's earlier one.
@@ -231,11 +251,25 @@ class SiloClient
      */
     private function guarded(string $method, int $id, array $body = []): void
     {
-        $path = '/api/v2/admin/users/' . $id;
+        $this->guardedPath($method, '/api/v2/admin/users/' . $id, $body, $id);
+    }
+
+    /**
+     * $path's resource, changed under Silo's edit guard. With $account, the
+     * account is read first and an administrator refused.
+     */
+    private function guardedPath(string $method, string $path, array $body, ?int $account = null): void
+    {
         for ($attempt = 1; ; $attempt++) {
-            [$account, $etag] = $this->requestWithEtag($path);
-            if (($account['role'] ?? '') === 'admin') {
-                throw new WizarrException('Paywarr does not change Silo administrators (account ' . $id . ').', 403);
+            if ($account !== null && $path !== '/api/v2/admin/users/' . $account) {
+                [$owner] = $this->requestWithEtag('/api/v2/admin/users/' . $account);
+                if (($owner['role'] ?? '') === 'admin') {
+                    throw new WizarrException('Paywarr does not change Silo administrators (account ' . $account . ').', 403);
+                }
+            }
+            [$current, $etag] = $this->requestWithEtag($path);
+            if ($path === '/api/v2/admin/users/' . $account && ($current['role'] ?? '') === 'admin') {
+                throw new WizarrException('Paywarr does not change Silo administrators (account ' . $account . ').', 403);
             }
             try {
                 $this->request($method, $path, $body, retry: false, headers: ['If-Match' => $etag]);

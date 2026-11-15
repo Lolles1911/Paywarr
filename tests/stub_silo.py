@@ -30,7 +30,8 @@ SCOPED_KEY = "sa_users_only"  # admin:users only
 PUBLIC = "https://silo.example.com"
 
 INVITATION_FIELDS = {"delivery", "email", "role", "access_group_id", "library_ids", "create_profile", "show_tour", "note"}
-ACCOUNT_FIELDS = {"username", "email", "enabled", "password", "role", "library_ids"}
+ACCOUNT_FIELDS = {"username", "email", "enabled", "password", "role", "library_ids", "requests_allowed"}
+LIMIT_FIELDS = {"limit_mode", "max_requests", "window_days", "approval_mode"}
 
 
 def now() -> str:
@@ -66,7 +67,8 @@ def public_account(acc: dict) -> dict:
     return {"id": acc["id"], "username": acc["username"], "email": acc["email"], "role": acc["role"], "permissions": [],
             "enabled": acc["enabled"], "library_ids": acc.get("library_ids"), "password_login": acc["password_login"],
             "password_change_required": False, "is_owner": acc.get("is_owner", False), "break_glass": False,
-            "access_group_id": None, "created_at": "2026-11-01T00:00:00.000Z", "updated_at": now(), "last_active_at": None}
+            "access_group_id": None, "requests_allowed": acc.get("requests_allowed"),
+            "created_at": "2026-11-01T00:00:00.000Z", "updated_at": now(), "last_active_at": None}
 
 
 def etag(acc: dict) -> str:
@@ -156,6 +158,28 @@ def handle(state: dict, method: str, path: str, query: dict, body, headers) -> t
             rows = [r for r in rows if wanted in (r["username"].lower(), r["email"].lower())]
         return 200, page(rows, query), {}
 
+    if len(parts) == 6 and parts[2:4] == ["admin", "request-users"] and parts[4].isdigit() and parts[5] == "limit":
+        acc = next((a for a in silo["accounts"] if a["id"] == parts[4]), None)
+        if not acc:
+            return (*problem(404, "not_found"), {})
+        limit = acc.setdefault("request_limit", {"limit_mode": "inherit", "max_requests": None, "window_days": None, "approval_mode": "inherit", "rev": 1})
+        tag = f'"limit-{acc["id"]}-{limit["rev"]}"'
+        public = {"user_id": acc["id"], **{k: limit[k] for k in LIMIT_FIELDS}}
+        if method == "GET":
+            return 200, public, {"ETag": tag}
+        if method == "PUT":
+            guard = headers.get("If-Match")
+            if not guard:
+                return (*problem(428, "precondition_required"), {})
+            if guard != tag:
+                return (*problem(412, "precondition_failed"), {"ETag": tag})
+            if not isinstance(body, dict) or set(body) != LIMIT_FIELDS:
+                return (*problem(422, "validation_failed", "all four members are required"), {})
+            if body["limit_mode"] == "custom" and (not isinstance(body["max_requests"], int) or not isinstance(body["window_days"], int) or body["window_days"] < 1):
+                return (*problem(422, "validation_failed", "custom needs max_requests and window_days"), {})
+            limit.update({k: body[k] for k in LIMIT_FIELDS}, rev=limit["rev"] + 1)
+            return 200, {"user_id": acc["id"], **{k: limit[k] for k in LIMIT_FIELDS}}, {"ETag": f'"limit-{acc["id"]}-{limit["rev"]}"'}
+
     if len(parts) >= 5 and parts[2:4] == ["admin", "users"] and parts[4].isdigit():
         acc = next((a for a in silo["accounts"] if a["id"] == parts[4]), None)
         if not acc:
@@ -195,6 +219,8 @@ def handle(state: dict, method: str, path: str, query: dict, body, headers) -> t
                 return (*problem(422, "validation_failed"), {})
             if "enabled" in body:
                 acc["enabled"] = bool(body["enabled"])
+            if "requests_allowed" in body:
+                acc["requests_allowed"] = body["requests_allowed"]
             acc["rev"] += 1
             return 204, None, {}
 
@@ -224,6 +250,12 @@ def handle_test(state: dict, path: str, body: dict) -> object:
         return {"ok": True}
     if path == "/_test/silo-stale":  # the next N account reads are outdated by the time Paywarr writes
         silo["stale_next"] = int(body.get("times", 1))
+        return {"ok": True}
+    if path == "/_test/silo-set-limit":  # an administrator changes requests by hand
+        for acc in silo["accounts"]:
+            if acc["id"] == str(body["id"]):
+                acc["requests_allowed"] = body.get("requests_allowed")
+                acc["rev"] += 1
         return {"ok": True}
     if path == "/_test/silo-add":
         silo["accounts"].append({"id": str(silo["next_account"]), "rev": 1, "password_login": True, "enabled": True, "role": "user", **body})
