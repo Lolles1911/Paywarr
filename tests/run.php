@@ -1433,8 +1433,8 @@ test('discord login: "Disable User Registration" in Paymenter is respected', fun
 test('discord login: names come from the Discord display name', function () {
     same(['Mette', 'Hansen'], ext()->namesFromDiscord('Mette Hansen'), 'two words');
     same(['Mette', 'Louise Hansen'], ext()->namesFromDiscord('  Mette Louise Hansen '), 'first word, then the rest');
-    same(['mette', null], ext()->namesFromDiscord('mette'), 'single name');
-    same(['Discord', null], ext()->namesFromDiscord(''), 'never empty');
+    same(['mette', ''], ext()->namesFromDiscord('mette'), 'single name: an empty last name, never null');
+    same(['Discord', ''], ext()->namesFromDiscord(''), 'never empty');
 });
 
 test('discord login: the button escapes what it prints and shows the terms when set', function () {

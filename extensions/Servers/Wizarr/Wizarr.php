@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.20.0',
+    version: '1.20.1',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -3731,7 +3731,8 @@ HTML;
         $parts = preg_split('/\s+/u', trim($displayName), 2) ?: [];
         $first = mb_substr($parts[0] ?? '', 0, 255);
 
-        return [$first !== '' ? $first : 'Discord', isset($parts[1]) ? mb_substr($parts[1], 0, 255) : null];
+        // Never null: Paymenter's Account page can't open for a user without a last name.
+        return [$first !== '' ? $first : 'Discord', isset($parts[1]) ? mb_substr($parts[1], 0, 255) : ''];
     }
 
     private function finishDiscordSignIn($account)
