@@ -3,6 +3,14 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.18.1 (2026-11-15)
+
+- The configurable option that sells requests is now called **`requests`**
+  (environment variable), as it is not only Seerr: on a Silo server it is
+  Silo's own requests. An option set up as `seerr` keeps working; if a
+  subscription has both, `requests` counts. The product setting is now called
+  **Requests included** (same setting, nothing to redo).
+
 ## 1.18.0 (2026-11-15)
 
 - **New: requests on Silo.** On a Silo server, the `seerr` option and its

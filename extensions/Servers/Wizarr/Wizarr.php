@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.18.0',
+    version: '1.18.1',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -120,7 +120,13 @@ class Wizarr extends Server
     /** On Silo: what its own requests are set to ("off", "default", "10/30", "0/"). */
     private const PROP_SILO_REQUESTS = 'silo_requests';
 
-    /** Paymenter configurable option (its environment variable) that buys the Seerr add-on. */
+    /**
+     * Paymenter configurable option (its environment variable) that buys
+     * requests: Seerr on a Wizarr server, Silo's own on a Silo server.
+     */
+    public const REQUESTS_OPTION = 'requests';
+
+    /** The same option's name before 1.18.1; still read. */
     public const SEERR_OPTION = 'seerr';
 
     /**
@@ -460,10 +466,10 @@ class Wizarr extends Server
             ],
             [
                 'name' => 'seerr_included',
-                'label' => 'Seerr included',
+                'label' => 'Requests included',
                 'type' => 'checkbox',
-                'description' => 'Every subscription on this product gets Seerr. Leave off to sell it as an add-on instead '
-                    . '(a configurable option with environment variable "seerr", see the README).',
+                'description' => 'Every subscription on this product can request movies and shows: in Seerr on a Wizarr server, in Silo itself on a Silo server. '
+                    . 'Leave off to sell requests as an add-on instead (a configurable option with environment variable "requests", see the README).',
             ],
             $this->discordRoleField(),
             [
@@ -1859,7 +1865,7 @@ HTML;
     }
 
     /**
-     * What the "seerr" option's value means: null for no Seerr, otherwise
+     * What the requests option's value means: null for no Seerr, otherwise
      * the request limit ([limit, days], null = Seerr's defaults, limit 0 =
      * no limit):
      *
@@ -1873,7 +1879,7 @@ HTML;
      */
     public function seerrPlan(array $productSettings, array $properties): ?array
     {
-        $value = strtolower(trim((string) ($properties[self::SEERR_OPTION] ?? '')));
+        $value = strtolower(trim((string) self::requestsChoice($properties)));
         $default = ['limit' => null, 'days' => null];
 
         if (in_array($value, ['ja', 'yes', 'y', '1', 'true', 'on'], true)) {
@@ -1888,6 +1894,18 @@ HTML;
 
         // No (or no option): only if the product includes Seerr.
         return $this->truthy($productSettings['seerr_included'] ?? false) ? $default : null;
+    }
+
+    /** The customer's choice in the requests option ("requests", or "seerr" as it was called before). */
+    public static function requestsChoice(array $properties): ?string
+    {
+        foreach ([self::REQUESTS_OPTION, self::SEERR_OPTION] as $option) {
+            if (isset($properties[$option]) && trim((string) $properties[$option]) !== '') {
+                return (string) $properties[$option];
+            }
+        }
+
+        return null;
     }
 
     /** "5/7", "0/" or "default": the plan as stored on the service. */
@@ -2154,7 +2172,7 @@ HTML;
     }
 
     /**
-     * On Silo the "seerr" option sells Silo's own requests: allowed with the
+     * On Silo the requests option sells Silo's own requests: allowed with the
      * package's limit while active, not allowed otherwise. Sent only when
      * that changes. The account itself goes when the subscription ends.
      */

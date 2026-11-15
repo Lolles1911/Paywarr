@@ -2717,7 +2717,7 @@ function siloWithRequests(string $option, int $id = 1): array
 {
     global $STUB;
     $service = service($id);
-    $service->configs = $option === '' ? [] : [Wizarr::SEERR_OPTION => $option];
+    $service->configs = $option === '' ? [] : [Wizarr::REQUESTS_OPTION => $option];
     $service->product = (object) ['server' => (object) ['id' => 9, 'extension' => 'Wizarr', 'settings' => ['backend' => 'silo', 'host' => $STUB . '/silo', 'public_url' => 'https://watch.example.com', 'api_key' => 'sa_full']], 'settings' => siloSettings()];
     $data = silo()->createServer($service, siloSettings(), props($service));
     $account = siloAccept($data['invite_url'], 'customer' . $id);
@@ -2753,6 +2753,14 @@ test('Silo requests: unlimited, Yes (Silo\'s default) and none', function () {
     ok(!in_array('Requests', array_column(silo()->getActions($none, siloSettings(), props($none)), 'label'), true), 'no Requests line without the add-on');
 });
 
+test('requests: the option is called "requests" now; "seerr" from before still works, and "requests" wins', function () {
+    $plan = fn (array $options) => ext()->seerrPlan(settings(), $options);
+    same(['limit' => 10, 'days' => 30], $plan(['requests' => '10/30']), '"requests"');
+    same(['limit' => 5, 'days' => 7], $plan(['seerr' => '5']), '"seerr", as set up before');
+    same(['limit' => 0, 'days' => null], $plan(['requests' => 'unlimited', 'seerr' => 'no']), 'both: "requests"');
+    same(null, $plan(['requests' => 'no']), 'no');
+});
+
 test('Silo requests: off while suspended, back with the package when paid', function () {
     [$service, $account] = siloWithRequests('5');
     silo()->suspendServer($service, siloSettings(), props($service));
@@ -2763,7 +2771,7 @@ test('Silo requests: off while suspended, back with the package when paid', func
 
 test('Silo requests: a new package changes the limit; the same one costs no call', function () {
     [$service, $account] = siloWithRequests('5');
-    $service->configs = [Wizarr::SEERR_OPTION => '20/30'];
+    $service->configs = [Wizarr::REQUESTS_OPTION => '20/30'];
     silo()->syncSeerr($service, siloSettings(), props($service), 'active');
     same([true, 'custom', 20, 30], siloLimit($account), 'upgraded');
     $before = count(siloState()['requests']);

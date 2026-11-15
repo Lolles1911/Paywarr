@@ -170,7 +170,7 @@ described further down.
 | Access expires after (days) | **Leave empty for subscriptions.** Only for one-time-paid products |
 | Where customers watch | Optional. Becomes a button in the client area. With several media servers, each server's *External URL* in Wizarr is used instead (see *Jellyfin, Emby or both*) |
 | Trial: days | Only on a trial product; see *Trials* |
-| Seerr included | See *Seerr as a paid add-on* |
+| Requests included | See *Seerr as a paid add-on*, and for Silo *Silo, without Wizarr* |
 | Discord role while active | See *Discord roles* |
 | Require Discord membership | See *Discord membership at checkout* |
 
@@ -661,13 +661,14 @@ deleted when the add-on ends. Clean them up once in Seerr before you start.
 6. Admin → Configurable Options → New:
    - Type: **Select** (a checkbox can't be added later in Paymenter)
    - **Upgradable**: on, so the customer can add or remove it later
-   - Environment Variable: **`seerr`**
+   - Environment Variable: **`requests`** (`seerr`, as it was called before
+     1.18.1, keeps working)
    - Products: your subscription
    - Options: **No** (env `no`, price 0) and **Yes** (env `yes`, your price per
      period). The Danish `nej`/`ja` work too. To sell request packages instead
      of a plain Yes, see *Request packages* below.
-7. If a product should always include Seerr (e.g. a premium plan), tick
-   **Seerr included** on the product instead.
+7. If a product should always include requests (e.g. a premium plan), tick
+   **Requests included** on the product instead.
 
 Customers with the add-on get the button **"Request movies and shows"** in the
 client area.
@@ -708,7 +709,7 @@ why, so an outage never blocks sales.
 
 ### Request packages
 
-Instead of a plain Yes, the `seerr` option can sell packages with a limit on
+Instead of a plain Yes, the `requests` option can sell packages with a limit on
 how much the customer may request, e.g. a cheap one and an unlimited one:
 
 | Option | Environment variable | The customer may request |
@@ -899,7 +900,7 @@ Good to know:
   refused for Silo: use a subscription.
 - "Allow downloads" and "Allow live TV" are Wizarr settings; in Silo, set them
   on the access group or account.
-- **Requests on Silo** are Silo's own, not Seerr: the same `seerr` option and
+- **Requests on Silo** are Silo's own, not Seerr: the same `requests` option and
   request packages (see *Request packages*) switch them on per account with
   the package's limit (`5` = 5 requests a week, `10/30`, `unlimited`, `yes` =
   Silo's default limit). Without the option they are switched off, and while
@@ -962,7 +963,7 @@ They behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-201 scenarios run the extension through the whole lifecycle against
+202 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole

@@ -87,10 +87,10 @@ foreach ($user->services()->with(['product.settings', 'product.server'])->get() 
     $properties = ExtensionHelper::getServiceProperties($service);
 
     echo PHP_EOL . '  Service ' . $service->id . ' (' . $service->product->name . '), status ' . $service->status . PHP_EOL;
-    $option = $properties[Wizarr::SEERR_OPTION] ?? null;
-    echo '  ' . ($option === null ? '-     ' : 'OK    ') . 'configurable option "' . Wizarr::SEERR_OPTION . '": '
-        . ($option === null ? 'not on this service (environment variable of the option must be "seerr")' : '"' . $option . '"') . PHP_EOL;
-    echo '  ' . (($productSettings['seerr_included'] ?? false) ? 'OK    ' : '-     ') . 'Seerr included in product: ' . (($productSettings['seerr_included'] ?? false) ? 'yes' : 'no') . PHP_EOL;
+    $option = Wizarr::requestsChoice($properties);
+    echo '  ' . ($option === null ? '-     ' : 'OK    ') . 'configurable option "' . Wizarr::REQUESTS_OPTION . '": '
+        . ($option === null ? 'not on this service (environment variable of the option must be "requests", or "seerr" as before)' : '"' . $option . '"') . PHP_EOL;
+    echo '  ' . (($productSettings['seerr_included'] ?? false) ? 'OK    ' : '-     ') . 'Requests included in product: ' . (($productSettings['seerr_included'] ?? false) ? 'yes' : 'no') . PHP_EOL;
     $plan = $extension->seerrPlan($productSettings, $properties);
     $wants = $plan !== null;
     $limit = $plan === null ? '' : ($plan['limit'] === null ? ", Seerr's default request limits" : ($plan['limit'] === 0 ? ', unlimited requests' : ', ' . $plan['limit'] . ' requests every ' . $plan['days'] . ' days'));
