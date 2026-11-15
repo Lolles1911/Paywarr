@@ -1006,11 +1006,16 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/discord/login extensions.wizarr.discord.login',
         'GET wizarr/discord/callback extensions.wizarr.discord.callback',
         'GET wizarr/status extensions.wizarr.status',
+        'GET wizarr/report extensions.wizarr.report',
+        'POST wizarr/report extensions.wizarr.report.submit',
+        'GET wizarr/report/poster/{service} extensions.wizarr.report.poster',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
     same(['web'], $byName['extensions.wizarr.discord.callback'], 'callback serves guests and logged-in customers');
-    same(['web', 'auth', 'throttle:40,1'], end(\Illuminate\Support\Facades\Route::$routes)->middleware, 'status check is throttled');
+    same(['web', 'auth', 'throttle:40,1'], $byName['extensions.wizarr.status'], 'status check is throttled');
+    same([['web', 'auth'], ['web', 'auth'], ['web', 'auth', 'throttle:120,1'], ['service' => '[0-9]+']],
+        [$byName['extensions.wizarr.report'], $byName['extensions.wizarr.report.submit'], $byName['extensions.wizarr.report.poster'], end(\Illuminate\Support\Facades\Route::$routes)->wheres], 'reports: logged in; posters throttled, by number');
     same(['web', 'auth'], \Illuminate\Support\Facades\Route::$routes[0]->middleware, 'logged-in customers only');
     ok(isset(\Illuminate\Support\Facades\View::$namespaces['wizarr']), 'view namespace');
 
@@ -2239,7 +2244,7 @@ test('languages: the client area, the box and the Discord button follow the lang
 test('languages: every text in the code has a Danish translation, and no translation is left over', function () {
     $dir = __DIR__ . '/../extensions/Servers/Wizarr';
     $code = '';
-    foreach (['Wizarr.php', 'ShopGate.php', 'resources/views/discord.blade.php'] as $file) {
+    foreach (['Wizarr.php', 'ShopGate.php', 'resources/views/discord.blade.php', 'resources/views/report.blade.php'] as $file) {
         $code .= file_get_contents($dir . '/' . $file);
     }
     preg_match_all('/(?:self::t|Wizarr::t|\$t)\(\s*(\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*")/', $code, $m);
@@ -2247,7 +2252,8 @@ test('languages: every text in the code has a Danish translation, and no transla
     $unquote = fn ($literal) => $literal[0] === "'"
         ? strtr(substr($literal, 1, -1), ['\\\\' => '\\', "\\'" => "'"])
         : stripcslashes(substr($literal, 1, -1));
-    $used = array_unique(array_map($unquote, $m[1]));
+    // Translated where they are shown, from the list.
+    $used = array_unique([...array_map($unquote, $m[1]), ...array_values(Wizarr::REPORT_PROBLEMS)]);
     $danish = json_decode(file_get_contents($dir . '/lang/da.json'), true);
     ok(count($used) > 50, 'found the texts (' . count($used) . ')');
     same([], array_values(array_diff($used, array_keys($danish))), 'missing in da.json');
@@ -2807,6 +2813,93 @@ test('hourly: each subscription is handled with its own server\'s settings, not 
     ext()->reconcileSeerr([$service]); // the hourly run's instance has the first server's settings: Wizarr
     same(true, siloAccount($account)['requests_allowed'], 'Silo\'s requests set, through the Silo server\'s settings');
     same([], array_values(array_filter(state()['requests'], fn ($r) => str_starts_with($r['path'], '/api/users'))), 'Wizarr was not asked about a Silo customer');
+});
+
+/* ---------- problem reports: a movie or show with a fault, as a ticket ---------- */
+
+/** A Wizarr subscription with Seerr requests, for the reports. */
+function reportCustomer(string $option = 'yes', int $id = 50, string $status = 'active'): Service
+{
+    global $STUB;
+    $service = service($id);
+    $service->status = $status;
+    $service->configs = $option === '' ? [] : [Wizarr::REQUESTS_OPTION => $option];
+    $service->product = (object) ['name' => 'Jellyfin Plus', 'server' => (object) ['id' => 1, 'extension' => 'Wizarr', 'settings' => [
+        'host' => $STUB . '/', 'public_url' => 'https://join.example.com/', 'api_key' => 'stub-key', 'seerr_url' => $STUB . '/seerr', 'seerr_api_key' => 'seerr-key']], 'settings' => settings()];
+
+    return $service;
+}
+
+function reportSources(array $services): array
+{
+    return ext()->reportSources((object) ['id' => 1], $services);
+}
+
+test('reports: only active subscriptions with requests can report, on Silo or with Seerr', function () {
+    [$silo] = siloWithRequests('10/30', 1);
+    $silo->status = 'active';
+    [$noRequests] = siloWithRequests('', 2);
+    $noRequests->status = 'active';
+    $seerr = reportCustomer('yes', 3);
+    $suspended = reportCustomer('yes', 4, 'suspended');
+    $plain = reportCustomer('', 5);
+    same([[1, 'silo'], [3, 'seerr']], array_map(fn ($s) => [$s['service']->id, $s['kind']], reportSources([$silo, $noRequests, $seerr, $suspended, $plain])), 'Silo with requests, and Seerr with requests');
+});
+
+test('reports: search finds titles in the customer\'s libraries; Seerr only what is on the server', function () {
+    [$silo] = siloWithRequests('yes', 1);
+    $silo->status = 'active';
+    $sources = reportSources([$silo, reportCustomer('yes', 3)]);
+    $results = ext()->reportSearch($sources, 'heat', fn ($service, $item) => "/poster/$service/$item");
+    same([
+        ['1:silo:movie:heat-1995', 'Heat', 1995, 'movie', '/poster/1/movie:heat-1995', 'Silo'],
+        ['1:silo:series:heat-house', 'Heat House', 2024, 'show', '/poster/1/series:heat-house', 'Silo'],
+        ['3:movie:949', 'Heat', 1995, 'movie', 'https://image.tmdb.org/t/p/w185/heat.jpg', 'Seerr'],
+        ['3:tv:1396', 'Breaking Heat', 2008, 'show', 'https://image.tmdb.org/t/p/w185/bh.jpg', 'Seerr'],
+    ], array_map(fn ($r) => [$r['key'], $r['title'], $r['year'], $r['kind'], $r['poster'], $r['server']], $results),
+        'Silo\'s movies and shows (no episodes); Seerr\'s available ones (not pending, not unknown, no people)');
+    same([], ext()->reportSearch($sources, 'h'), 'at least two letters');
+    same(['3:tv:1396'], array_column(ext()->reportSearch($sources, 'breaking heat'), 'key'), 'a search with a space, encoded as Seerr wants it (%20, not +)');
+});
+
+test('reports: the ticket names the title as the library knows it, for staff, on the customer\'s subscription', function () {
+    [$silo] = siloWithRequests('yes', 1);
+    $silo->status = 'active';
+    $silo->product->name = 'Silo Standard';
+    $sources = reportSources([$silo, reportCustomer('yes', 3)]);
+    $ticket = ext()->reportTicket($sources, ['pick' => '1:silo:series:heat-house', 'problem' => 'subtitles', 'season' => '2', 'episode' => '5', 'description' => "Danish subtitles are\r\nout of sync."]);
+    same(1, $ticket['service_id'], 'on the Silo subscription');
+    same('Problem: Heat House (2024) S2E5 – Subtitles', $ticket['subject'], 'subject');
+    foreach (['Title: Heat House (2024), show', 'Where: Silo, catalog item series:heat-house', 'Season 2, episode 5', 'Problem: Subtitles (missing, wrong, out of sync)', 'Subscription: #1 Silo Standard', 'Media server user: customer1 (silo)', "Danish subtitles are\nout of sync."] as $line) {
+        ok(str_contains($ticket['message'], $line), "message has \"$line\"");
+    }
+    $movie = ext()->reportTicket($sources, ['pick' => '3:movie:949', 'problem' => 'audio', 'season' => '9', 'description' => '']);
+    same(['Problem: Heat (1995) – Sound', 3], [$movie['subject'], $movie['service_id']], 'a movie from Seerr: no season');
+    ok(str_contains($movie['message'], 'Where: Seerr, TMDB movie 949') && str_contains($movie['message'], '(nothing)'), 'Seerr\'s ID for staff');
+});
+
+test('reports: refused for a title that isn\'t in the customer\'s libraries, an unknown problem or too much text', function () {
+    [$silo] = siloWithRequests('yes', 1);
+    $silo->status = 'active';
+    $sources = reportSources([$silo]);
+    foreach ([
+        ['pick' => '99:silo:movie:heat-1995', 'problem' => 'audio'],      // another customer's subscription
+        ['pick' => '1:movie:949', 'problem' => 'audio'],                  // Seerr title on a Silo subscription
+        ['pick' => '1:silo:episode:heat-1', 'problem' => 'audio'],        // not a movie or show
+        ['pick' => '1:silo:movie:gone', 'problem' => 'audio'],            // no longer in the catalog
+        ['pick' => '1:silo:../../admin', 'problem' => 'audio'],
+    ] as $input) {
+        tellsCustomer(fn () => ext()->reportTicket($sources, $input), 'can\'t be found', json_encode($input));
+    }
+    tellsCustomer(fn () => ext()->reportTicket($sources, ['pick' => '1:silo:movie:heat-1995', 'problem' => 'drm']), 'Choose what the problem is', 'unknown problem');
+    tellsCustomer(fn () => ext()->reportTicket($sources, ['pick' => '1:silo:movie:heat-1995', 'problem' => 'other', 'description' => str_repeat('x', 2001)]), '2000', 'too long');
+});
+
+test('reports: Silo posters come through Paymenter, with the key only for Silo\'s own address', function () {
+    $client = new \Paymenter\Extensions\Servers\Wizarr\SiloClient($GLOBALS['STUB'] . '/silo', 'sa_full');
+    same('image/jpeg', $client->poster('movie:heat-1995')['type'] ?? null, 'a poster');
+    same(null, $client->poster('episode:missing'), 'none for an unknown item');
+    same(null, $client->poster('../../x'), 'nothing for a strange ID');
 });
 
 /* ---------- summary ---------- */

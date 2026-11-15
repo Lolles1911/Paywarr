@@ -44,6 +44,12 @@ def fresh() -> dict:
         "invitations": [],
         "accounts": [{"id": "1", "username": "owner", "email": "owner@example.com", "role": "admin", "enabled": True, "password_login": True, "rev": 1, "is_owner": True}],
         "reset_links": [],
+        "profiles": [{"id": "p-owner", "is_primary": True, "has_pin": False}],
+        "catalog": [
+            {"content_id": "movie:heat-1995", "type": "movie", "title": "Heat", "year": 1995, "poster_url": "/img/heat.jpg"},
+            {"content_id": "series:heat-house", "type": "series", "title": "Heat House", "year": 2024, "series_poster_url": "/img/heat-house.jpg"},
+            {"content_id": "episode:heat-1", "type": "episode", "title": "Heatwave", "year": 2024},
+        ],
         "next_invitation": 1,
         "next_account": 2,
         "requests": [],
@@ -105,6 +111,21 @@ def handle(state: dict, method: str, path: str, query: dict, body, headers) -> t
         return (*problem(503, "unavailable"), {})
 
     parts = path.strip("/").split("/")  # api v2 ...
+
+    if method == "GET" and path.startswith("/img/"):
+        return 200, {"image": path}, {"Content-Type": "image/jpeg"}
+    if method == "GET" and path == "/api/v2/profiles":
+        return 200, {"items": silo["profiles"]}, {}
+    if method == "GET" and (path == "/api/v2/catalog" or path.startswith("/api/v2/catalog/items/")):
+        if headers.get("X-Profile-Id") != "p-owner":
+            return (*problem(400, "profile_required"), {})
+        if path == "/api/v2/catalog":
+            q = query.get("q", "").lower()
+            rows = [i for i in silo["catalog"] if q in i["title"].lower() and (query.get("type") != "video" or i["type"] in ("movie", "series"))]
+            return 200, {"items": rows[: int(query.get("limit", 50))], "page": {"has_more": False}}, {}
+        from urllib.parse import unquote
+        item = next((i for i in silo["catalog"] if i["content_id"] == unquote(parts[4])), None)
+        return (200, {"genres": [], **item}, {}) if item else (*problem(404, "not_found"), {})
 
     if method == "GET" and path == "/api/v2/admin/invitations/capabilities":
         return 200, {"revision": "1", "state": "available", "default_profile": True, "profileless": True, "email_delivery": False}, {}

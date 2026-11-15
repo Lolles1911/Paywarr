@@ -59,7 +59,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.18.1',
+    version: '1.19.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -223,6 +223,13 @@ class Wizarr extends Server
                 'required' => false,
                 'encrypted' => true,
                 'description' => 'Optional. Paywarr posts here when something needs you: suspensions that keep failing, Wizarr down, invitations stuck in the queue. Discord: channel settings -> Integrations -> Webhooks.',
+            ],
+            [
+                'name' => 'report_department',
+                'label' => 'Problem reports: ticket department',
+                'type' => 'text',
+                'required' => false,
+                'description' => 'Optional. Customers with requests can report a problem with a movie or show; it becomes a support ticket in this department. Empty: the first department.',
             ],
             [
                 'name' => 'heartbeat_url',
@@ -531,6 +538,15 @@ class Wizarr extends Server
             // Lets a theme hide the product list on the front page (see "For theme authors" in the README).
             app()->bind('wizarr.shopLocked', fn () => $this->shopAccessForCurrentUser() !== 'allow');
         }
+
+        // "Report a problem", for customers with requests.
+        Event::listen('navigation.dashboard', fn () => [
+            'name' => self::t('Report a problem'),
+            'route' => 'extensions.wizarr.report',
+            'icon' => 'ri-error-warning',
+            'priority' => 30,
+            'condition' => Auth::check() && Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== []),
+        ]);
 
         if ($this->discordConfigured()) {
             // Under the login form, and under the sign-up form (themes that offer the
@@ -2290,6 +2306,263 @@ HTML;
             trim((string) $this->config($this->seerrPrefix($n) . 'url')),
             trim((string) $this->config($this->seerrPrefix($n) . 'api_key')),
         );
+    }
+
+    /* ------------------------------------------------------------------
+     | Problem reports: a movie or show with a fault, as a support ticket
+     * ----------------------------------------------------------------- */
+
+    /** What the customer can report, in their words; staff read the key. */
+    public const REPORT_PROBLEMS = [
+        'video' => 'Picture (stutters, wrong quality, won\'t play)',
+        'audio' => 'Sound (missing, out of sync, wrong language)',
+        'subtitles' => 'Subtitles (missing, wrong, out of sync)',
+        'episode' => 'Wrong or missing episode',
+        'other' => 'Something else',
+    ];
+
+    /**
+     * Where this customer can report from: one entry per active subscription
+     * with requests, on Silo (its catalog) or with Seerr (titles on the server).
+     *
+     * @return array<int, array{service: Service, ext: static, kind: string}>
+     */
+    public function reportSources($user, ?iterable $services = null): array
+    {
+        if (!$user) {
+            return [];
+        }
+        $services ??= Service::where('user_id', $user->id)->where('status', 'active')->with(['product.server', 'properties'])->get();
+        $sources = [];
+        foreach ($services as $service) {
+            if (($service->status ?? '') !== 'active' || $service->product?->server?->extension !== 'Wizarr') {
+                continue;
+            }
+            $ext = $this->forServiceServer($service);
+            if ($ext->seerrPlan(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service)) === null) {
+                continue;
+            }
+            if ($ext->isSilo()) {
+                $sources[] = ['service' => $service, 'ext' => $ext, 'kind' => 'silo'];
+            } elseif ($ext->seerrConfigured()) {
+                $sources[] = ['service' => $service, 'ext' => $ext, 'kind' => 'seerr'];
+            }
+        }
+
+        return $sources;
+    }
+
+    /**
+     * Titles matching $query in the customer's libraries: key (what the form
+     * sends back), title, year, kind (movie|show), poster (an address), server.
+     *
+     * @param  callable(int, string): string  $siloPoster  address of a Silo poster, by service and content ID
+     */
+    public function reportSearch(array $sources, string $query, ?callable $siloPoster = null): array
+    {
+        $query = trim(mb_substr($query, 0, 100));
+        if (mb_strlen($query) < 2) {
+            return [];
+        }
+        $siloPoster ??= fn (int $service, string $item) => route('extensions.wizarr.report.poster', ['service' => $service]) . '?item=' . rawurlencode($item);
+        $results = [];
+        $asked = [];
+        foreach ($sources as $source) {
+            $id = (int) $source['service']->id;
+            $label = $source['kind'] === 'silo' ? 'Silo' : 'Seerr';
+            // Two subscriptions on the same library: ask it once.
+            $where = $source['kind'] . '|' . ($source['kind'] === 'silo' ? $source['ext']->config('host') : $source['ext']->seerrInstanceOf($source['service']));
+            if (isset($asked[$where])) {
+                continue;
+            }
+            $asked[$where] = true;
+            try {
+                if ($source['kind'] === 'silo') {
+                    foreach ($source['ext']->client()->searchCatalog($query) as $item) {
+                        $results[] = ['key' => $id . ':silo:' . $item['id'], 'title' => $item['title'], 'year' => $item['year'], 'kind' => $item['type'] === 'series' ? 'show' : 'movie',
+                            'poster' => $siloPoster($id, $item['id']), 'server' => $label];
+                    }
+                } else {
+                    foreach ($source['ext']->seerr($source['ext']->seerrInstanceOf($source['service']))->searchAvailable($query) as $item) {
+                        $results[] = ['key' => $id . ':' . $item['type'] . ':' . $item['id'], 'title' => $item['title'], 'year' => $item['year'], 'kind' => $item['type'] === 'tv' ? 'show' : 'movie',
+                            'poster' => $item['posterPath'] ? 'https://image.tmdb.org/t/p/w185' . $item['posterPath'] : null, 'server' => $label];
+                    }
+                }
+            } catch (Throwable $e) {
+                Log::warning('Wizarr: problem report search failed for service ' . $id . ': ' . $e->getMessage());
+            }
+        }
+
+        return array_slice($results, 0, 24);
+    }
+
+    /**
+     * The chosen title, looked up again where it lives (never taken from the
+     * form): title, year, kind, where (for staff), service. Null when the key
+     * isn't one of this customer's libraries or the title is gone.
+     */
+    public function reportTitle(array $sources, string $key): ?array
+    {
+        if (!preg_match('/^(\d+):(silo|movie|tv):([A-Za-z0-9:._-]{1,200})$/', $key, $m)) {
+            return null;
+        }
+        foreach ($sources as $source) {
+            if ((int) $source['service']->id !== (int) $m[1] || ($source['kind'] === 'silo') !== ($m[2] === 'silo')) {
+                continue;
+            }
+            if ($m[2] === 'silo') {
+                $item = $source['ext']->client()->catalogItem($m[3]);
+                if (!$item || !in_array($item['type'] ?? '', ['movie', 'series'], true)) {
+                    return null;
+                }
+
+                return ['title' => (string) $item['title'], 'year' => isset($item['year']) ? (int) $item['year'] : null, 'kind' => $item['type'] === 'series' ? 'show' : 'movie',
+                    'where' => 'Silo, catalog item ' . $m[3], 'service' => $source['service']];
+            }
+            if (!ctype_digit($m[3])) {
+                return null;
+            }
+            $item = $source['ext']->seerr($source['ext']->seerrInstanceOf($source['service']))->title($m[2], (int) $m[3]);
+
+            return $item === null ? null : ['title' => $item['title'], 'year' => $item['year'], 'kind' => $m[2] === 'tv' ? 'show' : 'movie',
+                'where' => 'Seerr, TMDB ' . $m[2] . ' ' . $m[3], 'service' => $source['service']];
+        }
+
+        return null;
+    }
+
+    /**
+     * The ticket for a report: subject and message for staff, the subscription
+     * it is about. Refuses (DisplayException, in the customer's language) a
+     * title that isn't theirs, an unknown problem or a too long text.
+     *
+     * @return array{service_id: int, subject: string, message: string}
+     */
+    public function reportTicket(array $sources, array $input): array
+    {
+        $title = $this->reportTitle($sources, (string) ($input['pick'] ?? ''));
+        if ($title === null) {
+            throw new DisplayException(self::t('Choose the movie or show again; that one can\'t be found.'));
+        }
+        $problem = (string) ($input['problem'] ?? '');
+        if (!isset(self::REPORT_PROBLEMS[$problem])) {
+            throw new DisplayException(self::t('Choose what the problem is.'));
+        }
+        $text = trim(str_replace("\r\n", "\n", (string) ($input['description'] ?? '')));
+        if (mb_strlen($text) > 2000) {
+            throw new DisplayException(self::t('The description can be at most 2000 characters.'));
+        }
+        $number = fn ($value) => is_numeric($value) && (int) $value >= 0 && (int) $value <= 9999 ? (int) $value : null;
+        $season = $title['kind'] === 'show' ? $number($input['season'] ?? null) : null;
+        $episode = $title['kind'] === 'show' ? $number($input['episode'] ?? null) : null;
+
+        $service = $title['service'];
+        $name = $title['title'] . ($title['year'] ? ' (' . $title['year'] . ')' : '');
+        $users = array_map(fn ($user) => $user['username'] . ' (' . ($user['type'] ?: '?') . ')', $this->allUsers(ExtensionHelper::getServiceProperties($service), resolve: false));
+        $lines = [
+            'Problem report from the client area.',
+            '',
+            'Title: ' . $name . ', ' . $title['kind'],
+            'Where: ' . $title['where'],
+        ];
+        if ($season !== null || $episode !== null) {
+            $lines[] = trim(($season !== null ? 'Season ' . $season : '') . ($season !== null && $episode !== null ? ', ' : '') . ($episode !== null ? 'episode ' . $episode : ''));
+        }
+        $lines[] = 'Problem: ' . self::REPORT_PROBLEMS[$problem];
+        $lines[] = 'Subscription: #' . $service->id . ($service->product?->name ? ' ' . $service->product->name : '');
+        if ($users) {
+            $lines[] = 'Media server user: ' . implode(', ', $users);
+        }
+        $lines[] = '';
+        $lines[] = 'The customer wrote:';
+        $lines[] = $text !== '' ? $text : '(nothing)';
+
+        return [
+            'service_id' => (int) $service->id,
+            'subject' => mb_substr('Problem: ' . $name . ($season !== null || $episode !== null ? ' S' . ($season ?? '?') . 'E' . ($episode ?? '?') : '') . ' – ' . explode(' (', self::REPORT_PROBLEMS[$problem])[0], 0, 250),
+            'message' => implode("\n", $lines),
+        ];
+    }
+
+    /** The Seerr a customer's account is on (their media servers decide); "1" before they have one. */
+    private function seerrInstanceOf(Service $service): string
+    {
+        $stored = (string) (ExtensionHelper::getServiceProperties($service)[self::PROP_SEERR_INSTANCE] ?? '');
+
+        return $stored !== '' && in_array($stored, $this->seerrInstances(), true) ? $stored : ($this->seerrInstances()[0] ?? '1');
+    }
+
+    /** GET /wizarr/report: search, choose, describe. */
+    public function reportPage()
+    {
+        $user = Auth::user();
+        $sources = $this->reportSources($user);
+        abort_unless($sources !== [], 404);
+        $query = (string) request()->query('q', '');
+        $pick = (string) request()->query('pick', '');
+        $chosen = $pick !== '' ? $this->reportTitle($sources, $pick) : null;
+
+        $content = view('wizarr::report', [
+            'query' => $query,
+            'results' => $chosen === null ? $this->reportSearch($sources, $query) : [],
+            'pick' => $chosen === null ? '' : $pick,
+            'chosen' => $chosen,
+            'problems' => array_map(fn ($label) => self::t($label), self::REPORT_PROBLEMS),
+            'error' => session('wizarr_report_error'),
+            't' => fn (string $text, array $replace = []) => self::t($text, $replace),
+        ])->render();
+
+        return view('layouts.app', ['slot' => new HtmlString($content), 'title' => self::t('Report a problem')]);
+    }
+
+    /** POST /wizarr/report: the ticket. */
+    public function reportSubmit()
+    {
+        $user = Auth::user();
+        $sources = $this->reportSources($user);
+        abort_unless($sources !== [], 404);
+        $back = fn (string $message) => redirect()->route('extensions.wizarr.report', ['pick' => (string) request()->input('pick', '')])->with('wizarr_report_error', $message);
+
+        // As Paymenter's own "new ticket": one a half minute; and ten a day.
+        $key = 'wizarr-report:' . $user->id;
+        if (\Illuminate\Support\Facades\RateLimiter::tooManyAttempts($key, 1) || \Illuminate\Support\Facades\RateLimiter::tooManyAttempts($key . ':day', 10)) {
+            return $back(self::t('Too many reports right now. Please try again in a little while.'));
+        }
+        try {
+            $ticket = $this->reportTicket($sources, request()->only(['pick', 'problem', 'season', 'episode', 'description']));
+        } catch (DisplayException $e) {
+            return $back($e->getMessage());
+        }
+        \Illuminate\Support\Facades\RateLimiter::hit($key, 30);
+        \Illuminate\Support\Facades\RateLimiter::hit($key . ':day', 86400);
+
+        $departments = array_values((array) config('settings.ticket_departments'));
+        $wanted = trim((string) $sources[0]['ext']->config('report_department'));
+        $created = \App\Models\Ticket::create([
+            'user_id' => $user->id,
+            'department' => in_array($wanted, $departments, true) ? $wanted : ($departments[0] ?? null),
+            'service_id' => $ticket['service_id'],
+            'subject' => $ticket['subject'],
+            'priority' => 'medium',
+        ]);
+        $created->messages()->create(['user_id' => $user->id, 'message' => $ticket['message']]);
+
+        return redirect()->route('tickets.show', $created);
+    }
+
+    /** GET /wizarr/report/poster/{service}?item=...: a Silo poster, for the search results. */
+    public function reportPoster($service)
+    {
+        $item = (string) request()->query('item', '');
+        foreach ($this->reportSources(Auth::user()) as $source) {
+            if ($source['kind'] === 'silo' && (int) $source['service']->id === (int) $service && preg_match('/^[A-Za-z0-9:._-]{1,200}$/', $item)) {
+                $image = $source['ext']->client()->poster($item);
+                if ($image) {
+                    return response($image['body'], 200, ['Content-Type' => $image['type'], 'Cache-Control' => 'private, max-age=86400', 'X-Content-Type-Options' => 'nosniff']);
+                }
+            }
+        }
+        abort(404);
     }
 
     /* ------------------------------------------------------------------

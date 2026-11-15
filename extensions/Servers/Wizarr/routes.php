@@ -25,3 +25,10 @@ Route::middleware(['web'])
 Route::middleware(['web', 'auth', 'throttle:40,1'])
     ->get('/wizarr/status', [Wizarr::class, 'bannerStatus'])
     ->name('extensions.wizarr.status');
+
+// "Report a problem" with a movie or show: becomes a support ticket. For customers with requests.
+Route::middleware(['web', 'auth'])->prefix('wizarr/report')->name('extensions.wizarr.report')->group(function () {
+    Route::get('/', [Wizarr::class, 'reportPage']);
+    Route::post('/', [Wizarr::class, 'reportSubmit'])->name('.submit');
+    Route::get('/poster/{service}', [Wizarr::class, 'reportPoster'])->whereNumber('service')->middleware('throttle:120,1')->name('.poster');
+});

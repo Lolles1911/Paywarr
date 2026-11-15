@@ -235,6 +235,91 @@ class SiloClient
     }
 
     /**
+     * Movies and shows in Silo's catalog matching $query: [id (content ID),
+     * title, year, type ("movie"|"series")]. Read as the key owner's primary
+     * profile; empty when that profile has a PIN.
+     */
+    public function searchCatalog(string $query, int $limit = 12): array
+    {
+        $profile = $this->profileId();
+        if ($profile === '') {
+            return [];
+        }
+        $answer = $this->request('get', '/api/v2/catalog?' . http_build_query(['q' => $query, 'type' => 'video', 'limit' => $limit, 'image_size' => 'small', 'skip_total' => 'true']),
+            headers: ['X-Profile-Id' => $profile]);
+        $found = [];
+        foreach ($answer['items'] ?? [] as $item) {
+            if (in_array($item['type'] ?? '', ['movie', 'series'], true) && ($item['content_id'] ?? '') !== '') {
+                $found[] = ['id' => (string) $item['content_id'], 'title' => (string) ($item['title'] ?? ''), 'year' => isset($item['year']) ? (int) $item['year'] : null, 'type' => (string) $item['type']];
+            }
+        }
+
+        return $found;
+    }
+
+    /** One catalog item (title, year, type, poster_url ...), or null. */
+    public function catalogItem(string $contentId): ?array
+    {
+        $profile = $this->profileId();
+        if ($profile === '' || !preg_match('/^[A-Za-z0-9:._-]{1,200}$/', $contentId)) {
+            return null;
+        }
+        try {
+            return $this->request('get', '/api/v2/catalog/items/' . rawurlencode($contentId) . '?image_size=small', headers: ['X-Profile-Id' => $profile]);
+        } catch (WizarrException $e) {
+            if ($e->isNotFound()) {
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * An item's poster as image bytes and type, or null. A signed Silo route
+     * (relative) is fetched with the key; object storage without it.
+     *
+     * @return array{body: string, type: string}|null
+     */
+    public function poster(string $contentId): ?array
+    {
+        $item = $this->catalogItem($contentId);
+        $url = (string) ($item['series_poster_url'] ?? '') ?: (string) ($item['poster_url'] ?? '');
+        $own = false;
+        if (str_starts_with($url, '/')) {
+            $url = rtrim($this->baseUrl, '/') . $url;
+            $own = true;
+        } elseif (!preg_match('~^https?://~i', $url)) {
+            return null;
+        }
+        try {
+            $response = Http::withHeaders(['Accept' => 'image/*'] + ($own ? ['Authorization' => 'Bearer ' . $this->apiKey] : []))->timeout($this->timeout)->get($url);
+        } catch (Throwable $e) {
+            return null;
+        }
+        $type = strtolower(trim(explode(';', $response->header('Content-Type'))[0]));
+
+        return $response->status() === 200 && str_starts_with($type, 'image/') && $type !== 'image/svg+xml'
+            ? ['body' => $response->body(), 'type' => $type] : null;
+    }
+
+    private ?string $profileId = null;
+
+    /** The key owner's primary profile, which catalog reads act as; "" when it has a PIN. */
+    private function profileId(): string
+    {
+        if ($this->profileId === null) {
+            $this->profileId = '';
+            foreach ($this->request('get', '/api/v2/profiles')['items'] ?? [] as $profile) {
+                if (!empty($profile['is_primary']) && empty($profile['has_pin'])) {
+                    $this->profileId = (string) $profile['id'];
+                }
+            }
+        }
+
+        return $this->profileId;
+    }
+
+    /**
      * Something that tells this invitation apart from a later one with the
      * same ID. Silo keeps the claim token to itself, so it is made from the
      * ID and the creation time, which both appear in every listing.

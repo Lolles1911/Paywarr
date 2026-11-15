@@ -32,6 +32,17 @@ import stub_silo
 API_KEY = "stub-key"
 
 
+# What Seerr's search knows (TMDB), with what is on the media server (mediaInfo.status 5 available,
+# 4 partly, 2 pending), as server/routes/search.ts answers.
+SEERR_CATALOG = [
+    {"id": 949, "mediaType": "movie", "title": "Heat", "releaseDate": "1995-12-15", "posterPath": "/heat.jpg", "mediaInfo": {"status": 5}},
+    {"id": 1396, "mediaType": "tv", "name": "Breaking Heat", "firstAirDate": "2008-01-20", "posterPath": "/bh.jpg", "mediaInfo": {"status": 4}},
+    {"id": 5, "mediaType": "movie", "title": "Heat Wave", "releaseDate": "2022-01-01", "posterPath": "/hw.jpg", "mediaInfo": {"status": 2}},
+    {"id": 7, "mediaType": "movie", "title": "Heated", "releaseDate": "2010-01-01", "posterPath": "/../../evil"},
+    {"id": 31, "mediaType": "person", "name": "Heath Ledger"},
+]
+
+
 def fresh_seerr(key: str, media: str) -> dict:
     """One Seerr: user 1 is the owner, as in Seerr."""
     return {"key": key, "csrf": False, "default_permissions": 32, "media": media,
@@ -294,6 +305,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if method == "GET" and path == "/status":
             return self.send_json(200, {"version": "3.5.1"})
+        if method == "GET" and path == "/search":
+            raw = self.path.partition("?")[2]
+            if "+" in raw:  # Seerr's request validation wants %20, as encodeURIComponent writes it
+                return self.send_json(400, {"message": "query must be URL encoded"})
+            q = (parse_qs(raw).get("query") or [""])[0].lower()
+            hits = [r for r in SEERR_CATALOG if q in (r.get("title") or r.get("name") or "").lower()]
+            return self.send_json(200, {"page": 1, "totalPages": 1, "totalResults": len(hits), "results": hits})
+        if method == "GET" and len(parts) == 2 and parts[0] in ("movie", "tv") and parts[1].isdigit():
+            hit = next((r for r in SEERR_CATALOG if r["id"] == int(parts[1]) and r["mediaType"] == parts[0]), None)
+            return self.send_json(200, hit) if hit else self.send_json(404, {"message": "Unable to retrieve"})
         if method == "GET" and path == "/settings/main":
             # server/constants/server.ts: PLEX = 1, JELLYFIN = 2, EMBY = 3
             return self.send_json(200, {"mediaServerType": {"plex": 1, "jellyfin": 2, "emby": 3}.get(st["media"], 4), "applicationTitle": "Seerr"})

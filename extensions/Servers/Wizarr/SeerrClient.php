@@ -150,6 +150,50 @@ class SeerrClient
     }
 
     /** Deletes the user and, as Seerr does, their requests. Gone already is fine. */
+    /**
+     * Movies and shows matching $query that are on the media server
+     * (available, or partly for a show): [type ("movie"|"tv"), id (TMDB),
+     * title, year, posterPath].
+     */
+    public function searchAvailable(string $query): array
+    {
+        $answer = $this->call('get', '/search?' . http_build_query(['query' => $query, 'page' => 1], '', '&', PHP_QUERY_RFC3986)) ?? [];
+        $found = [];
+        foreach ($answer['results'] ?? [] as $result) {
+            $type = $result['mediaType'] ?? '';
+            if (!in_array($type, ['movie', 'tv'], true) || !in_array((int) ($result['mediaInfo']['status'] ?? 0), [4, 5], true)) {
+                continue;
+            }
+            $found[] = $this->titleRow($type, $result);
+        }
+
+        return $found;
+    }
+
+    /** One movie or show by its TMDB ID, as searchAvailable() lists it; null when Seerr doesn't know it. */
+    public function title(string $type, int $id): ?array
+    {
+        if (!in_array($type, ['movie', 'tv'], true)) {
+            return null;
+        }
+        $answer = $this->call('get', '/' . $type . '/' . $id, notFound: true);
+
+        return $answer === null ? null : $this->titleRow($type, $answer);
+    }
+
+    private function titleRow(string $type, array $item): array
+    {
+        $date = (string) ($item['releaseDate'] ?? $item['firstAirDate'] ?? '');
+
+        return [
+            'type' => $type,
+            'id' => (int) ($item['id'] ?? 0),
+            'title' => (string) ($item['title'] ?? $item['name'] ?? ''),
+            'year' => preg_match('/^\d{4}/', $date, $m) ? (int) $m[0] : null,
+            'posterPath' => preg_match('~^/[A-Za-z0-9._-]+$~', (string) ($item['posterPath'] ?? '')) ? (string) $item['posterPath'] : null,
+        ];
+    }
+
     public function deleteUser(int $id): void
     {
         $this->call('delete', '/user/' . $id, notFound: true);

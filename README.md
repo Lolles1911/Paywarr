@@ -736,6 +736,26 @@ If it doesn't work, run `tools/seerr-check.php` (see *Troubleshooting*).
 Typically `http://` or the whole internal address is missing, or the "Yes"
 option doesn't have the environment variable `yes`/`ja`.
 
+## Report a problem with a movie or show
+
+Customers with requests (Seerr, or Silo's own) get **Report a problem** in the
+client area menu, at `/wizarr/report`:
+
+1. They search their library and choose the title: on Silo its catalog, with
+   Seerr only what is on the media server (available or partly available).
+2. They choose what is wrong (picture, sound, subtitles, wrong or missing
+   episode, something else), for a show the season and episode, and can add a
+   description.
+3. It becomes a **support ticket** in Paymenter, on their subscription, so you
+   answer it like any other ticket and they get your answer there and by mail.
+
+The ticket names the title as the library knows it (looked up again, never
+taken from the form), with Silo's catalog ID or Seerr's TMDB ID, the
+subscription and the customer's media server user, so you know exactly which
+file. It goes to the department set under **Problem reports: ticket
+department** on the server, or the first department. One report every half
+minute and ten a day per customer.
+
 ## Customer statistics: Paywarr Stats
 
 Want each customer to see their own watch statistics in the client area?
@@ -963,7 +983,7 @@ They behave differently, and that is up to Wizarr, not the extension:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-202 scenarios run the extension through the whole lifecycle against
+207 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -972,7 +992,7 @@ password reset, suspension and reopening on both Jellyfin and Plex,
 cancellation, the safety net, the Discord check at checkout, outages at Wizarr
 and Discord, that other users are not touched, refunds, the alerts, Jellyfin,
 Emby or both with one invitation each (including switching later), Seerr
-request packages, up to three Seerr (including Plex), Silo without Wizarr
+request packages, up to three Seerr (including Plex), problem reports, Silo without Wizarr
 (its edit guard, paging, its own requests, and that administrators are never
 touched), and the
 languages (English, Danish, and that every text in the code has a Danish
@@ -1026,6 +1046,7 @@ it*) does. Run it before you take on paying customers.
 | `tools/backup-paymenter.sh` | Backs up Paymenter's database, `.env` and uploads |
 | `extensions/Servers/Wizarr/routes.php` | The pages under `/wizarr/discord` and the status lookup `/wizarr/status` |
 | `extensions/Servers/Wizarr/resources/views/discord.blade.php` | The customer's Discord page |
+| `extensions/Servers/Wizarr/resources/views/report.blade.php` | The customer's "Report a problem" page |
 | `extensions/Servers/Wizarr/lang/da.json` | Danish translation of everything customers see |
 | `install.sh` | Copies the extension into Paymenter and reloads it |
 | `tests/` | Stubs (Wizarr, Discord, Seerr, Silo), stand-ins and scenarios |

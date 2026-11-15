@@ -703,6 +703,13 @@ namespace Illuminate\Support\Facades {
 
             return $this;
         }
+
+        public function middleware($middleware): static
+        {
+            $this->middleware = [...$this->middleware, ...(array) $middleware];
+
+            return $this;
+        }
     }
 }
 

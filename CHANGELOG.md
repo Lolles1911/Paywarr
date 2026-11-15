@@ -3,6 +3,16 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.19.0 (2026-11-15)
+
+- **New: Report a problem.** Customers with requests can report a movie or
+  show with a fault (picture, sound, subtitles, wrong or missing episode,
+  something else) from a new page in the client area. They search their own
+  library (Silo's catalog, or with Seerr what is on the media server), choose
+  the title, and it becomes a support ticket in Paymenter on their
+  subscription, naming the exact title for staff. The department is a server
+  setting.
+
 ## 1.18.1 (2026-11-15)
 
 - The configurable option that sells requests is now called **`requests`**
