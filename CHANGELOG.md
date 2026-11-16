@@ -3,6 +3,12 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.23.0 (2026-11-16)
+
+- **For Paywarr Stats 1.7:** the Stats overview can show how many requests
+  each customer has used, and who has used their limit up. Paywarr reads only
+  the quota for it, without searches or discovery rows.
+
 ## 1.22.1 (2026-11-16)
 
 - **Changed: one trial per server.** A customer can try each of your servers
