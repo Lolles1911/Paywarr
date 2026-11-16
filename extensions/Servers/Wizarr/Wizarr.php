@@ -9,6 +9,7 @@ use App\Events\InvoiceItem\Creating as InvoiceItemCreating;
 use App\Events\InvoiceTransaction\Updated as TransactionUpdated;
 use App\Events\ServiceUpgrade\Updated as ServiceUpgradeUpdated;
 use App\Jobs\Server\SuspendJob;
+use App\Jobs\Server\UnsuspendJob;
 use App\Exceptions\DisplayException;
 use App\Helpers\ExtensionHelper;
 use App\Helpers\NotificationHelper;
@@ -166,6 +167,11 @@ class Wizarr extends Server
     /** On the Paymenter user: Discord roles this extension gave them (and may take back). */
     private const PROP_DISCORD_ROLES = 'discord_roles_granted';
 
+    /** On a subscription: when the customer was first seen outside the Discord (a Unix time), and that Paywarr suspended it for that. */
+    public const PROP_DISCORD_LEFT = 'discord_left_at';
+
+    public const PROP_DISCORD_SUSPENDED = 'discord_suspended';
+
     /** How long a "member / not member" answer is reused while browsing the shop. */
     private const MEMBERSHIP_CACHE_SECONDS = 600;
 
@@ -315,6 +321,20 @@ class Wizarr extends Server
                 'label' => 'Only Discord members can see the shop',
                 'type' => 'checkbox',
                 'description' => 'Categories, products and the cart need a logged-in customer who is a member of your Discord. The front page stays public.',
+            ],
+            [
+                'name' => 'discord_suspend_leavers',
+                'label' => 'Suspend customers who leave the Discord',
+                'type' => 'checkbox',
+                'description' => 'For products with "Requires Discord membership". A customer who has connected Discord and is no longer on the server gets a warning; still gone after the hours below, the subscription is suspended. Back on the server, it opens again by itself (unless an invoice is overdue). Customers who never connected Discord are left alone.',
+            ],
+            [
+                'name' => 'discord_grace_hours',
+                'label' => 'Hours to rejoin before the suspension',
+                'type' => 'text',
+                'default' => '24',
+                'placeholder' => '24',
+                'description' => 'From the warning. 0 suspends at once. Checked every hour.',
             ],
             [
                 'name' => 'discord_client_id',
@@ -631,6 +651,7 @@ class Wizarr extends Server
             $schedule->call(function () {
                 $retry = $this->retryPending();
                 $this->reconcileDiscordRoles();
+                $this->reconcileDiscordMembership();
                 $this->reconcileSeerr();
                 $this->processTrials();
                 $this->reportHealth($retry);
@@ -3507,6 +3528,10 @@ HTML;
                 $member = $this->discord()->isMember((string) $this->config('discord_guild_id'), $discordId);
                 // "I have joined - check again" must open the shop straight away.
                 Cache::put('wizarr:discord-member:' . $discordId, $member, self::MEMBERSHIP_CACHE_SECONDS);
+                // Back on the server: a subscription suspended for leaving opens at once.
+                if ($member) {
+                    $this->reconcileDiscordMembership(Service::where('user_id', $user->id)->whereIn('status', ['active', 'suspended'])->with(['product.server', 'properties'])->get());
+                }
             } catch (DiscordException $e) {
                 Log::warning('Wizarr: Discord membership check failed: ' . $e->getMessage());
                 $error = true;
@@ -3778,6 +3803,145 @@ HTML;
     }
 
     /** Hourly: every customer with a connected Discord account. */
+    /**
+     * The hourly check of Discord membership, for subscriptions to products
+     * with "Requires Discord membership" on a server with "Suspend customers
+     * who leave the Discord": warns a customer who left, suspends after the
+     * grace hours, and opens the subscription again once they are back
+     * (if no invoice is overdue). A Discord error is never read as "left".
+     *
+     * @param  callable|null  $isMember  fn (array $serverSettings, string $discordId): bool, may throw DiscordException
+     * @param  callable|null  $suspend  fn (Service)
+     * @param  callable|null  $unsuspend  fn (Service)
+     * @param  callable|null  $notify  fn (User, string $kind, array $replace) - kind: warning, suspended, reopened
+     * @return array<int, string> what happened, by subscription: warned, suspended, reopened, cleared
+     */
+    public function reconcileDiscordMembership(?iterable $services = null, ?int $now = null, ?callable $isMember = null, ?callable $suspend = null, ?callable $unsuspend = null, ?callable $notify = null): array
+    {
+        $now ??= time();
+        $services ??= Service::whereIn('status', ['active', 'suspended'])->with(['product.server', 'properties'])->get();
+        $isMember ??= fn (array $serverSettings, string $id) => $this->discord($serverSettings)->isMember((string) $serverSettings['discord_guild_id'], $id);
+        $suspend ??= function (Service $service) {
+            $service->update(['status' => Service::STATUS_SUSPENDED]);
+            SuspendJob::dispatch($service, true);
+        };
+        $unsuspend ??= function (Service $service) {
+            $service->update(['status' => 'active']);
+            UnsuspendJob::dispatch($service);
+        };
+        $notify ??= fn ($user, string $kind, array $replace) => $this->notifyDiscordMembership($user, $kind, $replace);
+
+        $known = [];
+        $done = [];
+        foreach ($services as $service) {
+            if (!in_array($service->status ?? '', ['active', 'suspended'], true) || $service->product?->server?->extension !== 'Wizarr') {
+                continue;
+            }
+            $serverSettings = ExtensionHelper::settingsToArray($service->product->server->settings);
+            if (!$this->truthy(ExtensionHelper::settingsToArray($service->product->settings)['require_discord'] ?? false)
+                || !$this->truthy($serverSettings['discord_suspend_leavers'] ?? false)
+                || !$this->discordConfigured($serverSettings)) {
+                continue;
+            }
+            $discordId = $service->user ? $this->propertyValue($service->user, self::PROP_DISCORD_ID) : null;
+            if (!$discordId) {
+                continue; // never connected Discord: left alone
+            }
+            $key = $serverSettings['discord_guild_id'] . '|' . $discordId;
+            try {
+                $member = $known[$key] ??= (bool) $isMember($serverSettings, $discordId);
+            } catch (Throwable $e) {
+                Log::warning('Wizarr: Discord membership of service ' . $service->id . ' not checked: ' . $e->getMessage());
+
+                continue;
+            }
+
+            $properties = ExtensionHelper::getServiceProperties($service);
+            $leftAt = (int) ($properties[self::PROP_DISCORD_LEFT] ?? 0);
+            $suspendedByUs = !empty($properties[self::PROP_DISCORD_SUSPENDED]);
+            $replace = ['service' => $service->product->name ?? ('#' . $service->id), 'hours' => $this->graceHours($serverSettings)];
+
+            if ($member) {
+                if ($leftAt) {
+                    $this->setProperty($service, self::PROP_DISCORD_LEFT, 'Discord: left at', null);
+                    $done[$service->id] = 'cleared';
+                }
+                if ($suspendedByUs) {
+                    $this->setProperty($service, self::PROP_DISCORD_SUSPENDED, 'Discord: suspended for leaving', null);
+                    if ($service->status === 'suspended' && !$this->hasOverdueInvoice($service)) {
+                        $unsuspend($service);
+                        $notify($service->user, 'reopened', $replace);
+                        Log::info('Wizarr: service ' . $service->id . ' opened again: the customer is back on the Discord.');
+                        $done[$service->id] = 'reopened';
+                    }
+                }
+
+                continue;
+            }
+
+            if ($service->status !== 'active') {
+                continue;
+            }
+            $grace = $this->graceHours($serverSettings) * 3600;
+            if (!$leftAt && $grace > 0) {
+                $this->setProperty($service, self::PROP_DISCORD_LEFT, 'Discord: left at', (string) $now);
+                $notify($service->user, 'warning', $replace);
+                Log::info('Wizarr: service ' . $service->id . ': the customer left the Discord; warned.');
+                $done[$service->id] = 'warned';
+
+                continue;
+            }
+            if ($now - ($leftAt ?: $now) >= $grace) {
+                $this->setProperty($service, self::PROP_DISCORD_LEFT, 'Discord: left at', null);
+                $this->setProperty($service, self::PROP_DISCORD_SUSPENDED, 'Discord: suspended for leaving', '1');
+                $suspend($service);
+                $notify($service->user, 'suspended', $replace);
+                Log::info('Wizarr: service ' . $service->id . ' suspended: the customer left the Discord.');
+                $done[$service->id] = 'suspended';
+            }
+        }
+
+        return $done;
+    }
+
+    private function graceHours(array $serverSettings): int
+    {
+        $hours = trim((string) ($serverSettings['discord_grace_hours'] ?? ''));
+
+        return $hours === '' || !ctype_digit($hours) ? 24 : (int) $hours;
+    }
+
+    private function hasOverdueInvoice(Service $service): bool
+    {
+        try {
+            return method_exists($service, 'invoices') && $service->invoices()->where('status', 'pending')->where('due_at', '<', now())->exists();
+        } catch (Throwable $e) {
+            return true; // unsure: leave it suspended
+        }
+    }
+
+    /** Tells the customer, in Paymenter (the bell) and by mail. */
+    private function notifyDiscordMembership($user, string $kind, array $replace): void
+    {
+        [$title, $body] = match ($kind) {
+            'warning' => [self::t('You have left our Discord'), self::t('Your subscription :service needs you on our Discord. Join again within :hours hours, or your access will be paused.', $replace)],
+            'suspended' => [self::t('Your access is paused'), self::t('You are no longer on our Discord, so :service is paused. Join our Discord again and it opens by itself.', $replace)],
+            default => [self::t('Your access is back'), self::t('Welcome back on our Discord. :service is open again.', $replace)],
+        };
+        $url = function_exists('route') ? route('extensions.wizarr.discord') : null;
+        try {
+            \App\Models\Notification::create(['user_id' => $user->id, 'title' => $title, 'body' => $body, 'url' => $url]);
+        } catch (Throwable $e) {
+            Log::warning('Wizarr: notification for user ' . $user->id . ' not created: ' . $e->getMessage());
+        }
+        try {
+            $html = '<p>' . e($body) . '</p>' . ($url ? '<p><a href="' . e($url) . '">' . e(self::t('Open the Discord page')) . '</a></p>' : '');
+            \Illuminate\Support\Facades\Mail::html($html, fn ($mail) => $mail->to($user->email)->subject($title));
+        } catch (Throwable $e) {
+            Log::warning('Wizarr: mail to user ' . $user->id . ' not sent: ' . $e->getMessage());
+        }
+    }
+
     public function reconcileDiscordRoles(): void
     {
         if (!$this->discordConfigured()) {

@@ -3100,6 +3100,111 @@ test('extra requests: only on top of a package with a limit, refused at checkout
     same(2, silo()->topUpTarget($topUp, [$unlimited, $topUp, $limited])->id, 'the one with a limit');
 });
 
+/* ---------- Discord leavers ---------- */
+
+/** A Discord-only Wizarr subscription whose customer connected Discord. */
+function discordCustomer(int $id, array $serverSettings = [], array $product = ['require_discord' => true], ?string $discordId = '4242'): Service
+{
+    $service = wizarrService($id, discordSettings($serverSettings + ['discord_suspend_leavers' => true, 'discord_grace_hours' => '24']));
+    $service->product->settings = $product + settings();
+    $service->product->name = 'Silo';
+    if ($discordId) {
+        $service->user->properties()->updateOrCreate(['key' => 'discord_id'], ['name' => 'Discord ID', 'value' => $discordId]);
+    }
+
+    return $service;
+}
+
+/** Runs the hourly membership check once, recording what it would do. */
+function leavers(array $services, int $now, $member, array &$log): array
+{
+    $isMember = is_callable($member) ? $member : fn () => $member;
+
+    return ext()->reconcileDiscordMembership(
+        $services,
+        $now,
+        $isMember,
+        function ($s) use (&$log) { $log[] = 'suspend ' . $s->id; $s->status = 'suspended'; },
+        function ($s) use (&$log) { $log[] = 'unsuspend ' . $s->id; $s->status = 'active'; },
+        function ($user, $kind, $replace) use (&$log) { $log[] = $kind . ' ' . $user->email . ' ' . $replace['hours']; },
+    );
+}
+
+test('discord leavers: warned first, suspended when the hours are up, opened again on rejoin', function () {
+    $service = discordCustomer(90);
+    $log = [];
+    $t = 1_800_000_000;
+    same([90 => 'warned'], leavers([$service], $t, false, $log), 'left: warned');
+    same(['warning customer90@example.com 24'], $log, 'told, with the hours');
+    same([], leavers([$service], $t + 23 * 3600, false, $log), 'still within the hours: nothing');
+    same([90 => 'suspended'], leavers([$service], $t + 24 * 3600, false, $log), 'hours up: suspended');
+    same('suspended', $service->status, 'status');
+    same([], leavers([$service], $t + 30 * 3600, false, $log), 'suspended once only');
+    same([90 => 'reopened'], leavers([$service], $t + 40 * 3600, true, $log), 'back on the Discord');
+    same('active', $service->status, 'open again');
+    same(['warning customer90@example.com 24', 'suspend 90', 'suspended customer90@example.com 24', 'unsuspend 90', 'reopened customer90@example.com 24'], $log, 'in that order');
+    same([], leavers([$service], $t + 41 * 3600, true, $log), 'nothing more to do');
+});
+
+test('discord leavers: rejoining within the hours clears the warning', function () {
+    $service = discordCustomer(91);
+    $log = [];
+    leavers([$service], 1000, false, $log);
+    same([91 => 'cleared'], leavers([$service], 2000, true, $log), 'cleared');
+    same([91 => 'warned'], leavers([$service], 3000, false, $log), 'leaving again starts the hours again');
+    same('active', $service->status, 'never suspended');
+});
+
+test('discord leavers: 0 hours suspends at once, without a warning', function () {
+    $service = discordCustomer(92, ['discord_grace_hours' => '0']);
+    $log = [];
+    same([92 => 'suspended'], leavers([$service], 1000, false, $log), 'suspended');
+    same(['suspend 92', 'suspended customer92@example.com 0'], $log, 'no warning first');
+});
+
+test('discord leavers: only Discord-only products, with the setting on, and customers who connected Discord', function () {
+    $spy = function () { throw new RuntimeException('must not ask Discord'); };
+    $log = [];
+    same([], leavers([discordCustomer(93, ['discord_suspend_leavers' => false])], 1000, $spy, $log), 'setting off');
+    same([], leavers([discordCustomer(94, [], ['require_discord' => false])], 1000, $spy, $log), 'product without the Discord requirement');
+    same([], leavers([discordCustomer(95, [], ['require_discord' => true], null)], 1000, $spy, $log), 'never connected Discord');
+    same([], leavers([discordCustomer(96, ['discord_bot_token' => ''])], 1000, $spy, $log), 'Discord not set up');
+    $cancelled = discordCustomer(97);
+    $cancelled->status = 'cancelled';
+    same([], leavers([$cancelled], 1000, $spy, $log), 'cancelled');
+    $other = discordCustomer(98);
+    $other->product->server->extension = 'Pterodactyl';
+    same([], leavers([$other], 1000, $spy, $log), 'another extension');
+    same([], $log, 'nobody told');
+});
+
+test('discord leavers: Discord not answering changes nothing, and each customer is asked once', function () {
+    $log = [];
+    $down = fn () => throw new \Paymenter\Extensions\Servers\Wizarr\DiscordException('Discord is down');
+    same([], leavers([discordCustomer(99)], 1000, $down, $log), 'nothing done');
+    same([], $log, 'nobody told');
+    $asked = 0;
+    $count = function () use (&$asked) { $asked++; return true; };
+    leavers([discordCustomer(100), discordCustomer(101)], 1000, $count, $log);
+    same(1, $asked, 'two subscriptions, one question');
+});
+
+test('discord leavers: a suspension for another reason is not lifted on rejoin', function () {
+    $service = discordCustomer(102);
+    $service->status = 'suspended'; // e.g. an unpaid invoice
+    $log = [];
+    same([], leavers([$service], 1000, false, $log), 'not warned while suspended');
+    same([], leavers([$service], 2000, true, $log), 'not opened');
+    same('suspended', $service->status, 'still suspended');
+});
+
+test('discord leavers: the customer messages are translated', function () {
+    inLocale('da', function () {
+        same('Din adgang er sat på pause', \Paymenter\Extensions\Servers\Wizarr\Wizarr::t('Your access is paused'), 'title');
+        ok(str_contains(\Paymenter\Extensions\Servers\Wizarr\Wizarr::t('Your subscription :service needs you on our Discord. Join again within :hours hours, or your access will be paused.', ['service' => 'Silo', 'hours' => 24]), 'inden for 24 timer'), 'body');
+    });
+});
+
 /* ---------- summary ---------- */
 
 echo "\n" . $results['pass'] . ' passed, ' . count($results['fail']) . " failed\n";
