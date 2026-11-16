@@ -3,6 +3,14 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.22.1 (2026-11-16)
+
+- **Changed: one trial per server.** A customer can try each of your servers
+  once, e.g. both Silo and Jellyfin (also with both in the cart at once), but
+  not the same one twice. Having paid on one server no longer rules out a
+  trial on another.
+- Buying after a trial only takes over the trial's user on the same server.
+
 ## 1.22.0 (2026-11-16)
 
 - **New: customers who leave the Discord are suspended**, after a warning.

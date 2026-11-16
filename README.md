@@ -630,8 +630,9 @@ A free trial product that the extension manages from start to finish:
 
 - The box at the bottom of the page says "Your trial has ended – See
   subscriptions" for 14 days after the end, if the customer hasn't bought.
-- **New customers only:** checkout refuses a trial if the customer has had a
-  trial or a subscription before (whatever its status). Together with "one
+- **One trial per server:** checkout refuses a trial if the customer has had a
+  trial or a subscription on the same server before (whatever its status). A
+  customer can try each server once, e.g. both Silo and Jellyfin. Together with "one
   Discord account per customer" this makes it awkward to take several trials.
 - On Plex a disabled user can't be turned back on; if the customer buys, they
   get a new invitation instead.
