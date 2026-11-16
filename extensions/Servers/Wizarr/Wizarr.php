@@ -2570,6 +2570,23 @@ HTML;
     }
 
     /**
+     * Only the quota of one requestsSources() source (used, limit, unlimited
+     * per part), for Paywarr Stats' overview; null when the customer has no
+     * user there yet. Throws when Silo or Seerr can't answer.
+     */
+    public function requestQuotaOf(array $source): ?array
+    {
+        if ($source['user'] === null) {
+            return null;
+        }
+        if ($source['kind'] === 'silo') {
+            return $source['ext']->client()->requestQuota((int) $source['user']);
+        }
+
+        return $source['ext']->seerr($source['ext']->seerrInstanceOf($source['service']))->requestQuota((int) $source['user']);
+    }
+
+    /**
      * What the tab shows for one library: quota, search results or a show's
      * seasons, discovery rows, the customer's own requests. Each part that
      * can't be read is left empty, so the rest still shows.

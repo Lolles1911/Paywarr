@@ -2999,6 +2999,18 @@ test('Requests tab (Seerr): the customer\'s own limit decides', function () {
     tellsCustomer(fn () => ext()->placeRequest($sources, $service->id, 'tv', 1399), 'your limit is used', 'over the limit');
 });
 
+test('Paywarr Stats: requestQuotaOf() reads only the quota, on Silo and on Seerr', function () {
+    [$service, $account] = siloWithRequests('10/30', 1);
+    $service->status = 'active';
+    stub('/_test/clear-requests');
+    $quota = ext()->requestQuotaOf(ext()->requestsSources((object) ['id' => 1], [$service])[0]);
+    same([['requests', 0, 10]], array_map(fn ($p) => [$p['label'], $p['used'], $p['limit']], $quota['parts']), 'Silo');
+    ok(!array_filter(state()['requests'], fn ($r) => str_contains($r['path'], 'discover') || str_contains($r['path'], 'search')), 'no discovery or search');
+    [$seerr] = seerrTabCustomer('10/30');
+    same(['movies', 'tv'], array_column(ext()->requestQuotaOf(tabSource($seerr))['parts'], 'label'), 'Seerr');
+    same(null, ext()->requestQuotaOf(['user' => null] + tabSource($seerr)), 'no user yet');
+});
+
 test('Requests tab (Silo): read with the key, and "Request in Silo" opens the title in Silo', function () {
     [$service, $account] = siloWithRequests('10/30', 1);
     $service->status = 'active';
