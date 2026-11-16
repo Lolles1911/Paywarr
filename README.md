@@ -440,8 +440,8 @@ Discord server can buy it.
 - If Discord can't answer, the purchase waits ("try again in a moment") instead
   of slipping through. The reason is in the log.
 - Also applies to free products, so a trial also requires membership.
-- The check only happens at purchase. Leaving Discord afterwards doesn't stop
-  the subscription.
+- The check happens at purchase. To also act when a customer leaves later,
+  see [Customers who leave the Discord](#customers-who-leave-the-discord).
 - A service you create for a customer yourself in admin isn't blocked.
 
 **Setup (once):**
@@ -465,6 +465,28 @@ Discord server can buy it.
 
 The menu item **Account → Discord** appears once all the Discord fields are
 filled in.
+
+## Customers who leave the Discord
+
+Tick **Suspend customers who leave the Discord** on the Wizarr server, and
+subscriptions to products with **Require Discord membership** follow the
+membership after purchase too. Paywarr checks every hour:
+
+1. **The customer has left:** they are warned, in Paymenter (the bell) and by
+   email, that they have **Hours to rejoin before the suspension** (default 24)
+   to join again.
+2. **Still gone when the hours are up:** the subscription is suspended, and
+   they are told so.
+3. **Back on the Discord:** it opens again by itself within the hour, or at
+   once when they open **Account → Discord**. Back within the hours, the
+   warning is simply dropped.
+
+- **0 hours** suspends at once, without a warning.
+- Customers who never connected Discord, and products without the Discord
+  requirement, are left alone.
+- A subscription suspended for another reason (e.g. an unpaid invoice) isn't
+  opened again on rejoin, and one with an overdue invoice stays suspended.
+- If Discord can't answer, nothing happens that hour. The reason is in the log.
 
 ## Log in with Discord
 

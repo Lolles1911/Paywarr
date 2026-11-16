@@ -3,6 +3,15 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.22.0 (2026-11-16)
+
+- **New: customers who leave the Discord are suspended**, after a warning.
+  Turn on **Suspend customers who leave the Discord** on the Wizarr server.
+  For products with **Require Discord membership**, a customer who leaves is
+  warned and has **Hours to rejoin before the suspension** (default 24) to
+  join again. Otherwise the subscription is suspended, and it opens by itself
+  when they rejoin. Customers who never connected Discord are left alone.
+
 ## 1.21.0 (2026-11-15)
 
 - **New: links in the top bar.** Signed-in customers get **Requests**,
