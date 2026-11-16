@@ -2308,6 +2308,23 @@ test('trial: only for customers who never had a trial or a subscription', functi
     same('You have already had a trial.', ext()->trialRefusal(['trial']), 'trial before');
 });
 
+test('trial: one per server, so Silo and Jellyfin can each be tried once', function () {
+    $user = new User('mette@example.com');
+    $on = function (int $id, int $server, bool $trial, string $extension = 'Wizarr') use ($user) {
+        $service = new Service($id, $user);
+        $service->product = (object) ['server_id' => $server, 'server' => (object) ['id' => $server, 'extension' => $extension], 'settings' => $trial ? trialSettings() : settings()];
+
+        return $service;
+    };
+    $jellyfinTrial = $on(1, 10, true);
+    same([], ext()->trialHistory($jellyfinTrial, [$jellyfinTrial]), 'first trial');
+    $siloTrial = $on(2, 20, true);
+    same([], ext()->trialHistory($siloTrial, [$jellyfinTrial, $siloTrial]), 'a Silo trial after a Jellyfin trial (both in one cart, too)');
+    same(['trial'], ext()->trialHistory($on(3, 10, true), [$jellyfinTrial, $siloTrial]), 'Jellyfin again: refused');
+    same(['paid'], ext()->trialHistory($on(4, 20, true), [$on(5, 20, false)]), 'paid on Silo before: no Silo trial');
+    same([], ext()->trialHistory($on(6, 10, true), [$on(7, 20, false), $on(8, 10, false, 'Pterodactyl')]), 'paid elsewhere does not count');
+});
+
 test('trial: never gets a Wizarr expiry, even if "Access expires after" is filled in', function () {
     ext()->createServer(service(), trialSettings(['access_days' => '7']), []);
     same(null, state()['invitations'][0]['duration'], 'no duration: the extension ends the trial, Wizarr must not');
@@ -2407,6 +2424,16 @@ test('trial -> paid after the trial ended: same user switched back on, no new in
     // the 30-day clean-up must never touch the bought user
     same('none', ext()->processTrial($trial, trialSettings(), $trial->propertyArray(), time() + 60 * 86400), 'no clean-up');
     same(1, count(state()['users']), 'still there');
+});
+
+test('trial -> paid on another server: the trial is left alone', function () {
+    $trial = trialService(ago: 8 * 86400);
+    $trial->product->server_id = 10;
+    $paid = paidService($trial);
+    $paid->product->server_id = 20; // e.g. Silo after a Jellyfin trial
+    ok(!ext()->adoptTrialUser($paid), 'not adopted');
+    same(null, $trial->propertyArray()['trial_converted_to'] ?? null, 'trial not marked as bought');
+    same(true, state()['users'][0]['is_disabled'], 'the trial user stays disabled');
 });
 
 test('trial -> paid during the trial: the trial is closed, the user keeps watching', function () {

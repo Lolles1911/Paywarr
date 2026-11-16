@@ -1697,9 +1697,37 @@ HTML;
     }
 
     /**
+     * The customer's other subscriptions on the same server as $service, as
+     * trialRefusal() takes them: one trial per server, so a customer can try
+     * both Silo and Jellyfin, but not the same one twice.
+     *
+     * @return string[] 'trial' or 'paid' for each
+     */
+    public function trialHistory(Service $service, iterable $others): array
+    {
+        $server = $this->serverIdOf($service);
+        $history = [];
+        foreach ($others as $other) {
+            if ($other->id === $service->id || $other->product?->server?->extension !== 'Wizarr' || $this->serverIdOf($other) !== $server) {
+                continue;
+            }
+            $history[] = $this->isTrial(ExtensionHelper::settingsToArray($other->product->settings)) ? 'trial' : 'paid';
+        }
+
+        return $history;
+    }
+
+    private function serverIdOf(Service $service): ?int
+    {
+        $id = $service->product?->server_id ?? $service->product?->server?->id ?? null;
+
+        return $id === null ? null : (int) $id;
+    }
+
+    /**
      * Who may start a trial: only customers who never had one and never
-     * subscribed. $history: 'trial' or 'paid' for each of their other
-     * Wizarr subscriptions, whatever their status.
+     * subscribed on this server. $history: 'trial' or 'paid' for each of
+     * their other subscriptions there, whatever their status (trialHistory()).
      */
     public function trialRefusal(array $history): ?string
     {
@@ -1798,8 +1826,8 @@ HTML;
     public function adoptTrialUser(Service $service): bool
     {
         foreach ($service->user->services()->with(['product.settings', 'product.server'])->get() as $other) {
-            if ($other->id === $service->id || $other->product?->server?->extension !== 'Wizarr') {
-                continue;
+            if ($other->id === $service->id || $other->product?->server?->extension !== 'Wizarr' || $this->serverIdOf($other) !== $this->serverIdOf($service)) {
+                continue; // a trial on another server (e.g. Silo) stays its own
             }
             if (!$this->isTrial(ExtensionHelper::settingsToArray($other->product->settings))) {
                 continue;
@@ -3458,13 +3486,7 @@ HTML;
         $productSettings = ExtensionHelper::settingsToArray($product->settings);
 
         if ($this->isTrial($productSettings)) {
-            $history = [];
-            foreach ($service->user->services()->with(['product.settings', 'product.server'])->get() as $other) {
-                if ($other->id !== $service->id && $other->product?->server?->extension === 'Wizarr') {
-                    $history[] = $this->isTrial(ExtensionHelper::settingsToArray($other->product->settings)) ? 'trial' : 'paid';
-                }
-            }
-            $refusal = $this->trialRefusal($history);
+            $refusal = $this->trialRefusal($this->trialHistory($service, $service->user->services()->with(['product.settings', 'product.server'])->get()));
             if ($refusal !== null) {
                 throw new DisplayException($refusal);
             }
