@@ -3442,6 +3442,81 @@ test('admin: reset can delete the user on the media server too; a failed link is
     same('Deleted.', ext()->adminUserAction((int) stub('/_test/add-user', ['username' => 'x', 'server_id' => 1])['id'], 'delete'), 'Users page: delete');
 });
 
+test('admin: pause keeps the paid time and resumes by itself; no invoice or termination meanwhile', function () {
+    $service = adminCustomer();
+    $now = time();
+    $service->expires_at = date('Y-m-d H:i:s', $now + 10 * 86400);   // 10 days paid
+    ext()->adminPause($service, $now + 14 * 86400, $now);
+    same('suspended', $service->status, 'suspended');
+    same(true, state()['users'][0]['is_disabled'], 'the user is switched off');
+    same($now + 24 * 86400, strtotime($service->expires_at), 'expires after the pause plus the paid days left, so Paymenter neither bills nor terminates');
+    tellsCustomer(fn () => ext()->adminPause($service), 'Only an active', 'twice');
+    same([], ext()->resumePausedServices([$service], $now + 13 * 86400), 'not yet');
+    same([1], ext()->resumePausedServices([$service], $now + 14 * 86400), 'resumed when the pause ends');
+    same(['active', false], [$service->status, state()['users'][0]['is_disabled']], 'open again');
+    same($now + 24 * 86400, strtotime($service->expires_at), '10 paid days left from the end of the pause');
+    tellsCustomer(fn () => ext()->adminResume($service), 'not paused', 'not paused any more');
+});
+
+test('admin: move a subscription to another media server; libraries for one customer', function () {
+    $service = adminCustomer();
+    \App\Helpers\NotificationHelper::$sent = [];
+    ext()->adminChangeServers($service, [2]);  // Jellyfin -> Plex
+    same('2', $service->propertyArray()['wizarr_servers'] ?? null, 'Plex chosen');
+    $plex = array_values(array_filter(state()['invitations'], fn ($i) => $i['server_ids'] === [2]));
+    same(1, count($plex), 'an invitation for Plex');
+    same(1, count(\App\Helpers\NotificationHelper::$sent), 'mailed');
+    tellsCustomer(fn () => ext()->adminChangeServers($service, [99]), 'no longer exists', 'unknown server');
+
+    $other = adminCustomer(false);
+    ext()->adminSetLibraries($other, [11]);
+    ext()->adminNewInvitation($other, false);
+    $last = end(state()['invitations']);
+    same([11], $last['library_ids'], 'the next invitation has only the customer\'s libraries');
+    ext()->adminSetLibraries($other, []);
+    ext()->adminNewInvitation($other, false);
+    same([10, 11], end(state()['invitations'])['library_ids'], 'back to the product\'s');
+});
+
+test('admin: a password link for Jellyfin users, never for Plex; the log keeps what was done', function () {
+    $service = adminCustomer();
+    $links = ext()->adminPasswordReset($service, false);
+    same(['Jellyfin'], array_keys($links), 'per server');
+    ok(str_contains($links['Jellyfin'], '/reset/'), 'a reset link: ' . $links['Jellyfin']);
+    $plex = wizarrService(3);
+    $plex->product->settings = settings(['server_ids' => ['2']]);
+    subscribed($plex->product->settings, 'plexy', $plex);
+    ext()->getActions($plex, $plex->product->settings, $plex->propertyArray());
+    tellsCustomer(fn () => ext()->adminPasswordReset($plex, false), 'Plex', 'Plex has no password here');
+
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::logAdmin($service->user, 1, 'Paused until Dec 1', 'admin@example.com');
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::logAdmin($service->user, 1, 'Resumed', 'admin@example.com');
+    $log = json_decode($service->user->properties()->where('key', 'paywarr_log')->value('value'), true);
+    same(['Resumed', 'Paused until Dec 1'], array_column($log, 'what'), 'newest first');
+});
+
+test('admin: the health check finds what is wrong in the setup', function () {
+    $service = adminCustomer();
+    $server = (object) ['id' => 7, 'name' => 'WaffleHub Jellyfin', 'settings' => ['host' => $GLOBALS['STUB'] . '/', 'api_key' => 'stub-key', 'discord_guild_id' => '1', 'discord_bot_token' => 'x']];
+    $service->product->server->id = 7;
+    $service->product->server->settings = $server->settings;
+    $inventory = ext()->adminInventory([$server], [$service]);
+    $products = [
+        (object) ['id' => 1, 'name' => 'No server', 'server_id' => 7, 'per_user_limit' => null, 'settings' => ['server_ids' => []]],
+        (object) ['id' => 2, 'name' => 'Gone libraries', 'server_id' => 7, 'per_user_limit' => null, 'settings' => ['server_ids' => ['1'], 'library_ids' => ['10', '999']]],
+        (object) ['id' => 3, 'name' => 'Trial', 'server_id' => 7, 'per_user_limit' => 0, 'settings' => ['server_ids' => ['1'], 'trial_days' => '7']],
+    ];
+    $rows = ext()->adminHealth($inventory, [$server], $products, [$service]);
+    $whats = array_column($rows, 'what');
+    foreach (['Product "No server" has no media server', 'Media server "Unverified" is not verified', 'Server "WaffleHub Jellyfin" has no public address',
+        'Discord is half set up on "WaffleHub Jellyfin"', 'Product "Gone libraries" has libraries that are gone', 'Trial product "Trial" has no "Per user limit"'] as $needle) {
+        ok(in_array($needle, $whats, true), 'finds: ' . $needle);
+    }
+    same('error', $rows[0]['level'], 'errors first');
+    $down = ext()->adminInventory([(object) ['id' => 9, 'name' => 'Old', 'settings' => ['host' => 'http://127.0.0.1:1/', 'api_key' => 'x']]], []);
+    ok(str_contains(ext()->adminHealth($down, [], [], [])[0]['what'], 'does not answer'), 'a Wizarr that does not answer');
+});
+
 /* ---------- summary ---------- */
 
 echo "\n" . $results['pass'] . ' passed, ' . count($results['fail']) . " failed\n";

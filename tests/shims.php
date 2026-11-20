@@ -160,6 +160,12 @@ namespace App\Models {
             return $this;
         }
 
+        /** Relation filters are not modelled: callers check the rows again. */
+        public function whereHas($relation, $callback = null): static
+        {
+            return $this;
+        }
+
         public function get(): array
         {
             return array_values(array_filter(Service::$all, function ($service) {
@@ -189,6 +195,9 @@ namespace App\Models {
         public string $status = 'active';
 
         public ?\DateTimeImmutable $updated_at = null;
+
+        /** As Paymenter's column: when the paid period ends. */
+        public ?string $expires_at = null;
 
         /** ->product->server->extension and ->product->settings, as Paymenter's relations give them */
         public ?object $product = null;

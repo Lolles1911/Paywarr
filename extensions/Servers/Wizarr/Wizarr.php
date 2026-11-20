@@ -187,6 +187,19 @@ class Wizarr extends Server
     /** The link was used but no user was made (e.g. a Plex share that failed); for the admin page's filter. */
     public const PROP_LINK_FAILED = 'wizarr_link_failed';
 
+    /** Libraries chosen for this customer in admin: used for their next invitation instead of the product's. */
+    public const PROP_LIBRARIES = 'library_ids_given';
+
+    /** Paused in admin: since when, until when (empty: until resumed), and the paid time left then (seconds). */
+    public const PROP_PAUSED = 'paywarr_paused_at';
+
+    public const PROP_PAUSED_UNTIL = 'paywarr_paused_until';
+
+    private const PROP_PAUSED_LEFT = 'paywarr_paused_left';
+
+    /** What was done to the customer in admin, newest first (kept on the customer, last 40). */
+    public const PROP_LOG = 'paywarr_log';
+
     /** A note about the customer, kept on the customer (Paywarr → Customers). */
     public const PROP_NOTE = 'paywarr_note';
 
@@ -676,6 +689,7 @@ class Wizarr extends Server
                 $retry = $this->retryPending();
                 $this->reconcileDiscordRoles();
                 $this->reconcileDiscordMembership();
+                $this->resumePausedServices();
                 $this->reconcileSeerr();
                 $this->processTrials();
                 $this->reportHealth($retry);
@@ -4760,7 +4774,8 @@ HTML;
             $payload['expires_in_days'] = $lifetime;
         }
 
-        $libraryIds = $this->idList($settings['library_ids'] ?? null);
+        $given = (string) (ExtensionHelper::getServiceProperties($service)[self::PROP_LIBRARIES] ?? '');
+        $libraryIds = $this->idList($given !== '' ? $given : ($settings['library_ids'] ?? null));
         if ($libraryIds && $this->grant !== '') {
             // The product lists libraries of all its servers; this invitation
             // only takes this server's. None of them chosen: the server's default.
@@ -5425,6 +5440,247 @@ HTML;
         if (empty($properties[self::PROP_LINK_FAILED])) {
             $this->setProperty($service, self::PROP_LINK_FAILED, 'Wizarr: link used, no user made', (string) time());
         }
+    }
+
+    /**
+     * A password reset link for each media server where the customer has a
+     * user that can have one (Jellyfin, Emby, Silo), mailed to them when
+     * $mail. Returns the links per server.
+     */
+    public function adminPasswordReset(Service $service, bool $mail = true): array
+    {
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $links = [];
+        foreach ($this->grantKeys($properties) as $grant) {
+            $this->withGrant($grant, function () use ($service, $properties, &$links) {
+                $view = $this->grantView($properties);
+                $users = $this->parseUsers((string) ($view[self::PROP_USERS] ?? ''));
+                if ($users && array_filter($users, fn ($u) => $u['type'] === '' || in_array($u['type'], self::RESETTABLE_SERVERS, true))) {
+                    $links[$this->grantLabel($properties) ?: 'media server'] = $this->resetGrantPassword($service, $view);
+                }
+            });
+        }
+        if (!$links) {
+            throw new DisplayException('The customer has no user that can get a password link here (Plex passwords are the customer\'s own Plex account).');
+        }
+        if ($mail && $service->user) {
+            $html = '<p>' . e(self::t('Choose a new password with the link below. It works once.')) . '</p>';
+            foreach ($links as $server => $url) {
+                $html .= '<p><a href="' . e($url) . '">' . e(self::t('New password for :server', ['server' => $server])) . '</a></p>';
+            }
+            try {
+                \Illuminate\Support\Facades\Mail::html($html, fn ($m) => $m->to($service->user->email)->subject(self::t('Choose a new password')));
+            } catch (Throwable $e) {
+                Log::warning('Wizarr: password link for service ' . $service->id . ' could not be mailed: ' . $e->getMessage());
+            }
+        }
+        Log::info('Wizarr: password reset link for service ' . $service->id . ' made in admin.');
+
+        return $links;
+    }
+
+    /**
+     * Moves the subscription to other media servers of the same Wizarr, e.g.
+     * from Jellyfin to Plex: the new ones get an invitation (mailed), the
+     * user on servers taken away is removed, as at an upgrade.
+     */
+    public function adminChangeServers(Service $service, array $serverIds): void
+    {
+        $settings = ExtensionHelper::settingsToArray($service->product->settings);
+        $properties = ExtensionHelper::getServiceProperties($service);
+        if (trim((string) ($properties[self::MEDIA_OPTION] ?? '')) !== '') {
+            throw new DisplayException('This subscription\'s media server comes from the option "media_server". Change that option on the service in Paymenter instead.');
+        }
+        $ids = array_values(array_unique(array_map('intval', $serverIds)));
+        if (!$ids) {
+            throw new DisplayException('Choose at least one media server.');
+        }
+        $known = array_map(fn ($server) => (int) $server['id'], $this->client()->servers());
+        if (array_diff($ids, $known)) {
+            throw new DisplayException('A chosen media server no longer exists in Wizarr.');
+        }
+        $this->setProperty($service, self::PROP_SERVERS, 'Wizarr media servers', implode(',', $ids));
+        $this->upgradeServer($service, $settings, ExtensionHelper::getServiceProperties($service));
+        $this->forgetCustomerCaches($service);
+        Log::info('Wizarr: service ' . $service->id . ' moved to media server(s) ' . implode(',', $ids) . ' in admin.');
+    }
+
+    /** Libraries for this customer's next invitation, instead of the product's; [] goes back to the product's. */
+    public function adminSetLibraries(Service $service, array $libraryIds): void
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $libraryIds))));
+        $this->setProperty($service, self::PROP_LIBRARIES, 'Libraries chosen in admin', $ids ? implode(',', $ids) : null);
+    }
+
+    /**
+     * Pauses the subscription, e.g. for a holiday: the access is suspended
+     * as when unpaid, without notification, and the paid time left is kept.
+     * It resumes by itself at $until (or when resumed by hand).
+     */
+    public function adminPause(Service $service, ?int $until = null, ?int $now = null): void
+    {
+        $now ??= time();
+        if ($service->status !== 'active') {
+            throw new DisplayException('Only an active subscription can be paused.');
+        }
+        $expires = $service->expires_at ? strtotime((string) $service->expires_at) : null;
+        $left = $expires !== null ? max(0, $expires - $now) : null;
+        $this->setProperty($service, self::PROP_PAUSED, 'Paused in admin', (string) $now);
+        $this->setProperty($service, self::PROP_PAUSED_UNTIL, 'Paused until', $until ? (string) $until : null);
+        $this->setProperty($service, self::PROP_PAUSED_LEFT, 'Paid time left when paused (seconds)', $left === null ? null : (string) $left);
+        $service->status = 'suspended';
+        if ($left !== null) {
+            // No invoice and no termination while paused: Paymenter only looks at expires_at.
+            $service->expires_at = date('Y-m-d H:i:s', ($until ?? $now + 365 * 86400) + $left);
+        }
+        if (method_exists($service, 'save')) {
+            $service->save();
+        }
+        $this->suspendServer($service, ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service));
+        $this->forgetCustomerCaches($service);
+        Log::info('Wizarr: service ' . $service->id . ' paused in admin' . ($until ? ' until ' . date(DATE_ATOM, $until) : '') . '.');
+    }
+
+    /** Ends a pause: access back, with the paid time that was left. */
+    public function adminResume(Service $service, ?int $now = null): void
+    {
+        $now ??= time();
+        $properties = ExtensionHelper::getServiceProperties($service);
+        if (empty($properties[self::PROP_PAUSED])) {
+            throw new DisplayException('This subscription is not paused.');
+        }
+        $left = ($properties[self::PROP_PAUSED_LEFT] ?? '') !== '' ? (int) $properties[self::PROP_PAUSED_LEFT] : null;
+        $service->status = 'active';
+        if ($left !== null) {
+            $service->expires_at = date('Y-m-d H:i:s', $now + $left);
+        }
+        if (method_exists($service, 'save')) {
+            $service->save();
+        }
+        foreach ([self::PROP_PAUSED, self::PROP_PAUSED_UNTIL, self::PROP_PAUSED_LEFT] as $prop) {
+            $this->setProperty($service, $prop, '', null);
+        }
+        $this->unsuspendServer($service, ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service));
+        $this->forgetCustomerCaches($service);
+        Log::info('Wizarr: service ' . $service->id . ' resumed.');
+    }
+
+    /** Hourly: pauses whose end has come are resumed. */
+    public function resumePausedServices(?iterable $services = null, ?int $now = null): array
+    {
+        $now ??= time();
+        $services ??= Service::where('status', 'suspended')
+            ->whereHas('properties', fn ($query) => $query->where('key', self::PROP_PAUSED_UNTIL))
+            ->with(['product.server', 'product.settings', 'properties'])->get();
+        $resumed = [];
+        foreach ($services as $service) {
+            $until = (int) (ExtensionHelper::getServiceProperties($service)[self::PROP_PAUSED_UNTIL] ?? 0);
+            if ($until > 0 && $until <= $now && $service->status === 'suspended') {
+                try {
+                    $this->forServiceServer($service)->adminResume($service, $now);
+                    $resumed[] = $service->id;
+                } catch (Throwable $e) {
+                    Log::warning('Wizarr: paused service ' . $service->id . ' not resumed, will retry: ' . $e->getMessage());
+                }
+            }
+        }
+
+        return $resumed;
+    }
+
+    /** Notes what was done to a customer in admin (Paywarr → Customers shows it). */
+    public static function logAdmin($user, ?int $serviceId, string $what, string $by = ''): void
+    {
+        if (!$user || !method_exists($user, 'properties')) {
+            return;
+        }
+        $log = json_decode((string) ($user->properties()->where('key', self::PROP_LOG)->value('value') ?? '[]'), true) ?: [];
+        array_unshift($log, ['at' => time(), 'by' => $by, 'service' => $serviceId, 'what' => mb_substr($what, 0, 300)]);
+        $user->properties()->updateOrCreate(['key' => self::PROP_LOG], ['name' => 'Paywarr log', 'value' => json_encode(array_slice($log, 0, 40))]);
+    }
+
+    /**
+     * What might be wrong in the setup, worst first: rows of level (error,
+     * warning), what, detail and where to fix it ("server:<id>",
+     * "product:<id>", "page:<slug>").
+     */
+    public function adminHealth(array $inventory, iterable $servers, iterable $products, iterable $services): array
+    {
+        $rows = [];
+        $add = function (string $level, string $what, string $detail, string $where = '') use (&$rows) {
+            $rows[] = compact('level', 'what', 'detail', 'where');
+        };
+        $byServer = [];
+        foreach ($inventory as $backend) {
+            foreach ($backend['paymenter'] as $id => $name) {
+                $byServer[$id] = $backend;
+            }
+            $label = ($backend['kind'] === 'silo' ? 'Silo' : 'Wizarr') . ' at ' . $backend['host'];
+            if (!$backend['ok']) {
+                $add('error', $label . ' does not answer', $backend['error'], 'page:paywarr-status');
+
+                continue;
+            }
+            foreach ($backend['servers'] as $media) {
+                if (!$media['verified']) {
+                    $add('warning', 'Media server "' . $media['name'] . '" is not verified', 'Wizarr can\'t make invitations for it. Check it in Wizarr.', 'page:paywarr-status');
+                }
+            }
+        }
+        foreach ($servers as $server) {
+            $config = ExtensionHelper::settingsToArray($server->settings);
+            if (trim((string) ($config['public_url'] ?? '')) === '' && ($config['backend'] ?? 'wizarr') !== 'silo') {
+                $add('warning', 'Server "' . $server->name . '" has no public address', 'Invitation links then use Wizarr\'s own address, which customers may not reach.', 'server:' . $server->id);
+            }
+            $discord = array_filter(['discord_guild_id', 'discord_client_id', 'discord_client_secret', 'discord_bot_token', 'discord_invite_url'], fn ($k) => trim((string) ($config[$k] ?? '')) !== '');
+            if ($discord && count($discord) < 5) {
+                $add('warning', 'Discord is half set up on "' . $server->name . '"', count($discord) . ' of the 5 Discord fields are filled in; Discord is off until all are.', 'server:' . $server->id);
+            }
+        }
+        foreach ($products as $product) {
+            $settings = ExtensionHelper::settingsToArray($product->settings);
+            $backend = $byServer[(int) $product->server_id] ?? null;
+            if ($backend === null || !$backend['ok'] || $this->isTopUp($settings)) {
+                continue;
+            }
+            if ($backend['kind'] === 'wizarr') {
+                $chosen = $this->idList($settings['server_ids'] ?? null);
+                $known = array_column($backend['servers'], 'id');
+                if (!$chosen) {
+                    $add('error', 'Product "' . $product->name . '" has no media server', 'Orders of it can\'t get an invitation. Choose one on the product.', 'product:' . $product->id);
+                } elseif (array_diff($chosen, $known)) {
+                    $add('error', 'Product "' . $product->name . '" uses a media server that is gone', 'Choose its media servers again on the product.', 'product:' . $product->id);
+                }
+            }
+            $libraries = $this->idList($settings['library_ids'] ?? null);
+            if ($libraries && array_diff($libraries, array_column($backend['libraries'], 'id'))) {
+                $add('warning', 'Product "' . $product->name . '" has libraries that are gone', 'New customers get fewer libraries than you meant. Choose them again under Libraries per product.', 'page:paywarr-libraries');
+            }
+            if ($this->isTrial($settings) && (int) ($product->per_user_limit ?? 0) === 0) {
+                $add('warning', 'Trial product "' . $product->name . '" has no "Per user limit"', 'Paywarr allows one trial per server, but a limit of 1 on the product is extra safety.', 'product:' . $product->id);
+            }
+        }
+        $stuck = 0;
+        $failed = 0;
+        foreach ($services as $service) {
+            $properties = ExtensionHelper::getServiceProperties($service);
+            if (!empty($properties[self::PROP_LINK_FAILED])) {
+                $failed++;
+            }
+            $updated = $service->updated_at ? strtotime((string) $service->updated_at) : null;
+            if ($service->status === 'active' && !$this->hasGrants($properties) && $updated !== null && time() - $updated > 3600) {
+                $stuck++;
+            }
+        }
+        if ($stuck) {
+            $add('error', $stuck . ' active subscription(s) without an invitation', 'Paid, but no invitation was made (the queue, or Wizarr was down). Use "New invitation" on them.', 'page:paywarr-customers');
+        }
+        if ($failed) {
+            $add('warning', $failed . ' customer(s) whose link was used without a user', 'E.g. a Plex share that failed. See Customers → Problems.', 'page:paywarr-customers');
+        }
+        usort($rows, fn ($a, $b) => ($a['level'] === 'error' ? 0 : 1) <=> ($b['level'] === 'error' ? 0 : 1));
+
+        return $rows;
     }
 
     /** A trial that had ended is open again: users switched back on (or a new invitation on Plex). */
