@@ -7,6 +7,8 @@ use App\Models\Service;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -21,6 +23,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Paymenter\Extensions\Servers\Wizarr\Admin\PaywarrInventory;
 use Paymenter\Extensions\Servers\Wizarr\Wizarr;
 use Throwable;
 
@@ -38,9 +41,11 @@ class PaywarrCustomers extends Page implements HasTable
 
     protected static string|\BackedEnum|null $activeNavigationIcon = 'ri-user-star-fill';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Administration';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
 
-    protected static ?string $navigationLabel = 'Paywarr customers';
+    protected static ?int $navigationSort = 1;
+
+    protected static ?string $navigationLabel = 'Customers';
 
     protected static ?string $title = 'Paywarr customers';
 
@@ -74,13 +79,14 @@ class PaywarrCustomers extends Page implements HasTable
                 TextColumn::make('user.email')
                     ->label('Customer')
                     ->formatStateUsing(fn (Service $record) => trim(($record->user->first_name ?? '') . ' ' . ($record->user->last_name ?? '')) ?: $record->user->email)
-                    ->description(fn (Service $record) => $record->user->email . (($discord = $this->summary($record)['discord']) !== '' ? ' · Discord: ' . $discord : ''))
+                    ->description(fn (Service $record) => $record->user->email . (($discord = $this->summary($record)['discord']) !== '' ? ' · Discord: ' . $discord : '')
+                        . (($note = $this->note($record)) !== '' ? ' · Note: ' . mb_strimwidth($note, 0, 60, '…') : ''))
                     ->searchable(query: fn (Builder $query, string $search) => $query->whereHas('user', fn (Builder $user) => $user
                         ->where('email', 'like', '%' . $search . '%')
                         ->orWhere('first_name', 'like', '%' . $search . '%')
                         ->orWhere('last_name', 'like', '%' . $search . '%')
                         ->orWhereHas('properties', fn (Builder $property) => $property
-                            ->whereIn('key', ['discord_username', 'discord_id'])
+                            ->whereIn('key', ['discord_username', 'discord_id', Wizarr::PROP_NOTE])
                             ->where('value', 'like', '%' . $search . '%')))),
                 TextColumn::make('product.name')
                     ->label('Subscription')
@@ -108,6 +114,26 @@ class PaywarrCustomers extends Page implements HasTable
             ->filters([
                 SelectFilter::make('status')->options(['active' => 'Active', 'pending' => 'Pending', 'suspended' => 'Suspended', 'cancelled' => 'Cancelled']),
                 SelectFilter::make('server')->label('Server')->relationship('product.server', 'name', fn (Builder $query) => $query->where('extension', 'Wizarr')),
+                SelectFilter::make('problem')->label('Problems')
+                    ->options([
+                        'failed' => 'Link used, no user made',
+                        'expired' => 'Link expired, no user',
+                        'new_link' => 'May get a new link',
+                        'discord_left' => 'Left the Discord',
+                        'trial_over' => 'Trial ended, not bought',
+                    ])
+                    ->query(fn (Builder $query, array $data) => match ($data['value'] ?? null) {
+                        'failed' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_LINK_FAILED)),
+                        'expired' => $query
+                            ->whereHas('properties', fn (Builder $p) => $p->where('key', 'like', 'wizarr_invite_expires%')->where('value', '<', now()->utc()->format('Y-m-d\TH:i:s')))
+                            ->whereDoesntHave('properties', fn (Builder $p) => $p->where('key', 'like', 'wizarr_users%')->where('value', '!=', '')),
+                        'new_link' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_NEW_LINK)),
+                        'discord_left' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_DISCORD_LEFT)),
+                        'trial_over' => $query->where('status', 'cancelled')
+                            ->whereHas('properties', fn (Builder $p) => $p->where('key', 'trial_ended_at'))
+                            ->whereDoesntHave('properties', fn (Builder $p) => $p->where('key', 'trial_converted_to')),
+                        default => $query,
+                    }),
                 TernaryFilter::make('no_user')
                     ->label('Without a user')
                     ->queries(
@@ -149,13 +175,34 @@ class PaywarrCustomers extends Page implements HasTable
                         })),
                     $this->action('resetUser', 'Reset user', 'ri-user-unfollow-line')
                         ->color('danger')
-                        ->modalDescription('Forgets the customer\'s user on the media server and makes a new invitation, so they start over. The user itself stays on the media server; remove it there if it should go.')
-                        ->schema([Toggle::make('mail')->label('Email the new link to the customer')->default(true)])
+                        ->modalDescription('Forgets the customer\'s user on the media server and makes a new invitation, so they start over.')
+                        ->schema([
+                            Toggle::make('mail')->label('Email the new link to the customer')->default(true),
+                            Toggle::make('delete')->label('Also delete the user on the media server')->default(false)
+                                ->helperText('Watch history there is lost. Off: the user stays there, without a subscription (see Media server users).'),
+                        ])
                         ->action(fn (Service $record, array $data) => $this->run($record, function (Wizarr $wizarr) use ($record, $data) {
-                            $links = $wizarr->adminResetUser($record, (bool) $data['mail']);
+                            $links = $wizarr->adminResetUser($record, (bool) $data['mail'], (bool) ($data['delete'] ?? false));
 
                             return 'Reset. New link: ' . implode(', ', $links);
                         })),
+                    $this->action('linkUser', 'Link an existing user', 'ri-user-shared-line', confirm: false)
+                        ->modalDescription('Gives the subscription a user that already exists on the media server (e.g. an account from before), instead of an invitation.')
+                        ->schema(fn (Service $record) => [
+                            Select::make('user')->label('User on the media server')->required()->searchable()->options($this->freeUsers($record)),
+                        ])
+                        ->action(fn (Service $record, array $data) => $this->run($record, fn (Wizarr $wizarr) => 'Linked: ' . $wizarr->adminLinkUser($record, (int) $data['user'], PaywarrInventory::services()))),
+                    $this->action('note', 'Note', 'ri-sticky-note-line', confirm: false)
+                        ->modalDescription('About the customer, for you only. Shown here and found by the search.')
+                        ->fillForm(fn (Service $record) => ['note' => $this->note($record)])
+                        ->schema([Textarea::make('note')->label('Note')->rows(4)->maxLength(1000)])
+                        ->action(function (Service $record, array $data) {
+                            $note = trim((string) ($data['note'] ?? ''));
+                            $note === ''
+                                ? $record->user->properties()->where('key', Wizarr::PROP_NOTE)->delete()
+                                : $record->user->properties()->updateOrCreate(['key' => Wizarr::PROP_NOTE], ['name' => 'Paywarr note', 'value' => $note]);
+                            Notification::make()->title('Note saved')->success()->send();
+                        }),
                 ])->label('Access')->tooltip('Access: invitation, new link, sync, reset')->icon('ri-key-2-line'),
                 ActionGroup::make([
                     $this->action('setTrial', 'Set start and end', 'ri-calendar-event-line', confirm: false)
@@ -224,6 +271,26 @@ class PaywarrCustomers extends Page implements HasTable
             Notification::make()->title('Not done')->body($e->getMessage())->danger()->send();
         }
         unset($this->summaries[$record->id]);
+        PaywarrInventory::forget();
+    }
+
+    private function note(Service $record): string
+    {
+        return (string) ($record->user->properties->firstWhere('key', Wizarr::PROP_NOTE)?->value ?? '');
+    }
+
+    /** Users on the subscription's media servers that no subscription has yet. */
+    private function freeUsers(Service $record): array
+    {
+        $backend = PaywarrInventory::backendFor((int) ($record->product->server->id ?? 0));
+        $options = [];
+        foreach ($backend['users'] ?? [] as $user) {
+            if ($user['owner'] === null) {
+                $options[$user['id']] = $user['username'] . ($user['email'] !== '' ? ' (' . $user['email'] . ')' : '') . ' · ' . $user['server'];
+            }
+        }
+
+        return $options;
     }
 
     private function summary(Service $record): array
