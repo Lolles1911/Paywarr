@@ -174,7 +174,9 @@ trait Grants
 
             return $product;
         }
-        if (in_array($choice, ['all', 'both', 'begge', 'alle'], true) || !$product) {
+        // Nothing to choose with one server (always so on Silo): the choice is
+        // left alone, so a media server option left on the product can't stop an order.
+        if (in_array($choice, ['all', 'both', 'begge', 'alle'], true) || count($product) <= 1) {
             return $product;
         }
 
@@ -269,10 +271,12 @@ trait Grants
      */
     private function serverUrls(): array
     {
-        $urls = Cache::get('paywarr:server-urls');
+        // One list per Wizarr or Silo: their server IDs overlap (Silo's is always 1).
+        $key = 'paywarr:server-urls:' . md5($this->backendKey());
+        $urls = Cache::get($key);
         if (!is_array($urls)) {
             $urls = array_map(fn ($server) => $server['url'], $this->serverInfo());
-            Cache::put('paywarr:server-urls', $urls, self::SERVER_URLS_SECONDS);
+            Cache::put($key, $urls, self::SERVER_URLS_SECONDS);
         }
 
         return $urls;

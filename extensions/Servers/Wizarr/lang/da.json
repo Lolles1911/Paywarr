@@ -227,5 +227,6 @@
     "Your trial has ended": "Din prøveperiode er slut",
     "Your trial of :product ends on :date. Continue with a subscription and keep your user and everything you have watched.": "Din prøve af :product slutter :date. Fortsæt med et abonnement, og behold din bruger og alt, hvad du har set.",
     "Your user is waiting": "Din bruger venter",
-    "Your user was not created": "Din bruger blev ikke oprettet"
+    "Your user was not created": "Din bruger blev ikke oprettet",
+    "Your access is not ready yet": "Din adgang er ikke klar endnu"
 }

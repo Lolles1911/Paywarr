@@ -787,6 +787,61 @@ trait Admin
      * warning), what, detail and where to fix it ("server:<id>",
      * "product:<id>", "page:<slug>").
      */
+    /**
+     * The "media_server" option on a product: pointless with one media server
+     * (always so on Silo; the choice is left alone then), and wrong when one
+     * of its choices matches none of the product's servers.
+     */
+    private function checkMediaOption($product, array $settings, array $backend, callable $add): void
+    {
+        $option = null;
+        try {
+            foreach ($product->configOptions ?? [] as $candidate) {
+                if (($candidate->env_variable ?? '') === self::MEDIA_OPTION) {
+                    $option = $candidate;
+                }
+            }
+        } catch (Throwable $e) {
+            return;
+        }
+        if ($option === null) {
+            return;
+        }
+        $ids = $backend['kind'] === 'silo' ? [SiloClient::SERVER_ID] : $this->idList($settings['server_ids'] ?? null);
+        if (count($ids) <= 1) {
+            $add('warning', 'Product "' . $product->name . '" asks for a media server it doesn\'t need',
+                'It has one media server' . ($backend['kind'] === 'silo' ? ' (Silo)' : '') . ', so the choice "' . ($option->name ?? self::MEDIA_OPTION) . '" does nothing. Remove the product from that option under Config Options.', 'option:' . $option->id);
+
+            return;
+        }
+        $servers = [];
+        foreach ($backend['servers'] as $media) {
+            if (in_array((int) $media['id'], $ids, true)) {
+                $servers[] = $media;
+            }
+        }
+        $wrong = [];
+        foreach ($option->children ?? [] as $child) {
+            $choice = strtolower(trim((string) ($child->env_variable ?? '')));
+            if ($choice === '' || in_array($choice, ['all', 'both', 'begge', 'alle'], true)) {
+                continue;
+            }
+            foreach (array_filter(array_map('trim', preg_split('/[,;+\s]+/', $choice))) as $part) {
+                $known = false;
+                foreach ($servers as $media) {
+                    $known = $known || $part === (string) $media['id'] || $part === strtolower((string) ($media['type'] ?? '')) || $part === strtolower((string) $media['name']);
+                }
+                if (!$known) {
+                    $wrong[] = ($child->name ?? $choice) . ' (' . $part . ')';
+                }
+            }
+        }
+        if ($wrong) {
+            $add('error', 'Product "' . $product->name . '" offers a media server it doesn\'t have',
+                'Orders with ' . implode(', ', array_unique($wrong)) . ' can\'t get an invitation. Fix the environment variable of that choice under Config Options, or add the server to the product.', 'option:' . $option->id);
+        }
+    }
+
     public function adminHealth(array $inventory, iterable $servers, iterable $products, iterable $services): array
     {
         $rows = [];
@@ -836,6 +891,7 @@ trait Admin
                     $add('error', 'Product "' . $product->name . '" uses a media server that is gone', 'Choose its media servers again on the product.', 'product:' . $product->id);
                 }
             }
+            $this->checkMediaOption($product, $settings, $backend, $add);
             $libraries = $this->idList($settings['library_ids'] ?? null);
             if ($libraries && array_diff($libraries, array_column($backend['libraries'], 'id'))) {
                 $add('warning', 'Product "' . $product->name . '" has libraries that are gone', 'New customers get fewer libraries than you meant. Choose them again under Libraries per product.', 'page:paywarr-libraries');

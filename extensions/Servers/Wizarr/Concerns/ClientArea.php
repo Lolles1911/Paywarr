@@ -66,6 +66,19 @@ trait ClientArea
         if (count($grants) > 1) {
             return $this->actionsForGrants($service, $settings, $properties, $grants);
         }
+        if (!$grants) {
+            // Paid, and no invitation yet: the queue is making it. Should that
+            // fail (as the box below says too), the customer can ask again.
+            $since = $service->updated_at?->getTimestamp();
+            if ($since !== null && time() - $since <= self::PREPARING_FOR_SECONDS) {
+                return [$this->statusField(self::t('Your access is being prepared'))];
+            }
+
+            return [
+                $this->statusField(self::t('Your access is not ready yet')),
+                ['type' => 'button', 'label' => self::t('Get a new invitation link'), 'function' => 'renewInvitation'],
+            ];
+        }
 
         $url = $this->withGrant($grants[0] ?? '', fn () => $this->watchUrl($settings, $properties, $service));
         $watch = $url === '' ? [] : [[

@@ -83,7 +83,7 @@ class PaywarrChecks extends Page implements HasTable
         $rows = (new Wizarr([]))->adminHealth(
             PaywarrInventory::get(),
             Server::where('extension', 'Wizarr')->with('settings')->get(),
-            Product::whereHas('server', fn ($query) => $query->where('extension', 'Wizarr'))->with('settings')->get(),
+            Product::whereHas('server', fn ($query) => $query->where('extension', 'Wizarr'))->with(['settings', 'configOptions.children'])->get(),
             PaywarrInventory::services(),
         );
         $keyed = [];
@@ -101,6 +101,7 @@ class PaywarrChecks extends Page implements HasTable
         return match ($kind) {
             'server' => route('filament.admin.resources.servers.edit', ['record' => $id]),
             'product' => route('filament.admin.resources.products.edit', ['record' => $id]),
+            'option' => route('filament.admin.resources.config-options.edit', ['record' => $id]),
             'page' => url('admin/' . $id),
             default => null,
         };

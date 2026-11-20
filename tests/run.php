@@ -2700,6 +2700,35 @@ test('Silo: an unused link is revoked at suspension, and payment brings a new on
     same(1, count(NotificationHelper::$sent), 'mailed');
 });
 
+test('Silo: the watch address is Silo\'s own, also after Wizarr\'s servers were looked up (their IDs overlap)', function () {
+    $wizarr = service(2, 'other@example.com');
+    $data = ext()->createServer($wizarr, mediaSettings(), $wizarr->propertyArray());
+    same('https://jellyfin.example.com', $data['login_url'], 'Wizarr\'s server 1 is Jellyfin');
+
+    $other = service(3, 'third@example.com');
+    same('https://watch.example.com', silo()->createServer($other, siloSettings(), [])['login_url'], 'Silo\'s server 1 is Silo (the welcome mail\'s "Watch in the browser")');
+    [$service] = siloSubscribed();
+    $actions = silo()->getActions($service, siloSettings(), $service->propertyArray());
+    same('https://watch.example.com', end($actions)['url'], '"Open" goes to Silo, not to Jellyfin');
+});
+
+test('media: with one server on the product the choice is left alone, so it can\'t stop an order', function () {
+    $service = chosen('jellyfin,plex');
+    $data = ext()->createServer($service, settings(['server_ids' => ['1']]), props($service));
+    ok(($data['invite_code'] ?? '') !== '', 'an invitation was made');
+    $silo = service(2);
+    $silo->configs = [Wizarr::MEDIA_OPTION => 'jellyfin,plex'];
+    ok(str_contains(silo()->createServer($silo, siloSettings(), props($silo))['invite_url'], 'silo.example.com'), 'on Silo too');
+});
+
+test('client area: paid and no invitation yet says "being prepared", later offers a new link', function () {
+    $service = service();
+    $service->updated_at = new DateTimeImmutable('-20 seconds');
+    same(['text:Status=Your access is being prepared'], labels(ext()->getActions($service, settings(), [])), 'while the queue works');
+    $service->updated_at = new DateTimeImmutable('-16 minutes');
+    same(['text:Status=Your access is not ready yet', 'button:Get a new invitation link'], labels(ext()->getActions($service, settings(), [])), 'when it never came');
+});
+
 test('Silo: an expired link gets a "new link" button that works', function () {
     $service = service();
     silo()->createServer($service, siloSettings(), $service->propertyArray());
@@ -3584,6 +3613,17 @@ test('admin: the health check finds what is wrong in the setup', function () {
         ok(in_array($needle, $whats, true), 'finds: ' . $needle);
     }
     ok(!array_filter($whats, fn ($w) => str_contains($w, 'Gift card')), 'a gift card needs no media server');
+
+    $option = (object) ['id' => 5, 'name' => 'Media server', 'env_variable' => 'media_server', 'children' => [
+        (object) ['name' => 'Jellyfin', 'env_variable' => 'jellyfin'], (object) ['name' => 'Both', 'env_variable' => 'both'], (object) ['name' => 'Plex', 'env_variable' => 'plex']]];
+    $withOption = [
+        (object) ['id' => 5, 'name' => 'One server', 'server_id' => 7, 'per_user_limit' => 1, 'settings' => ['server_ids' => ['1']], 'configOptions' => [$option]],
+        (object) ['id' => 6, 'name' => 'Two servers', 'server_id' => 7, 'per_user_limit' => 1, 'settings' => ['server_ids' => ['1', '4']], 'configOptions' => [$option]],
+    ];
+    $media = array_column(ext()->adminHealth($inventory, [], $withOption, []), null, 'what');
+    ok(isset($media['Product "One server" asks for a media server it doesn\'t need']), 'one server: the option does nothing');
+    ok(str_contains($media['Product "Two servers" offers a media server it doesn\'t have']['detail'] ?? '', 'Plex (plex)'), 'Plex is not on the product');
+    same('option:5', $media['Product "Two servers" offers a media server it doesn\'t have']['where'] ?? '', 'links to the option');
     same([], array_filter(array_column(ext()->adminHealth($inventory, [(object) ['id' => 8, 'name' => 'Only the invite', 'settings' => ['host' => 'x', 'public_url' => 'y', 'discord_invite_url' => 'https://discord.gg/x']]], [], []), 'what'), fn ($w) => str_contains($w, 'Discord')), 'the invite link alone is fine');
     same('error', $rows[0]['level'], 'errors first');
     $down = ext()->adminInventory([(object) ['id' => 9, 'name' => 'Old', 'settings' => ['host' => 'http://127.0.0.1:1/', 'api_key' => 'x']]], []);
