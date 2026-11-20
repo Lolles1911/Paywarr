@@ -815,15 +815,16 @@ trait Admin
             if (trim((string) ($config['public_url'] ?? '')) === '' && ($config['backend'] ?? 'wizarr') !== 'silo') {
                 $add('warning', 'Server "' . $server->name . '" has no public address', 'Invitation links then use Wizarr\'s own address, which customers may not reach.', 'server:' . $server->id);
             }
-            $discord = array_filter(['discord_guild_id', 'discord_client_id', 'discord_client_secret', 'discord_bot_token', 'discord_invite_url'], fn ($k) => trim((string) ($config[$k] ?? '')) !== '');
-            if ($discord && count($discord) < 5) {
-                $add('warning', 'Discord is half set up on "' . $server->name . '"', count($discord) . ' of the 5 Discord fields are filled in; Discord is off until all are.', 'server:' . $server->id);
+            // The invite link alone is fine (the welcome mail's Discord button); the other four go together.
+            $discord = array_filter(['discord_guild_id', 'discord_client_id', 'discord_client_secret', 'discord_bot_token'], fn ($k) => trim((string) ($config[$k] ?? '')) !== '');
+            if ($discord && count($discord) < 4) {
+                $add('warning', 'Discord is half set up on "' . $server->name . '"', count($discord) . ' of the 4 Discord fields (server ID, client ID, client secret, bot token) are filled in; Discord is off until all are.', 'server:' . $server->id);
             }
         }
         foreach ($products as $product) {
             $settings = ExtensionHelper::settingsToArray($product->settings);
             $backend = $byServer[(int) $product->server_id] ?? null;
-            if ($backend === null || !$backend['ok'] || $this->isTopUp($settings)) {
+            if ($backend === null || !$backend['ok'] || $this->isTopUp($settings) || $this->isGift($settings)) {
                 continue;
             }
             if ($backend['kind'] === 'wizarr') {

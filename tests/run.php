@@ -3575,6 +3575,7 @@ test('admin: the health check finds what is wrong in the setup', function () {
         (object) ['id' => 1, 'name' => 'No server', 'server_id' => 7, 'per_user_limit' => null, 'settings' => ['server_ids' => []]],
         (object) ['id' => 2, 'name' => 'Gone libraries', 'server_id' => 7, 'per_user_limit' => null, 'settings' => ['server_ids' => ['1'], 'library_ids' => ['10', '999']]],
         (object) ['id' => 3, 'name' => 'Trial', 'server_id' => 7, 'per_user_limit' => 0, 'settings' => ['server_ids' => ['1'], 'trial_days' => '7']],
+        (object) ['id' => 4, 'name' => 'Gift card', 'server_id' => 7, 'per_user_limit' => 0, 'settings' => ['gift_months' => '1']],
     ];
     $rows = ext()->adminHealth($inventory, [$server], $products, [$service]);
     $whats = array_column($rows, 'what');
@@ -3582,6 +3583,8 @@ test('admin: the health check finds what is wrong in the setup', function () {
         'Discord is half set up on "WaffleHub Jellyfin"', 'Product "Gone libraries" has libraries that are gone', 'Trial product "Trial" has no "Per user limit"'] as $needle) {
         ok(in_array($needle, $whats, true), 'finds: ' . $needle);
     }
+    ok(!array_filter($whats, fn ($w) => str_contains($w, 'Gift card')), 'a gift card needs no media server');
+    same([], array_filter(array_column(ext()->adminHealth($inventory, [(object) ['id' => 8, 'name' => 'Only the invite', 'settings' => ['host' => 'x', 'public_url' => 'y', 'discord_invite_url' => 'https://discord.gg/x']]], [], []), 'what'), fn ($w) => str_contains($w, 'Discord')), 'the invite link alone is fine');
     same('error', $rows[0]['level'], 'errors first');
     $down = ext()->adminInventory([(object) ['id' => 9, 'name' => 'Old', 'settings' => ['host' => 'http://127.0.0.1:1/', 'api_key' => 'x']]], []);
     ok(str_contains(ext()->adminHealth($down, [], [], [])[0]['what'], 'does not answer'), 'a Wizarr that does not answer');
