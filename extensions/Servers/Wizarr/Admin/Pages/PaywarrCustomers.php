@@ -376,7 +376,7 @@ class PaywarrCustomers extends Page implements HasTable
 
                             return 'Resumed.';
                         })),
-                ])->label('Subscription')->tooltip('Subscription: pause, resume')->icon('ri-calendar-pause-line'),
+                ])->label('Subscription')->tooltip('Subscription: pause, resume')->icon('ri-pause-circle-line'),
                 ActionGroup::make([
                     $this->action('setTrial', 'Set start and end', 'ri-calendar-event-line', confirm: false)
                         ->visible(fn (Service $record) => $this->summary($record)['trial'] !== null)

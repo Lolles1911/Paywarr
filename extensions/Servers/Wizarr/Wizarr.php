@@ -5631,6 +5631,8 @@ HTML;
             return;
         }
         $log = json_decode((string) ($user->properties()->where('key', self::PROP_LOG)->value('value') ?? '[]'), true) ?: [];
+        // Links (invitations, password resets) are not kept: they are as good as a key while they work.
+        $what = (string) preg_replace('~https?://\S+~', '[link]', $what);
         array_unshift($log, ['at' => time(), 'by' => $by, 'service' => $serviceId, 'what' => mb_substr($what, 0, 300)]);
         $user->properties()->updateOrCreate(['key' => self::PROP_LOG], ['name' => 'Paywarr log', 'value' => json_encode(array_slice($log, 0, 40))]);
     }

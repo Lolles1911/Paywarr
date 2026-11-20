@@ -3490,9 +3490,10 @@ test('admin: a password link for Jellyfin users, never for Plex; the log keeps w
     tellsCustomer(fn () => ext()->adminPasswordReset($plex, false), 'Plex', 'Plex has no password here');
 
     \Paymenter\Extensions\Servers\Wizarr\Wizarr::logAdmin($service->user, 1, 'Paused until Dec 1', 'admin@example.com');
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::logAdmin($service->user, 1, 'Password link: Jellyfin https://join.example.com/reset/SECRET', 'admin@example.com');
     \Paymenter\Extensions\Servers\Wizarr\Wizarr::logAdmin($service->user, 1, 'Resumed', 'admin@example.com');
     $log = json_decode($service->user->properties()->where('key', 'paywarr_log')->value('value'), true);
-    same(['Resumed', 'Paused until Dec 1'], array_column($log, 'what'), 'newest first');
+    same(['Resumed', 'Password link: Jellyfin [link]', 'Paused until Dec 1'], array_column($log, 'what'), 'newest first, links left out');
 });
 
 test('admin: the health check finds what is wrong in the setup', function () {
