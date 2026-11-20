@@ -172,6 +172,24 @@ class Wizarr extends Server
 
     public const PROP_DISCORD_SUSPENDED = 'discord_suspended';
 
+    /** Trial days given in admin (Paywarr → Customers): the subscription is a trial of that many days. */
+    public const PROP_TRIAL_DAYS = 'trial_days_given';
+
+    /** When the trial started, when set in admin (shown there only). */
+    public const PROP_TRIAL_STARTED = 'trial_started_at';
+
+    /** An old trial that no longer counts: the customer may take a trial on that server again. */
+    public const PROP_TRIAL_FORGIVEN = 'trial_forgiven';
+
+    /** Set in admin: the customer may get a new invitation link once, even after using theirs. */
+    public const PROP_NEW_LINK = 'wizarr_new_link_allowed';
+
+    /** When the customer last asked for a new link themselves ("Problems? Get a new link"). */
+    private const PROP_RELINKED = 'wizarr_relinked_at';
+
+    /** How often a customer may ask for a new link of an unused invitation. */
+    private const RELINK_SECONDS = 3600;
+
     /** How long a "member / not member" answer is reused while browsing the shop. */
     private const MEMBERSHIP_CACHE_SECONDS = 600;
 
@@ -970,12 +988,12 @@ class Wizarr extends Server
         if (!empty($properties[self::PROP_USERS])) {
             // A trial whose user was recorded before its clock existed (or before
             // the hourly run): start the clock now, so the end date shows at once.
-            if ($this->isTrial($settings) && empty($properties[self::PROP_TRIAL_ENDS])) {
+            if ($this->isTrial($this->trialSettings($settings, $properties)) && empty($properties[self::PROP_TRIAL_ENDS])) {
                 $this->processTrialQuietly($service);
                 $properties = $this->grantView(ExtensionHelper::getServiceProperties($service));
             }
 
-            return $this->activeActions($this->parseUsers((string) $properties[self::PROP_USERS]), $watch, $properties);
+            return array_merge($this->activeActions($this->parseUsers((string) $properties[self::PROP_USERS]), $watch, $properties), $this->grantedLinkButton($properties, 0));
         }
 
         $storedUrl = (string) ($properties[self::PROP_INVITE_URL] ?? '');
@@ -1003,13 +1021,14 @@ class Wizarr extends Server
                 // Only bookkeeping; the page should render either way.
             }
 
-            return $this->activeActions($users, $watch, $properties);
+            return array_merge($this->activeActions($users, $watch, $properties), $this->grantedLinkButton($properties, 0));
         }
 
         if ($status === 'pending') {
             return [
                 $this->statusField(self::t('Waiting for you to create your user')),
                 $this->inviteButton($this->absoluteUrl($invitation['url'] ?? null, (string) $invitation['code'])),
+                ...$this->freshLinkButton($properties, 0),
             ];
         }
 
@@ -1037,7 +1056,7 @@ class Wizarr extends Server
                 $view = $this->grantView($properties);
                 $server = $this->grantLabel($properties);
                 if (!empty($view[self::PROP_USERS])) {
-                    return [$this->parseUsers((string) $view[self::PROP_USERS]), []];
+                    return [$this->parseUsers((string) $view[self::PROP_USERS]), $this->grantedLinkButton($view, $number, $server)];
                 }
                 try {
                     $invitation = $this->findInvitation($view);
@@ -1058,12 +1077,13 @@ class Wizarr extends Server
                         // Only bookkeeping; the page should render either way.
                     }
 
-                    return [$found, []];
+                    return [$found, $this->grantedLinkButton($view, $number, $server)];
                 }
                 if ($status === 'pending') {
                     return [[], [
                         $this->statusField(self::t('Waiting for you to create your user'), $server),
                         $this->inviteButton($this->absoluteUrl($invitation['url'] ?? null, (string) $invitation['code']), $server),
+                        ...$this->freshLinkButton($view, $number, $server),
                     ]];
                 }
 
@@ -1181,6 +1201,95 @@ class Wizarr extends Server
         }
 
         return $this->withGrant($grants[0], fn () => $this->renewGrant($service, $settings, $properties));
+    }
+
+    /**
+     * "Problems? Get a new link" by an unused invitation: a customer whose
+     * account creation failed (a Plex share, a typo) can start over without
+     * writing to you. At most once an hour.
+     */
+    private function freshLinkButton(array $properties, int $number, string $server = ''): array
+    {
+        if (!empty($properties[self::PROP_NEW_LINK])) {
+            return $this->grantedLinkButton($properties, $number, $server);
+        }
+        if (time() - (int) ($properties[self::PROP_RELINKED] ?? 0) < self::RELINK_SECONDS) {
+            return [];
+        }
+
+        return [['type' => 'button', 'function' => 'freshInvitation' . ($number ?: ''),
+            'label' => $server !== '' ? self::t('Problems? Get a new link for :server', ['server' => $server]) : self::t('Problems? Get a new link')]];
+    }
+
+    /** "Get a new invitation link" after the invitation was used, when allowed in admin. */
+    private function grantedLinkButton(array $properties, int $number, string $server = ''): array
+    {
+        if (empty($properties[self::PROP_NEW_LINK])) {
+            return [];
+        }
+
+        return [['type' => 'button', 'function' => 'freshInvitation' . ($number ?: ''),
+            'label' => $server !== '' ? self::t('Get a new invitation link for :server', ['server' => $server]) : self::t('Get a new invitation link')]];
+    }
+
+    public function freshInvitation(Service $service, $settings, $properties): string
+    {
+        return $this->freshInvitationFor($service, $settings, $properties, 0);
+    }
+
+    public function freshInvitation1(Service $service, $settings, $properties): string
+    {
+        return $this->freshInvitationFor($service, $settings, $properties, 1);
+    }
+
+    public function freshInvitation2(Service $service, $settings, $properties): string
+    {
+        return $this->freshInvitationFor($service, $settings, $properties, 2);
+    }
+
+    public function freshInvitation3(Service $service, $settings, $properties): string
+    {
+        return $this->freshInvitationFor($service, $settings, $properties, 3);
+    }
+
+    public function freshInvitation4(Service $service, $settings, $properties): string
+    {
+        return $this->freshInvitationFor($service, $settings, $properties, 4);
+    }
+
+    /**
+     * Button handler: a new link instead of an unused one (once an hour), or,
+     * when allowed in admin, instead of a used one: the customer starts over.
+     */
+    private function freshInvitationFor(Service $service, array $settings, array $properties, int $number): string
+    {
+        $grant = $number === 0 ? ($this->grantKeys($properties)[0] ?? null) : $this->grantNumber($properties, $number);
+        if ($grant === null) {
+            return $this->renewInvitation($service, $settings, $properties);
+        }
+        $allowed = !empty($properties[self::PROP_NEW_LINK]);
+        if (!$allowed && time() - (int) ($properties[self::PROP_RELINKED] ?? 0) < self::RELINK_SECONDS) {
+            throw new DisplayException(self::t('You can get a new link once an hour. Try again later, or write to us.'));
+        }
+
+        return $this->withGrant($grant, function () use ($service, $settings, $properties, $allowed) {
+            $view = $this->grantView($properties);
+            $invitation = $this->findInvitation($view);
+            if (!$allowed && (($invitation['status'] ?? 'missing') !== 'pending' || !empty($view[self::PROP_USERS]))) {
+                return $this->renewGrant($service, $settings, $properties); // used: the login page; gone: a new one, as always
+            }
+            if ($invitation) {
+                $this->deleteInvitationQuietly((int) $invitation['id']);
+            }
+            $fresh = $this->issueInvitation($service, $settings); // forgets the user(s) of this server too
+            $this->setProperty($service, self::PROP_RELINKED, 'Wizarr: customer asked for a new link', (string) time());
+            if ($allowed) {
+                $this->setProperty($service, self::PROP_NEW_LINK, '', null);
+            }
+            Log::info('Wizarr: service ' . $service->id . ' got a new invitation link' . ($allowed ? ' (allowed in admin)' : ' (asked by the customer)') . '.');
+
+            return (string) $fresh['url'];
+        });
     }
 
     private function renewGrant(Service $service, array $settings, array $properties): string
@@ -1696,6 +1805,17 @@ HTML;
         return (int) ($productSettings['trial_days'] ?? 0) > 0;
     }
 
+    /** The product's settings, with trial days given to this subscription in admin applied. */
+    public function trialSettings(array $productSettings, array $properties): array
+    {
+        $days = (int) ($properties[self::PROP_TRIAL_DAYS] ?? 0);
+        if ($days > 0) {
+            $productSettings['trial_days'] = $days;
+        }
+
+        return $productSettings;
+    }
+
     /**
      * The customer's other subscriptions on the same server as $service, as
      * trialRefusal() takes them: one trial per server, so a customer can try
@@ -1711,7 +1831,11 @@ HTML;
             if ($other->id === $service->id || $other->product?->server?->extension !== 'Wizarr' || $this->serverIdOf($other) !== $server) {
                 continue;
             }
-            $history[] = $this->isTrial(ExtensionHelper::settingsToArray($other->product->settings)) ? 'trial' : 'paid';
+            $props = ExtensionHelper::getServiceProperties($other);
+            if (!empty($props[self::PROP_TRIAL_FORGIVEN])) {
+                continue; // forgiven in admin: may try again
+            }
+            $history[] = $this->isTrial($this->trialSettings(ExtensionHelper::settingsToArray($other->product->settings), $props)) ? 'trial' : 'paid';
         }
 
         return $history;
@@ -1753,6 +1877,7 @@ HTML;
      */
     public function processTrial(Service $service, array $productSettings, array $properties, ?int $now = null): string
     {
+        $productSettings = $this->trialSettings($productSettings, $properties);
         if (!$this->isTrial($productSettings) || !empty($properties[self::PROP_TRIAL_CONVERTED])) {
             return 'none';
         }
@@ -1829,10 +1954,10 @@ HTML;
             if ($other->id === $service->id || $other->product?->server?->extension !== 'Wizarr' || $this->serverIdOf($other) !== $this->serverIdOf($service)) {
                 continue; // a trial on another server (e.g. Silo) stays its own
             }
-            if (!$this->isTrial(ExtensionHelper::settingsToArray($other->product->settings))) {
+            $props = ExtensionHelper::getServiceProperties($other);
+            if (!$this->isTrial($this->trialSettings(ExtensionHelper::settingsToArray($other->product->settings), $props))) {
                 continue;
             }
-            $props = ExtensionHelper::getServiceProperties($other);
             if (!empty($props[self::PROP_TRIAL_CONVERTED]) || !$this->allUsers($props, resolve: false)) {
                 continue;
             }
@@ -1919,12 +2044,13 @@ HTML;
             if (!$service->product) {
                 continue;
             }
-            $productSettings = ExtensionHelper::settingsToArray($service->product->settings);
+            $properties = ExtensionHelper::getServiceProperties($service);
+            $productSettings = $this->trialSettings(ExtensionHelper::settingsToArray($service->product->settings), $properties);
             if (!$this->isTrial($productSettings)) {
                 continue;
             }
             try {
-                $this->forServiceServer($service)->processTrial($service, $productSettings, ExtensionHelper::getServiceProperties($service));
+                $this->forServiceServer($service)->processTrial($service, $productSettings, $properties);
             } catch (Throwable $e) {
                 Log::warning('Wizarr: trial ' . $service->id . ' not processed, will retry: ' . $e->getMessage());
             }
@@ -1937,9 +2063,10 @@ HTML;
             return;
         }
         try {
-            $productSettings = ExtensionHelper::settingsToArray($service->product->settings);
+            $properties = ExtensionHelper::getServiceProperties($service);
+            $productSettings = $this->trialSettings(ExtensionHelper::settingsToArray($service->product->settings), $properties);
             if ($this->isTrial($productSettings)) {
-                $this->processTrial($service, $productSettings, ExtensionHelper::getServiceProperties($service));
+                $this->processTrial($service, $productSettings, $properties);
             }
         } catch (Throwable $e) {
             Log::warning('Wizarr: trial ' . $service->id . ' not processed, will retry: ' . $e->getMessage());
@@ -4583,7 +4710,7 @@ HTML;
 
         // A trial's end is handled here (disable, keep for a purchase). Letting
         // Wizarr expire the user could delete it, so trials never get a duration.
-        $accessDays = $this->isTrial($settings) ? 0 : (int) ($settings['access_days'] ?? 0);
+        $accessDays = $this->isTrial($this->trialSettings($settings, ExtensionHelper::getServiceProperties($service))) ? 0 : (int) ($settings['access_days'] ?? 0);
 
         $payload = [
             'server_ids' => $serverIds,
@@ -4802,6 +4929,274 @@ HTML;
         }
 
         return $users;
+    }
+
+    /* ------------------------------------------------------------------
+     | Admin: Paywarr → Customers
+     * ----------------------------------------------------------------- */
+
+    /** This extension, set up for the server of $service. */
+    public function forService(Service $service): static
+    {
+        return $this->forServiceServer($service);
+    }
+
+    /**
+     * What the admin page shows for a subscription, from what is stored (no
+     * calls to Wizarr or Silo): per media server the user(s) or the
+     * invitation, the trial, Discord and whether a new link is allowed.
+     */
+    public function adminSummary(Service $service): array
+    {
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $settings = $this->trialSettings(ExtensionHelper::settingsToArray($service->product?->settings ?? []), $properties);
+        $grants = [];
+        foreach ($this->grantKeys($properties) as $grant) {
+            $grants[] = $this->withGrant($grant, function () use ($properties) {
+                $view = $this->grantView($properties);
+
+                return [
+                    'server' => $this->grantLabel($properties),
+                    'users' => array_column($this->parseUsers((string) ($view[self::PROP_USERS] ?? '')), 'username'),
+                    'invite_url' => (string) ($view[self::PROP_INVITE_URL] ?? ''),
+                    'invite_expires' => (string) ($view[self::PROP_INVITE_EXPIRES] ?? ''),
+                ];
+            });
+        }
+        $trialDays = (int) ($settings['trial_days'] ?? 0);
+        $time = fn ($value) => $value ? (strtotime((string) $value) ?: (ctype_digit((string) $value) ? (int) $value : null)) : null;
+
+        return [
+            'grants' => $grants,
+            'trial' => $trialDays > 0 ? [
+                'days' => $trialDays,
+                'given' => (int) ($properties[self::PROP_TRIAL_DAYS] ?? 0) > 0,
+                'started' => $time($properties[self::PROP_TRIAL_STARTED] ?? null),
+                'ends' => $time($properties[self::PROP_TRIAL_ENDS] ?? null),
+                'ended' => $time($properties[self::PROP_TRIAL_ENDED] ?? null),
+                'converted' => !empty($properties[self::PROP_TRIAL_CONVERTED]),
+                'forgiven' => !empty($properties[self::PROP_TRIAL_FORGIVEN]),
+            ] : null,
+            'new_link' => !empty($properties[self::PROP_NEW_LINK]),
+            'discord' => $service->user ? (string) ($this->propertyValue($service->user, self::PROP_DISCORD_NAME) ?? '') : '',
+            'discord_id' => $service->user ? (string) ($this->propertyValue($service->user, self::PROP_DISCORD_ID) ?? '') : '',
+            'discord_left' => (int) ($properties[self::PROP_DISCORD_LEFT] ?? 0) ?: null,
+        ];
+    }
+
+    /**
+     * A new invitation for every media server of the subscription where the
+     * customer has no user yet (the old link stops working), mailed to the
+     * customer when $mail. Returns the new links.
+     */
+    public function adminNewInvitation(Service $service, bool $mail = true): array
+    {
+        $settings = ExtensionHelper::settingsToArray($service->product->settings);
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $made = [];
+        $grants = $this->grantKeys($properties);
+        if (!$grants) {
+            $made = array_filter($this->syncGrants($service, $settings, $properties), fn ($i) => ($i['code'] ?? '') !== '' && empty($i['has_user']));
+        }
+        foreach ($grants as $grant) {
+            $fresh = $this->withGrant($grant, function () use ($service, $settings, $properties) {
+                $view = $this->grantView($properties);
+                if (!empty($view[self::PROP_USERS])) {
+                    return null; // has a user: "Reset user" first
+                }
+                $invitation = $this->findInvitation($view);
+                if ($invitation) {
+                    $this->deleteInvitationQuietly((int) $invitation['id']);
+                }
+
+                return $this->issueInvitation($service, $settings);
+            });
+            if ($fresh !== null) {
+                $made[$grant] = $fresh;
+            }
+        }
+        if (!$made) {
+            throw new DisplayException(self::t('The customer already has a user on every server. Use "Reset user" first.'));
+        }
+        if ($mail) {
+            $this->notifyNewInvitation($service, $this->mailDataFor($made, $settings));
+        }
+        $this->forgetCustomerCaches($service);
+        Log::info('Wizarr: new invitation for service ' . $service->id . ' made in admin' . ($mail ? ' and mailed.' : '.'));
+
+        return array_values(array_map(fn ($i) => (string) ($i['url'] ?? ''), $made));
+    }
+
+    /** The customer may get a new link once (on their subscription), even after using theirs. */
+    public function adminAllowNewLink(Service $service, bool $allowed = true): void
+    {
+        $this->setProperty($service, self::PROP_NEW_LINK, 'Wizarr: new link allowed in admin', $allowed ? '1' : null);
+    }
+
+    /**
+     * Asks Wizarr or Silo again: records the customer's user(s), moves a
+     * trial along, and brings the Discord role and Seerr in line with the
+     * subscription's status. Returns the usernames found.
+     */
+    public function adminSync(Service $service): array
+    {
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $found = [];
+        foreach ($this->grantKeys($properties) as $grant) {
+            $this->withGrant($grant, function () use ($service, $properties, &$found) {
+                $view = $this->grantView($properties);
+                $users = $this->resolveUsers($view, $this->findInvitation($view));
+                if ($users) {
+                    $this->rememberUsers($service, $users);
+                }
+                foreach ($users as $user) {
+                    $found[] = $user['username'];
+                }
+            });
+        }
+        $this->processTrialQuietly($service);
+        $status = (string) $service->status;
+        $this->syncRolesQuietly($service, active: $status === 'active');
+        $this->syncSeerrQuietly($service, $status === 'active' ? 'active' : ($status === 'suspended' ? 'suspended' : 'ended'));
+        $this->forgetCustomerCaches($service);
+
+        return $found;
+    }
+
+    /**
+     * Forgets the customer's media server user(s), so they start over with a
+     * new invitation (mailed when $mail). The user stays on the media
+     * server; remove it there if it should go.
+     */
+    public function adminResetUser(Service $service, bool $mail = true): array
+    {
+        $properties = ExtensionHelper::getServiceProperties($service);
+        foreach ($this->grantKeys($properties) as $grant) {
+            $this->withGrant($grant, fn () => $this->rememberUsers($service, []));
+        }
+        Log::info('Wizarr: the media server user(s) of service ' . $service->id . ' were forgotten in admin.');
+
+        return $this->adminNewInvitation($service, $mail);
+    }
+
+    /**
+     * Sets the trial's start (shown only) and end. An end in the past ends
+     * the trial now; a later end reopens a trial that had ended.
+     *
+     * @return string 'set', 'ended' or 'reopened'
+     */
+    public function adminSetTrial(Service $service, ?int $start, int $end, ?int $now = null): string
+    {
+        $now ??= time();
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $settings = $this->trialSettings(ExtensionHelper::settingsToArray($service->product->settings), $properties);
+        if (!$this->isTrial($settings)) {
+            throw new DisplayException(self::t('This subscription is not a trial. Give it trial days first.'));
+        }
+        if ($start !== null) {
+            $this->setProperty($service, self::PROP_TRIAL_STARTED, 'Trial started', date(DATE_ATOM, $start));
+        }
+        $this->setProperty($service, self::PROP_TRIAL_ENDS, 'Trial ends', date(DATE_ATOM, $end));
+        $this->setProperty($service, self::PROP_TRIAL_CONVERTED, '', null);
+
+        if ($end > $now && !empty($properties[self::PROP_TRIAL_ENDED])) {
+            $this->reopenTrial($service, $settings, ExtensionHelper::getServiceProperties($service));
+            $result = 'reopened';
+        } elseif ($end <= $now && $service->status === 'active') {
+            $result = $this->processTrial($service, $settings, ExtensionHelper::getServiceProperties($service), $now) === 'ended' ? 'ended' : 'set';
+        } else {
+            $result = 'set';
+        }
+        $this->forgetCustomerCaches($service);
+        Log::info('Wizarr: trial of service ' . $service->id . ' set in admin to end ' . date(DATE_ATOM, $end) . ' (' . $result . ').');
+
+        return $result;
+    }
+
+    /** Adds $days to the trial, from its end (or from now, when it has ended). */
+    public function adminExtendTrial(Service $service, int $days, ?int $now = null): string
+    {
+        $now ??= time();
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $ends = strtotime((string) ($properties[self::PROP_TRIAL_ENDS] ?? '')) ?: $now;
+
+        return $this->adminSetTrial($service, null, max($ends, $now) + max(1, $days) * 86400, $now);
+    }
+
+    /** Starts the trial again, with its full number of days from now. */
+    public function adminRestartTrial(Service $service, ?int $now = null): string
+    {
+        $now ??= time();
+        $settings = $this->trialSettings(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service));
+
+        return $this->adminSetTrial($service, $now, $now + (int) ($settings['trial_days'] ?? 0) * 86400, $now);
+    }
+
+    /** Ends the trial now: the user is disabled, as at a normal end. */
+    public function adminEndTrial(Service $service, ?int $now = null): string
+    {
+        $now ??= time();
+
+        return $this->adminSetTrial($service, null, $now, $now);
+    }
+
+    /** This trial no longer counts: the customer may take a trial on this server again. */
+    public function adminAllowNewTrial(Service $service, bool $allowed = true): void
+    {
+        $this->setProperty($service, self::PROP_TRIAL_FORGIVEN, 'Trial forgiven in admin', $allowed ? '1' : null);
+    }
+
+    /**
+     * Makes the subscription a trial of $days days, e.g. a free week for a
+     * friend. Its clock starts now if the customer has a user, else when
+     * they create it. At the end it closes, as any trial.
+     */
+    public function adminGiveTrialDays(Service $service, int $days, ?int $now = null): string
+    {
+        $now ??= time();
+        $days = max(1, $days);
+        $this->setProperty($service, self::PROP_TRIAL_DAYS, 'Trial days given in admin', (string) $days);
+        $this->setProperty($service, self::PROP_TRIAL_CONVERTED, '', null);
+        $properties = ExtensionHelper::getServiceProperties($service);
+        if ($this->allUsers($properties, resolve: false)) {
+            return $this->adminSetTrial($service, $now, $now + $days * 86400, $now);
+        }
+        $this->setProperty($service, self::PROP_TRIAL_ENDS, '', null);
+
+        return 'waiting';
+    }
+
+    /** A trial that had ended is open again: users switched back on (or a new invitation on Plex). */
+    private function reopenTrial(Service $service, array $settings, array $properties): void
+    {
+        $this->setProperty($service, self::PROP_TRIAL_ENDED, '', null);
+        foreach ($this->grantKeys($properties) as $grant) {
+            $this->withGrant($grant, fn () => $this->unsuspendGrant($service, $settings, $properties));
+        }
+        if ($service->status !== 'active') {
+            $service->status = 'active';
+            if (method_exists($service, 'save')) {
+                $service->save();
+            }
+            $product = $service->product;
+            if ($product && ($product->stock ?? null) !== null && method_exists($product, 'decrement')) {
+                $product->decrement('stock', $service->quantity ?? 1);
+            }
+        }
+        $this->syncRolesQuietly($service, active: true);
+        $this->syncSeerrQuietly($service, 'active');
+    }
+
+    /** The customer's cached menu links and box, so a change shows at once. */
+    private function forgetCustomerCaches(Service $service): void
+    {
+        $user = $service->user_id ?? $service->user?->id ?? null;
+        if ($user === null) {
+            return;
+        }
+        foreach (['wizarr:nav-watch:', 'wizarr:can-request:', 'wizarr:can-report:'] as $key) {
+            Cache::forget($key . $user);
+        }
     }
 
     /* ------------------------------------------------------------------

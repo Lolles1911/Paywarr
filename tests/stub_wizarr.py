@@ -635,6 +635,12 @@ class Handler(BaseHTTPRequestHandler):
             inv["expires"] = (now() - timedelta(hours=1)).isoformat()
             return self.send_json(200, {"ok": True})
 
+        if path == "/_test/fail-redeem":
+            # What Wizarr does when the Plex share fails: the code is spent, no user is made.
+            inv = next(i for i in STATE["invitations"] if i["code"] == body["code"])
+            inv["used"] = True
+            return self.send_json(200, {"ok": True})
+
         if path == "/_test/redeem":
             inv = next((i for i in STATE["invitations"] if i["code"] == body["code"]), None)
             if not inv:

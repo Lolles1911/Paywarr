@@ -381,7 +381,7 @@ test('client area shows the sign-up button while the invitation is unused', func
     $data = ext()->createServer($service, settings(), []);
     $actions = ext()->getActions($service, settings(), $service->propertyArray());
 
-    same(['text:Status=Waiting for you to create your user', 'button:Create your user'], labels($actions), 'actions');
+    same(['text:Status=Waiting for you to create your user', 'button:Create your user', 'button:Problems? Get a new link'], labels($actions), 'actions');
     same($data['invite_url'], $actions[1]['url'], 'button target');
 });
 
@@ -1807,13 +1807,13 @@ test('media: the client area shows each server\'s link, then a reset button per 
     $service = chosen('both');
     $data = ext()->createServer($service, mediaSettings(), props($service));
     same([
-        'text:Jellyfin=Waiting for you to create your user', 'button:Create your user on Jellyfin',
-        'text:Emby=Waiting for you to create your user', 'button:Create your user on Emby',
+        'text:Jellyfin=Waiting for you to create your user', 'button:Create your user on Jellyfin', 'button:Problems? Get a new link for Jellyfin',
+        'text:Emby=Waiting for you to create your user', 'button:Create your user on Emby', 'button:Problems? Get a new link for Emby',
     ], labels(ext()->getActions($service, mediaSettings(), props($service))), 'both waiting');
 
     redeem($data['invites'][0]['code'], 'mette');
     same([
-        'text:Status=Active', 'text:Emby=Waiting for you to create your user', 'button:Create your user on Emby',
+        'text:Status=Active', 'text:Emby=Waiting for you to create your user', 'button:Create your user on Emby', 'button:Problems? Get a new link for Emby',
         'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Open Jellyfin',
     ], labels(ext()->getActions($service, mediaSettings(), props($service))), 'Jellyfin done, Emby waiting');
 
@@ -2637,7 +2637,7 @@ test('Silo: first payment makes one link invitation for an ordinary account, wit
     same($data['invite_url'], grantProp($service, 'wizarr_invite_url'), 'link stored, as Silo never shows it again');
 
     $actions = silo()->getActions($service, siloSettings(), $service->propertyArray());
-    same(['text:Status=Waiting for you to create your user', 'button:Create your user'], labels($actions), 'waiting');
+    same(['text:Status=Waiting for you to create your user', 'button:Create your user', 'button:Problems? Get a new link'], labels($actions), 'waiting');
     same($data['invite_url'], $actions[1]['url'], 'the button opens the stored link');
 });
 
@@ -3242,6 +3242,133 @@ test('discord leavers: the customer messages are translated', function () {
         same('Din adgang er sat på pause', \Paymenter\Extensions\Servers\Wizarr\Wizarr::t('Your access is paused'), 'title');
         ok(str_contains(\Paymenter\Extensions\Servers\Wizarr\Wizarr::t('Your subscription :service needs you on our Discord. Join again within :hours hours, or your access will be paused.', ['service' => 'Silo', 'hours' => 24]), 'inden for 24 timer'), 'body');
     });
+});
+
+/* ---------- new links and Paywarr → Customers ---------- */
+
+test('new link: "Problems? Get a new link" replaces an unused link, at most once an hour', function () {
+    $service = service();
+    $old = ext()->createServer($service, settings(), []);
+    $url = ext()->freshInvitation($service, settings(), $service->propertyArray());
+    $invitations = state()['invitations'];
+    same(1, count($invitations), 'the old one is gone, one new');
+    ok($invitations[0]['code'] !== $old['invite_code'], 'a different code');
+    same('https://join.example.com/j/' . $invitations[0]['code'], $url, 'sent to the new link');
+    same(['text:Status=Waiting for you to create your user', 'button:Create your user'], labels(ext()->getActions($service, settings(), $service->propertyArray())), 'no button again within the hour');
+    tellsCustomer(fn () => ext()->freshInvitation($service, settings(), $service->propertyArray()), 'once an hour', 'refused within the hour');
+});
+
+test('new link: a used invitation is not replaced by the customer, unless allowed in admin', function () {
+    $service = service();
+    $data = ext()->createServer($service, settings(), []);
+    stub('/_test/fail-redeem', ['code' => $data['invite_code']]); // the Plex share failed: code spent, no user
+    $labels = labels(ext()->getActions($service, settings(), $service->propertyArray()));
+    ok(!in_array('button:Get a new invitation link', $labels, true), 'no new link by default: ' . json_encode($labels));
+    $url = ext()->freshInvitation($service, settings(), $service->propertyArray());
+    same(1, count(state()['invitations']), 'a used invitation gives no second one');
+
+    ext()->adminAllowNewLink($service);
+    $labels = labels(ext()->getActions($service, settings(), $service->propertyArray()));
+    ok(in_array('button:Get a new invitation link', $labels, true), 'allowed in admin: the button shows');
+    $url = ext()->freshInvitation($service, settings(), $service->propertyArray());
+    $pending = array_values(array_filter(state()['invitations'], fn ($i) => !$i['used']));
+    same(1, count($pending), 'a new, unused invitation');
+    same('https://join.example.com/j/' . $pending[0]['code'], $url, 'sent to it');
+    ok(empty($service->propertyArray()['wizarr_new_link_allowed']), 'allowed once');
+    redeem($pending[0]['code'], 'mette');
+    same('text:Status=Active', labels(ext()->getActions($service, settings(), $service->propertyArray()))[0], 'the customer gets in');
+});
+
+/** A Paywarr customer as the admin page finds them: product set, user created and seen. */
+function adminCustomer(bool $withUser = true, array $productSettings = []): Service
+{
+    $service = wizarrService(1);
+    $service->product->settings = $productSettings + settings();
+    if (!$withUser) {
+        ext()->createServer($service, $service->product->settings, []);
+
+        return $service;
+    }
+    subscribed($service->product->settings, 'mette', $service);
+    ext()->getActions($service, $service->product->settings, $service->propertyArray()); // a page view records the user
+
+    return $service;
+}
+
+test('admin: a new invitation, mailed or not; never instead of an existing user', function () {
+    $service = adminCustomer(false);
+    $old = state()['invitations'][0]['code'];
+    \App\Helpers\NotificationHelper::$sent = [];
+    ext()->adminNewInvitation($service, true);
+    $code = state()['invitations'][0]['code'];
+    ok($code !== $old && count(state()['invitations']) === 1, 'replaced');
+    same([['customer1@example.com', 'https://join.example.com/j/' . $code]], array_map(fn ($m) => [$m['email'], $m['data']['invite_url']], \App\Helpers\NotificationHelper::$sent), 'mailed with the new link');
+    ext()->adminNewInvitation($service, false);
+    same(1, count(\App\Helpers\NotificationHelper::$sent), 'not mailed when asked not to');
+    redeem(state()['invitations'][0]['code'], 'mette');
+    ext()->getActions($service, settings(), $service->propertyArray());
+    tellsCustomer(fn () => ext()->adminNewInvitation($service), 'Reset user', 'has a user');
+});
+
+test('admin: reset user forgets the user and sends a new invitation; sync finds a user again', function () {
+    $service = adminCustomer();
+    same('1:mette:jellyfin', grantProp($service, 'wizarr_users'), 'has a user');
+    ext()->adminResetUser($service, false);
+    same(null, grantProp($service, 'wizarr_users'), 'forgotten');
+    same(1, count(array_filter(state()['invitations'], fn ($i) => !$i['used'])), 'a new invitation');
+    same(1, count(state()['users']), 'the user stays on the media server');
+    redeem(array_values(array_filter(state()['invitations'], fn ($i) => !$i['used']))[0]['code'], 'mette2');
+    same(['mette2'], ext()->adminSync($service), 'sync records the new user');
+    same('2:mette2:jellyfin', grantProp($service, 'wizarr_users'), 'stored');
+});
+
+test('admin: give trial days, extend, end now and reopen, restart; only on a trial', function () {
+    $service = adminCustomer();
+    $now = time();
+    same('set', ext()->adminGiveTrialDays($service, 7, $now), 'a week for a friend');
+    $summary = ext()->adminSummary($service);
+    same([7, true], [$summary['trial']['days'], $summary['trial']['given']], 'a given trial');
+    same($now + 7 * 86400, $summary['trial']['ends'], 'ends in 7 days');
+    ext()->adminExtendTrial($service, 3, $now);
+    same($now + 10 * 86400, ext()->adminSummary($service)['trial']['ends'], 'extended by 3 days');
+
+    same('ended', ext()->adminEndTrial($service, $now), 'ended now');
+    same(['cancelled', true], [$service->status, state()['users'][0]['is_disabled']], 'closed, user disabled');
+    same('reopened', ext()->adminExtendTrial($service, 2, $now), 'given 2 more days');
+    same(['active', false], [$service->status, state()['users'][0]['is_disabled']], 'open again, user enabled');
+    same(null, ext()->adminSummary($service)['trial']['ended'], 'no longer ended');
+
+    same('set', ext()->adminRestartTrial($service, $now), 'restarted');
+    same($now + 7 * 86400, ext()->adminSummary($service)['trial']['ends'], 'the full 7 days again');
+
+    $waiting = adminCustomer(false);
+    same('waiting', ext()->adminGiveTrialDays($waiting, 5, $now), 'no user yet: the clock starts when they create it');
+    $plain = adminCustomer(false);
+    tellsCustomer(fn () => ext()->adminSetTrial($plain, null, $now + 86400), 'not a trial', 'only trials');
+});
+
+test('admin: a forgiven trial no longer counts at checkout', function () {
+    $user = new User('mette@example.com');
+    $old = new Service(1, $user);
+    $old->product = (object) ['server_id' => 10, 'server' => (object) ['id' => 10, 'extension' => 'Wizarr'], 'settings' => trialSettings()];
+    $new = new Service(2, $user);
+    $new->product = $old->product;
+    same(['trial'], ext()->trialHistory($new, [$old]), 'had a trial');
+    ext()->adminAllowNewTrial($old);
+    $old->loadedProperties = null;
+    same([], ext()->trialHistory($new, [$old]), 'forgiven: may try again');
+    same(true, ext()->adminSummary($old)['trial']['forgiven'], 'shown in admin');
+});
+
+test('admin: the summary shows users, trial and Discord from what is stored, without calls', function () {
+    $service = adminCustomer();
+    $service->user->properties()->updateOrCreate(['key' => 'discord_username'], ['name' => 'Discord', 'value' => 'waffle.fan']);
+    $service->user->properties()->updateOrCreate(['key' => 'discord_id'], ['name' => 'Discord ID', 'value' => '4242']);
+    stub('/_test/clear-requests');
+    $summary = ext()->adminSummary($service);
+    same([['mette']], array_column($summary['grants'], 'users'), 'the user');
+    same(['waffle.fan', '4242', null, false], [$summary['discord'], $summary['discord_id'], $summary['trial'], $summary['new_link']], 'Discord; not a trial');
+    same([], state()['requests'], 'no calls to Wizarr');
 });
 
 /* ---------- summary ---------- */
