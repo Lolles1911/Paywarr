@@ -3,6 +3,32 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.24.0 (2026-11-20)
+
+- **New: a Paywarr group in admin.** Six pages:
+  - **Customers:** every subscription with its user or invitation, trial,
+    Discord name and a note; search by Discord name too; a Problems filter;
+    and per subscription: new invitation, allow a new link, sync, password
+    reset link, change media server (e.g. Jellyfin to Plex), libraries for
+    this customer, link an existing user, reset user (optionally deleting it
+    on the media server), pause and resume, and everything about trials (set
+    the dates, extend, start over, end now, may try again, give trial days).
+    Bulk actions, and a customer card with what was done, by whom and when.
+  - **Server status**, **Media server users** (link, disable, delete the ones
+    without a subscription), **Invitations** (with a clean-up), **Libraries per
+    product** and **Checks** (what might be wrong in the setup).
+  - Badges in the menu and a line on the dashboard when something needs a look.
+- **New: "Problems? Get a new link"** on the customer's subscription, by an
+  unused link and by a link that was used without a user being made (e.g. a
+  Plex share that failed), at most once an hour.
+- **Fixed:** a link used without a user being made showed "Active" and the box
+  kept offering the spent link. Both now say "Your user was not created" and
+  lead to a new link.
+- **Pause:** keeps the paid time, sends no invoice meanwhile, and resumes by
+  itself on the chosen date.
+- Trial days given in admin count as a trial everywhere (checkout, the hourly
+  run, Paywarr Stats 1.7.1).
+
 ## 1.23.0 (2026-11-16)
 
 - **For Paywarr Stats 1.7:** the Stats overview can show how many requests

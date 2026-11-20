@@ -368,6 +368,9 @@ been used yet, every page in the client area shows a small box at the bottom:
   which opens the invitation link directly.
 - **Expired:** "Your invitation link has expired" with a button to the
   subscription, where the customer can get a new link.
+- **User not created:** the link was used, but no user was made (e.g. a Plex
+  share that failed): "Your user was not created" with a button to the
+  subscription, where the customer gets a new link.
 - **User created:** the box disappears by itself.
 
 The customer can close it with ✕; it comes back if the message changes (e.g.
@@ -378,6 +381,12 @@ subscription and asks Wizarr in the background (at most 40 times a minute per
 customer). It uses the theme's colours, so it fits the default theme and
 custom themes alike. If the queue gives up on creating the invitation, the box stops
 waiting after 15 minutes.
+
+**"Problems? Get a new link":** by an unused link, and by a link that was used
+without a user being made, the subscription has this button. The customer gets
+a new link and the old one stops working; at most once an hour. A customer
+who has a user only gets a new link when you allow it in admin ("Allow a new
+link", see below), so one subscription never turns into two users.
 
 ## Forgotten login
 
@@ -395,6 +404,82 @@ The button only exists while the subscription is active, and only for the
 subscription's own user. Plex has no button, because Wizarr can't change a Plex
 password. If Wizarr can't be reached, the customer gets a short message to try
 again, and the actual error is written to Paymenter's log.
+
+## Admin: the Paywarr pages
+
+Paymenter's admin gets a **Paywarr** group with six pages. Staff who may view
+services see them; the buttons need the right to edit services (products for
+the libraries). The pages ask Wizarr and Silo at most once a minute.
+
+![Paywarr customers](screenshots/admin-customers.png)
+
+### Customers
+
+Every Paywarr subscription: the customer with their email, **Discord name** and
+note, the subscription, its status, the user or invitation on each media
+server, and the trial. Search by name, email, Discord name or ID, or the note.
+Filters: status, server, without a user, and **Problems** (link used without a
+user, link expired, may get a new link, left the Discord, paused, trial ended
+and not bought). The menu shows how many customers need a look.
+
+**Access** (the key):
+
+| Button | Does |
+|---|---|
+| New invitation | A new link for every server where the customer has no user yet; mailed or not |
+| Allow a new link | The customer gets "Get a new invitation link" once, even after using theirs (e.g. a failed Plex share) |
+| Sync now | Asks Wizarr/Silo again: records the user, moves a trial along, Discord role and Seerr in line. Says so when a link was used without a user |
+| Password reset link | A link to choose a new password on Jellyfin, Emby or Silo; mailed or not |
+| Change media server | E.g. from Jellyfin to Plex on the same Wizarr: the new server gets an invitation, the user on the old one is removed, as at an upgrade |
+| Libraries for this customer | Used for the customer's next invitation instead of the product's (Wizarr can't change an existing user's libraries) |
+| Link an existing user | Gives the subscription a user that already exists, e.g. a friend's account from before |
+| Note | About the customer, for you only |
+| Reset user | Forgets the user and sends a new invitation; can delete the user on the media server too |
+
+**Subscription:** **Pause** switches the access off as when unpaid, without
+telling the customer, and keeps the paid time: Paymenter sends no invoice and
+doesn't terminate while paused, and the subscription resumes by itself on the
+date you choose (or when you press **Resume**). A card or PayPal subscription
+at the payment provider keeps charging: pause it there too. On Plex the share
+is removed, and the customer gets a new invitation when it resumes.
+
+**Trial:** set the start and end, extend, start over, end now, **may try
+again** (this trial no longer counts at checkout; a "Per user limit" on the
+product still does), and **give trial days** (makes the subscription a trial of
+so many days, e.g. a free week for a friend; it closes at the end as any
+trial).
+
+Tick several customers for **Sync now**, **Allow a new link** or **New
+invitation** at once; **New links for expired ones** does that for every link
+that expired before a user was made.
+
+Click a customer's name for their **card**: everything above for that customer,
+their requests, and **what was done here**: each action with who did it and
+when (links are left out).
+
+![A customer card](screenshots/admin-customer-card.png)
+
+### Server status, users, invitations, libraries, checks
+
+- **Server status:** every Wizarr and Silo, with its media servers: online or
+  not verified, users, libraries, how fast it answered. One that doesn't answer
+  shows the reason, a red badge in the menu and a line on the dashboard.
+- **Media server users:** every user on your media servers with the
+  subscription it belongs to; by default those **without one**. Link one to a
+  subscription, disable, enable or delete it.
+- **Invitations:** every invitation with its status, how long it works and its
+  subscription. **Clean up** deletes expired ones and unused ones that no
+  subscription has.
+- **Libraries per product:** the media servers and libraries each product
+  gives, with its trial, link lifetime and Discord requirement; the libraries
+  can be chosen there.
+- **Checks:** what might be wrong, worst first, each with a button to where it
+  is fixed: a Wizarr or Silo that doesn't answer, an unverified media server, a
+  product without a media server or with libraries that are gone, a server
+  without a public address, Discord half set up, a trial product without a
+  per-user limit, paid subscriptions that got no invitation.
+
+The dashboard shows a Paywarr line when customers or servers need a look.
 
 ## Safety net: failed suspensions
 
@@ -1136,6 +1221,8 @@ it*) does. Run it before you take on paying customers.
 | `extensions/Servers/Wizarr/SiloClient.php` | The calls to Silo, answering like the Wizarr client |
 | `extensions/Servers/Wizarr/SeerrClient.php` | The calls to Seerr (import, permissions, deletion) |
 | `extensions/Servers/Wizarr/SeerrException.php` | Error type |
+| `extensions/Servers/Wizarr/Admin/Pages/` | The Paywarr pages in Paymenter's admin |
+| `extensions/Servers/Wizarr/Admin/PaywarrInventory.php` | What those pages read from Wizarr and Silo, kept a minute |
 | `tools/discord-check.php` | Checks the Discord setup step by step |
 | `tools/seerr-check.php` | Checks the Seerr add-on for one customer |
 | `tools/backup-paymenter.sh` | Backs up Paymenter's database, `.env` and uploads |
