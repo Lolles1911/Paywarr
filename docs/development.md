@@ -69,7 +69,7 @@ two extra things:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-250 scenarios run the extension through the whole lifecycle against
+253 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole

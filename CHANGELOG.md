@@ -3,6 +3,22 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.25.1 (2026-11-20)
+
+- **Fixed:** Silo customers could be sent to your Jellyfin. Paywarr kept one
+  list of media server addresses for Wizarr and Silo together, and their
+  server IDs overlap (Silo's is always 1), so the welcome mail's "Watch in the
+  browser" and the "Open the media library" button could show Jellyfin's
+  address. Each Wizarr and Silo now has its own list.
+- **Fixed:** a "media server" option left on a product with one media server
+  (always so on Silo) stopped the order with "matches none of the servers".
+  The choice is now left alone there.
+- **New in Checks:** a product that asks for a media server it doesn't need,
+  and a product whose media server choice names a server it doesn't have.
+- Right after payment the subscription says "Your access is being prepared"
+  instead of "Your invitation link has expired"; if the link never comes,
+  "Your access is not ready yet" with "Get a new invitation link".
+
 ## 1.25.0 (2026-11-20)
 
 - **New: Paywarr's own welcome mail** (Wizarr server: "Send Paywarr's welcome

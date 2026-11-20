@@ -60,7 +60,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.25.0',
+    version: '1.25.1',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
