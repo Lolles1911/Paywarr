@@ -95,7 +95,18 @@ class DiscordClient
      * when Discord says the member or user does not exist, and throws for
      * everything else.
      */
-    private function call(string $method, string $path, string $notMember = 'null'): ?array
+    /**
+     * A private message from the bot to a member (reminders, warnings). The
+     * member must share a server with the bot, and may have closed their DMs:
+     * then Discord answers 50007 and this throws.
+     */
+    public function sendDirectMessage(string $userId, string $content): void
+    {
+        $channel = $this->call('post', '/users/@me/channels', body: ['recipient_id' => $this->id($userId)]);
+        $this->call('post', '/channels/' . $this->id((string) ($channel['id'] ?? '')) . '/messages', body: ['content' => mb_substr($content, 0, 2000)]);
+    }
+
+    private function call(string $method, string $path, string $notMember = 'null', array $body = []): ?array
     {
         try {
             $request = Http::withHeaders([
@@ -107,6 +118,7 @@ class DiscordClient
                 'get' => $request->get($url),
                 'put' => $request->put($url),
                 'delete' => $request->delete($url),
+                'post' => $request->post($url, $body),
             };
         } catch (Throwable $e) {
             throw new DiscordException('Could not reach Discord: ' . $e->getMessage());

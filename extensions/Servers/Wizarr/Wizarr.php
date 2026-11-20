@@ -76,6 +76,10 @@ class Wizarr extends Server
     use Concerns\Discord;
     use Concerns\Grants;
     use Concerns\Admin;
+    use Concerns\Notifications;
+    use Concerns\Welcome;
+    use Concerns\Gifts;
+    use Concerns\Reminders;
 
     /** Wizarr only accepts these lifetimes (in days) for an invitation link. */
     private const LINK_LIFETIMES = [1, 7, 30];
@@ -385,6 +389,37 @@ class Wizarr extends Server
                 'description' => 'From the warning. 0 suspends at once. Checked every hour.',
             ],
             [
+                'name' => 'welcome_mail',
+                'label' => 'Send Paywarr\'s welcome mail',
+                'type' => 'checkbox',
+                'description' => 'A welcome mail with the link, three steps to get going, where to watch (the apps for Jellyfin, Emby or Plex) and your Discord, also as "Your new link" when an invitation is made again. Paymenter still sends its own "Service activated" mail: turn that template\'s mail off, or empty the products\' Email template, so customers don\'t get two.',
+            ],
+            [
+                'name' => 'welcome_text',
+                'label' => 'Your own words in the welcome mail',
+                'type' => 'textarea',
+                'required' => false,
+                'description' => 'Optional. Shown in the welcome mail above the link, e.g. a greeting or house rules.',
+            ],
+            [
+                'name' => 'remind_trial',
+                'label' => 'Remind: the trial ends in 2 days',
+                'type' => 'checkbox',
+                'description' => 'By mail, and as a private Discord message to customers who connected Discord. Once per trial.',
+            ],
+            [
+                'name' => 'remind_link',
+                'label' => 'Remind: user not created 2 days after the link',
+                'type' => 'checkbox',
+                'description' => 'With the link again. Once per link.',
+            ],
+            [
+                'name' => 'remind_renewal',
+                'label' => 'Remind: renews in 3 days and the invoice is unpaid',
+                'type' => 'checkbox',
+                'description' => 'Not for subscriptions paid automatically (card or PayPal subscription). Paymenter\'s own invoice mail goes 7 days before, as always.',
+            ],
+            [
                 'name' => 'discord_client_id',
                 'label' => 'Discord application: Client ID',
                 'type' => 'text',
@@ -567,6 +602,14 @@ class Wizarr extends Server
                     . 'Only for new customers. See the README. Leave empty for normal products.',
             ],
             [
+                'name' => 'gift_months',
+                'label' => 'Gift card: months',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:24',
+                'description' => 'Makes this a gift card: the buyer gets a one-time code worth what they paid, spread over this many billing periods of a subscription (with monthly plans: that many months free). No invitation is sent. Leave empty for normal products.',
+            ],
+            [
                 'name' => 'extra_requests',
                 'label' => 'Extra requests (top-up product)',
                 'type' => 'number',
@@ -710,6 +753,8 @@ class Wizarr extends Server
                 $this->reconcileDiscordRoles();
                 $this->reconcileDiscordMembership();
                 $this->resumePausedServices();
+                $this->sendReminders();
+                $this->queueHeartbeat();
                 $this->reconcileSeerr();
                 $this->processTrials();
                 $this->reportHealth($retry);
@@ -740,6 +785,9 @@ class Wizarr extends Server
 
             return ['invite_url' => '', 'invite_code' => '', 'invite_valid_for' => '', 'login_url' => '', 'extra_requests' => $n];
         }
+        if ($this->isGift($settings)) {
+            return $this->createGift($service, $settings);
+        }
         // Bought after a trial: keep the same media server user(s) instead of
         // inviting them again, so their history and "continue watching" stay.
         if (!$this->hasGrants($properties) && !$this->isTrial($settings) && $this->adoptTrialUserQuietly($service)) {
@@ -753,7 +801,12 @@ class Wizarr extends Server
         // Usually nothing yet: Seerr follows once the customer has created their user.
         $this->syncSeerrQuietly($service, 'active');
 
-        return $this->mailDataFor($invitations, $settings);
+        $data = $this->mailDataFor($invitations, $settings);
+        if ($this->welcomeMailOn() && array_filter($invitations, fn ($i) => ($i['code'] ?? '') !== '' && empty($i['has_user']))) {
+            $this->sendWelcomeMail($service, $settings, $data);
+        }
+
+        return $data;
     }
 
     /**
@@ -791,6 +844,11 @@ class Wizarr extends Server
      */
     public function suspendServer(Service $service, $settings, $properties)
     {
+        if ($this->isGift($settings)) {
+            $this->setGiftActive($service, false);
+
+            return true;
+        }
         if ($this->isTopUp($settings)) {
             $this->withdrawTopUp($service); // e.g. refunded
 
@@ -852,6 +910,11 @@ class Wizarr extends Server
      */
     public function unsuspendServer(Service $service, $settings, $properties)
     {
+        if ($this->isGift($settings)) {
+            $this->setGiftActive($service, true);
+
+            return true;
+        }
         if ($this->isTopUp($settings)) {
             $this->applyTopUp($service, $settings);
 
@@ -926,6 +989,11 @@ class Wizarr extends Server
      */
     public function terminateServer(Service $service, $settings, $properties)
     {
+        if ($this->isGift($settings)) {
+            $this->setGiftActive($service, false);
+
+            return true;
+        }
         if ($this->isTopUp($settings)) {
             $this->withdrawTopUp($service);
 
@@ -948,6 +1016,9 @@ class Wizarr extends Server
      */
     public function upgradeServer(Service $service, $settings, $properties)
     {
+        if ($this->isGift($settings)) {
+            return true;
+        }
         // Media servers added get an invitation (mailed); removed ones lose their user.
         $before = $this->grantKeys($properties);
         foreach ($this->syncGrants($service, $settings, $properties) as $grant => $invitation) {
@@ -1039,6 +1110,11 @@ class Wizarr extends Server
         // The invitation exists whether or not the mail goes out, and the link
         // is in the client area too, so a mail problem must not fail the job.
         try {
+            if ($this->welcomeMailOn()) {
+                $this->sendWelcomeMail($service, ExtensionHelper::settingsToArray($service->product->settings ?? []), $data, again: true);
+
+                return;
+            }
             NotificationHelper::serverCreatedNotification($service->user, $service, $data);
         } catch (Throwable $e) {
             Log::warning('Wizarr: new invitation for service ' . $service->id . ' could not be mailed: ' . $e->getMessage());

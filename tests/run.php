@@ -1015,6 +1015,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/report/poster/{service} extensions.wizarr.report.poster',
         'GET wizarr/requests extensions.wizarr.requests',
         'POST wizarr/requests extensions.wizarr.requests.submit',
+        'GET wizarr/gift/{service} extensions.wizarr.gift', 'POST wizarr/gift/{service} extensions.wizarr.gift',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');

@@ -185,7 +185,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.handle_test(path, body)
 
         if path.startswith("/discord/api/v10/"):
-            return self.handle_discord(method, path[len("/discord/api/v10"):])
+            return self.handle_discord(method, path[len("/discord/api/v10"):], body)
 
         if path.startswith("/silo/"):
             query = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
@@ -489,10 +489,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"permissions": u["permissions"]})
         return self.send_json(404, {"message": "not found"})
 
-    def handle_discord(self, method: str, path: str) -> None:
-        """Discord's REST answers for the two calls the extension makes."""
+    def handle_discord(self, method: str, path: str, body: dict = None) -> None:
+        """Discord's REST answers for the calls the extension makes."""
         d = STATE["discord"]
-        STATE["requests"].append({"method": method, "path": "discord:" + path, "body": {}})
+        STATE["requests"].append({"method": method, "path": "discord:" + path, "body": body or {}})
         if d["down"]:
             return self.send_json(502, {"message": "Bad Gateway"})
         if self.headers.get("Authorization") != f"Bot {d['token']}":
@@ -500,6 +500,15 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/users/@me":
             return self.send_json(200, {"id": d["bot_id"], "username": "WaffleBot", "bot": True})
         parts = path.strip("/").split("/")
+        # Direct messages: a DM channel with the user, then a message in it.
+        if method == "POST" and path == "/users/@me/channels":
+            recipient = str((body or {}).get("recipient_id", ""))
+            if recipient in d.get("closed_dms", []):
+                return self.send_json(403, {"message": "Cannot send messages to this user", "code": 50007})
+            return self.send_json(200, {"id": "9" + recipient, "type": 1})
+        if method == "POST" and len(parts) == 3 and parts[0] == "channels" and parts[2] == "messages":
+            d.setdefault("dms", []).append({"to": parts[1][1:], "content": (body or {}).get("content", "")})
+            return self.send_json(200, {"id": "m1", "content": (body or {}).get("content", "")})
         if method == "GET" and len(parts) == 3 and parts[0] == "guilds" and parts[2] == "roles":
             if parts[1] != d["guild"]:
                 return self.send_json(404, {"message": "Unknown Guild", "code": 10004})

@@ -38,3 +38,9 @@ Route::middleware(['web', 'auth'])->prefix('wizarr/requests')->name('extensions.
     Route::get('/', [Wizarr::class, 'requestsPage']);
     Route::post('/', [Wizarr::class, 'requestsSubmit'])->name('.submit');
 });
+
+// A gift card: send its code to a friend.
+Route::middleware(['web', 'auth', 'throttle:30,1'])->name('extensions.wizarr.gift')->group(function () {
+    Route::get('wizarr/gift/{service}', [Wizarr::class, 'giftPage'])->whereNumber('service');
+    Route::post('wizarr/gift/{service}', [Wizarr::class, 'giftPage'])->whereNumber('service');
+});

@@ -544,6 +544,9 @@ class PaywarrCustomers extends Page implements HasTable
     private function accessText(Service $record): array
     {
         $summary = $this->summary($record);
+        if ($summary['gift']) {
+            return ['Gift card: ' . $summary['gift']['code'] . ($summary['gift']['used'] ? ' (used)' : ' (not used yet)') . ($summary['gift']['sent_to'] !== '' ? ' · sent to ' . $summary['gift']['sent_to'] : '')];
+        }
         $lines = [];
         foreach ($summary['grants'] as $grant) {
             $server = $grant['server'] !== '' ? $grant['server'] . ': ' : '';

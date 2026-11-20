@@ -92,6 +92,7 @@ trait Admin
                 'forgiven' => !empty($properties[self::PROP_TRIAL_FORGIVEN]),
             ] : null,
             'new_link' => !empty($properties[self::PROP_NEW_LINK]),
+            'gift' => ($properties[self::PROP_GIFT_CODE] ?? '') !== '' ? ['code' => (string) $properties[self::PROP_GIFT_CODE], 'used' => $this->giftUsed($properties), 'sent_to' => (string) ($properties['gift_sent_to'] ?? '')] : null,
             'paused' => !empty($properties[self::PROP_PAUSED]) ? ['since' => (int) $properties[self::PROP_PAUSED], 'until' => (int) ($properties[self::PROP_PAUSED_UNTIL] ?? 0) ?: null] : null,
             'libraries' => $this->idList((string) ($properties[self::PROP_LIBRARIES] ?? '')),
             'servers' => $this->idList((string) ($properties[self::PROP_SERVERS] ?? '')) ?: array_map('intval', array_filter($this->grantKeys($properties))),
@@ -592,13 +593,17 @@ trait Admin
         try {
             $problems = \Paymenter\Extensions\Servers\Wizarr\Admin\Pages\PaywarrCustomers::problemCount();
             $down = \Paymenter\Extensions\Servers\Wizarr\Admin\PaywarrInventory::downCount();
+            $queue = self::queueStuckSince();
         } catch (Throwable $e) {
             return '';
         }
-        if ($problems === 0 && $down === 0) {
+        if ($problems === 0 && $down === 0 && $queue === null) {
             return '';
         }
         $parts = [];
+        if ($queue !== null) {
+            $parts[] = '<a href="' . e(url('admin/paywarr-checks')) . '" style="font-weight:600;text-decoration:underline">Paymenter\'s queue stands still since ' . e(date('M j, H:i', $queue)) . '</a>';
+        }
         if ($down > 0) {
             $parts[] = '<a href="' . e(url('admin/paywarr-status')) . '" style="font-weight:600;text-decoration:underline">' . $down . ' Wizarr/Silo not answering</a>';
         }
@@ -837,6 +842,9 @@ trait Admin
             if ($this->isTrial($settings) && (int) ($product->per_user_limit ?? 0) === 0) {
                 $add('warning', 'Trial product "' . $product->name . '" has no "Per user limit"', 'Paywarr allows one trial per server, but a limit of 1 on the product is extra safety.', 'product:' . $product->id);
             }
+        }
+        if (($since = self::queueStuckSince()) !== null) {
+            $add('error', 'Paymenter\'s queue stands still', 'Since ' . date('M j, H:i', $since) . ' nothing in the queue has run: invitations and mails wait. On the server: systemctl restart paymenter (see journalctl -u paymenter for why it stopped).', '');
         }
         $stuck = 0;
         $failed = 0;

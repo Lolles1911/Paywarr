@@ -59,6 +59,9 @@ trait ClientArea
         if ($this->isTopUp($settings)) {
             return $this->topUpActions($properties);
         }
+        if ($this->isGift($settings)) {
+            return $this->giftActions($service, $properties);
+        }
         $grants = $this->grantKeys($properties);
         if (count($grants) > 1) {
             return $this->actionsForGrants($service, $settings, $properties, $grants);
@@ -493,6 +496,9 @@ trait ClientArea
     {
         $now ??= time();
         $key = 'service-' . $service->id;
+        if (!empty($properties[self::PROP_GIFT_CODE]) || !empty($properties[self::PROP_TOPUP_TARGET])) {
+            return null; // a gift card or a top-up has no access of its own
+        }
         $grants = $this->grantKeys($properties);
 
         if (!$grants) {
