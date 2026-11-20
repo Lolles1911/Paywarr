@@ -1018,7 +1018,11 @@ class Wizarr extends Server
                 $this->syncSeerrQuietly($service, 'active'); // user just created: Seerr can follow now
                 $this->processTrialQuietly($service);        // ... and a trial's clock can start
             } catch (Throwable $e) {
-                // Only bookkeeping; the page should render either way.
+                return $this->activeActions([], $watch, $properties); // can't tell: as before
+            }
+            if (!$users) {
+                // The link was used but no user was made (e.g. a Plex share that failed).
+                return [$this->statusField(self::t('Your user was not created')), ...$this->freshLinkButton($properties, 0)];
             }
 
             return array_merge($this->activeActions($users, $watch, $properties), $this->grantedLinkButton($properties, 0));
@@ -1074,7 +1078,10 @@ class Wizarr extends Server
                         $this->syncSeerrQuietly($service, 'active');
                         $this->processTrialQuietly($service);
                     } catch (Throwable $e) {
-                        // Only bookkeeping; the page should render either way.
+                        return [[], []]; // can't tell: show nothing for this server
+                    }
+                    if (!$found) {
+                        return [[], [$this->statusField(self::t('Your user was not created'), $server), ...$this->freshLinkButton($view, $number, $server)]];
                     }
 
                     return [$found, $this->grantedLinkButton($view, $number, $server)];
@@ -1275,7 +1282,10 @@ class Wizarr extends Server
         return $this->withGrant($grant, function () use ($service, $settings, $properties, $allowed) {
             $view = $this->grantView($properties);
             $invitation = $this->findInvitation($view);
-            if (!$allowed && (($invitation['status'] ?? 'missing') !== 'pending' || !empty($view[self::PROP_USERS]))) {
+            $status = $invitation['status'] ?? 'missing';
+            // Used, but no user was made (a failed Plex share): starting over takes no second seat.
+            $failed = $status === 'used' && empty($view[self::PROP_USERS]) && !$this->resolveUsers($view, $invitation);
+            if (!$allowed && (($status !== 'pending' && !$failed) || !empty($view[self::PROP_USERS]))) {
                 return $this->renewGrant($service, $settings, $properties); // used: the login page; gone: a new one, as always
             }
             if ($invitation) {
@@ -1406,6 +1416,9 @@ class Wizarr extends Server
                 if (!empty($view[self::PROP_USERS])) {
                     return null;
                 }
+                if (!empty($properties[self::PROP_NEW_LINK])) {
+                    return ['state' => 'failed', 'key' => $key . ($this->grant === '' ? '' : '-' . $this->grant), 'inviteUrl' => ''];
+                }
                 $url = (string) ($view[self::PROP_INVITE_URL] ?? '');
                 if ($url === '') {
                     return null;
@@ -1442,7 +1455,7 @@ class Wizarr extends Server
     public function liveBannerState(Service $service, array $properties): array
     {
         $stored = $this->bannerState($service, $properties);
-        if ($stored === null || in_array($stored['state'], ['preparing', 'trial'], true)) {
+        if ($stored === null || in_array($stored['state'], ['preparing', 'trial', 'failed'], true)) {
             return $stored ?? ['state' => 'none', 'key' => 'service-' . $service->id, 'inviteUrl' => ''];
         }
 
@@ -1453,7 +1466,11 @@ class Wizarr extends Server
                 $status = $invitation['status'] ?? 'missing';
 
                 if ($status === 'used') {
-                    $this->rememberUsers($service, $this->resolveUsers($properties, $invitation));
+                    $users = $this->resolveUsers($properties, $invitation);
+                    if (!$users) {
+                        return ['state' => 'failed', 'inviteUrl' => ''] + $stored; // used, but no user was made
+                    }
+                    $this->rememberUsers($service, $users);
                     $this->syncSeerrQuietly($service, 'active');
                     $this->processTrialQuietly($service);
 
@@ -1572,7 +1589,7 @@ class Wizarr extends Server
 @media (min-width:768px){#wizarr-banner{left:auto;right:1.5rem;bottom:1.5rem;width:26rem}}
 #wizarr-banner[hidden]{display:none}
 #wizarr-banner [data-when]{display:none}
-#wizarr-banner[data-state="preparing"] [data-when~="preparing"],#wizarr-banner[data-state="ready"] [data-when~="ready"],#wizarr-banner[data-state="expired"] [data-when~="expired"],#wizarr-banner[data-state="trial_over"] [data-when~="trial_over"],#wizarr-banner[data-state="trial"] [data-when~="trial"]{display:block}
+#wizarr-banner[data-state="preparing"] [data-when~="preparing"],#wizarr-banner[data-state="ready"] [data-when~="ready"],#wizarr-banner[data-state="expired"] [data-when~="expired"],#wizarr-banner[data-state="failed"] [data-when~="failed"],#wizarr-banner[data-state="trial_over"] [data-when~="trial_over"],#wizarr-banner[data-state="trial"] [data-when~="trial"]{display:block}
 #wizarr-banner .wb-title{font-weight:700;font-size:1rem;margin:0 1.75rem .25rem 0;display:flex;align-items:center;gap:.5rem}
 #wizarr-banner .wb-text{font-size:.875rem;color:hsl(var(--color-muted));margin:0}
 #wizarr-banner .wb-actions{display:flex;gap:.25rem .75rem;flex-wrap:wrap;align-items:center;margin-top:.75rem}
@@ -1594,6 +1611,8 @@ HTML
             . '<p class="wb-text">' . $e(self::t('Create your user with your personal link. The link can only be used once.')) . '</p></div>'
             . '<div data-when="expired"><p class="wb-title">' . $e(self::t('Your invitation link has expired')) . '</p>'
             . '<p class="wb-text">' . $e(self::t('Get a new link on your subscription.')) . '</p></div>'
+            . '<div data-when="failed"><p class="wb-title">' . $e(self::t('Your user was not created')) . '</p>'
+            . '<p class="wb-text">' . $e(self::t('Get a new link on your subscription and try again.')) . '</p></div>'
             . '<div data-when="trial"><p class="wb-title"><span>' . $e(self::t('Trial')) . ': <span data-remaining>' . $e($state['remaining'] ?? '') . '</span></span></p>'
             . '<p class="wb-text">' . $e(self::t('Continue with a subscription and keep your user and everything you have watched.')) . '</p></div>'
             . '<div data-when="trial_over"><p class="wb-title">' . $e(self::t('Your trial has ended')) . '</p>'
@@ -1603,7 +1622,7 @@ HTML
   <span data-when="ready"><a class="wb-btn" data-invite target="_blank" rel="noopener" href="
 HTML
             . $e($state['inviteUrl'] ?? '') . '">' . $e(($state['server'] ?? '') !== '' ? self::t('Create your user on :server', ['server' => $state['server']]) : self::t('Create your user')) . '</a></span>'
-            . '<span data-when="expired"><a class="wb-btn" href="' . $e($state['serviceUrl'] ?? '') . '">' . $e(self::t('Get a new link')) . '</a></span>'
+            . '<span data-when="expired failed"><a class="wb-btn" href="' . $e($state['serviceUrl'] ?? '') . '">' . $e(self::t('Get a new link')) . '</a></span>'
             . '<span data-when="preparing ready"><a class="wb-link" href="' . $e($state['serviceUrl'] ?? '') . '">' . $e(self::t('View subscription')) . '</a></span>'
             . '<span data-when="trial trial_over"><a class="wb-btn" href="' . $e($state['shopUrl'] ?? '') . '">' . $e(self::t('See subscriptions')) . '</a></span>'
             . <<<'HTML'
@@ -5042,12 +5061,16 @@ HTML;
     {
         $properties = ExtensionHelper::getServiceProperties($service);
         $found = [];
+        $spent = [];
         foreach ($this->grantKeys($properties) as $grant) {
-            $this->withGrant($grant, function () use ($service, $properties, &$found) {
+            $this->withGrant($grant, function () use ($service, $properties, &$found, &$spent) {
                 $view = $this->grantView($properties);
-                $users = $this->resolveUsers($view, $this->findInvitation($view));
+                $invitation = $this->findInvitation($view);
+                $users = $this->resolveUsers($view, $invitation);
                 if ($users) {
                     $this->rememberUsers($service, $users);
+                } elseif (($invitation['status'] ?? '') === 'used') {
+                    $spent[] = $this->grantLabel($properties) ?: 'the media server';
                 }
                 foreach ($users as $user) {
                     $found[] = $user['username'];
@@ -5059,6 +5082,9 @@ HTML;
         $this->syncRolesQuietly($service, active: $status === 'active');
         $this->syncSeerrQuietly($service, $status === 'active' ? 'active' : ($status === 'suspended' ? 'suspended' : 'ended'));
         $this->forgetCustomerCaches($service);
+        if ($spent && !$found) {
+            throw new DisplayException('The link on ' . implode(', ', $spent) . ' was used, but no user was made (e.g. a Plex share that failed). Use "Allow a new link" or "New invitation".');
+        }
 
         return $found;
     }

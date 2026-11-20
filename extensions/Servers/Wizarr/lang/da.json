@@ -54,6 +54,7 @@
     "Get a new invitation link": "Få et nyt invitationslink",
     "Get a new invitation link for :server": "Få et nyt invitationslink til :server",
     "Get a new link": "Få et nyt link",
+    "Get a new link on your subscription and try again.": "Få et nyt link på dit abonnement, og prøv igen.",
     "Get a new link on your subscription.": "Hent et nyt link på dit abonnement.",
     "Hide": "Skjul",
     "I have joined – check again": "Jeg har joinet – tjek igen",
@@ -171,5 +172,6 @@
     "Your invitation link has expired": "Dit invitationslink er udløbet",
     "Your requests are being set up. Once you have created your user, they are ready within a few minutes.": "Dine anmodninger bliver sat op. Når du har oprettet din bruger, er de klar inden for få minutter.",
     "Your subscription :service needs you on our Discord. Join again within :hours hours, or your access will be paused.": "Dit abonnement :service kræver, at du er på vores Discord. Meld dig ind igen inden for :hours timer, ellers bliver din adgang sat på pause.",
-    "Your trial has ended": "Din prøveperiode er slut"
+    "Your trial has ended": "Din prøveperiode er slut",
+    "Your user was not created": "Din bruger blev ikke oprettet"
 }

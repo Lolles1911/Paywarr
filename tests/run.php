@@ -3258,16 +3258,27 @@ test('new link: "Problems? Get a new link" replaces an unused link, at most once
     tellsCustomer(fn () => ext()->freshInvitation($service, settings(), $service->propertyArray()), 'once an hour', 'refused within the hour');
 });
 
-test('new link: a used invitation is not replaced by the customer, unless allowed in admin', function () {
+test('new link: a used link without a user (failed Plex share) is replaced by the customer; one with a user only when allowed in admin', function () {
     $service = service();
     $data = ext()->createServer($service, settings(), []);
     stub('/_test/fail-redeem', ['code' => $data['invite_code']]); // the Plex share failed: code spent, no user
+    same(['text:Status=Your user was not created', 'button:Problems? Get a new link'], labels(ext()->getActions($service, settings(), $service->propertyArray())), 'told, with a way out');
+    same('failed', ext()->liveBannerState($service, $service->propertyArray())['state'], 'the box says so too, without the used link');
+    ext()->freshInvitation($service, settings(), $service->propertyArray());
+    same(1, count(array_filter(state()['invitations'], fn ($i) => !$i['used'])), 'the customer got a new link themselves');
+    same(['text:Status=Waiting for you to create your user', 'button:Create your user'], labels(ext()->getActions($service, settings(), $service->propertyArray())), 'and can use it');
+
+    // A customer with a user only gets a new link when allowed in admin.
+    redeem(array_values(array_filter(state()['invitations'], fn ($i) => !$i['used']))[0]['code'], 'mette');
     $labels = labels(ext()->getActions($service, settings(), $service->propertyArray()));
     ok(!in_array('button:Get a new invitation link', $labels, true), 'no new link by default: ' . json_encode($labels));
-    $url = ext()->freshInvitation($service, settings(), $service->propertyArray());
-    same(1, count(state()['invitations']), 'a used invitation gives no second one');
+    $service->properties()->updateOrCreate(['key' => 'wizarr_relinked_at'], ['name' => 'x', 'value' => '0']);
+    $service->unsetRelation('properties');
+    ext()->freshInvitation($service, settings(), $service->propertyArray());
+    same(0, count(array_filter(state()['invitations'], fn ($i) => !$i['used'])), 'a user exists: no second seat');
 
     ext()->adminAllowNewLink($service);
+    same(null, ext()->bannerState($service, $service->propertyArray()), 'has a user: no box, the button is on the subscription');
     $labels = labels(ext()->getActions($service, settings(), $service->propertyArray()));
     ok(in_array('button:Get a new invitation link', $labels, true), 'allowed in admin: the button shows');
     $url = ext()->freshInvitation($service, settings(), $service->propertyArray());
@@ -3275,7 +3286,7 @@ test('new link: a used invitation is not replaced by the customer, unless allowe
     same(1, count($pending), 'a new, unused invitation');
     same('https://join.example.com/j/' . $pending[0]['code'], $url, 'sent to it');
     ok(empty($service->propertyArray()['wizarr_new_link_allowed']), 'allowed once');
-    redeem($pending[0]['code'], 'mette');
+    redeem($pending[0]['code'], 'mette2');
     same('text:Status=Active', labels(ext()->getActions($service, settings(), $service->propertyArray()))[0], 'the customer gets in');
 });
 
@@ -3320,6 +3331,14 @@ test('admin: reset user forgets the user and sends a new invitation; sync finds 
     redeem(array_values(array_filter(state()['invitations'], fn ($i) => !$i['used']))[0]['code'], 'mette2');
     same(['mette2'], ext()->adminSync($service), 'sync records the new user');
     same('2:mette2:jellyfin', grantProp($service, 'wizarr_users'), 'stored');
+});
+
+test('admin: sync tells when the link was used but no user was made (a failed Plex share)', function () {
+    $service = adminCustomer(false);
+    stub('/_test/fail-redeem', ['code' => state()['invitations'][0]['code']]);
+    tellsCustomer(fn () => ext()->adminSync($service), 'no user was made', 'told');
+    ext()->adminAllowNewLink($service);
+    same(true, ext()->adminSummary($service)['new_link'], 'allowed');
 });
 
 test('admin: give trial days, extend, end now and reopen, restart; only on a trial', function () {
