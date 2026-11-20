@@ -3390,6 +3390,58 @@ test('admin: the summary shows users, trial and Discord from what is stored, wit
     same([], state()['requests'], 'no calls to Wizarr');
 });
 
+test('admin: the inventory shows each Wizarr with its servers, libraries, users and invitations, and who owns them', function () {
+    $service = adminCustomer();                     // mette, with a user
+    $waiting = wizarrService(2);                    // customer2, an unused invitation
+    ext()->createServer($waiting, settings(), []);
+    stub('/_test/add-user', ['username' => 'stranger', 'server_id' => 1]);
+    $server = (object) ['id' => 7, 'name' => 'WaffleHub Jellyfin', 'settings' => ['host' => $GLOBALS['STUB'] . '/', 'api_key' => 'stub-key', 'public_url' => 'https://join.example.com/']];
+    $twin = (object) ['id' => 8, 'name' => 'WaffleHub Plex', 'settings' => $server->settings];
+    foreach ([$service, $waiting] as $s) {
+        $s->product->server->id = 7;
+        $s->product->server->settings = $server->settings;
+    }
+    [$backend] = ext()->adminInventory([$server, $twin], [$service, $waiting]);
+    same([true, [7 => 'WaffleHub Jellyfin', 8 => 'WaffleHub Plex']], [$backend['ok'], $backend['paymenter']], 'one Wizarr behind two Paymenter servers');
+    same(['Jellyfin' => [2, 2], 'Plex' => [0, 1]], array_intersect_key(array_combine(array_column($backend['servers'], 'name'), array_map(fn ($x) => [$x['users'], $x['libraries']], $backend['servers'])), ['Jellyfin' => 1, 'Plex' => 1]), 'users and libraries per media server');
+    same([['mette', 1], ['stranger', null]], array_map(fn ($u) => [$u['username'], $u['owner']['service'] ?? null], $backend['users']), 'a user with and one without a subscription');
+    same([[1, 'used'], [2, 'pending']], array_map(fn ($i) => [$i['owner']['service'] ?? null, $i['status']], $backend['invitations']), 'invitations with their subscription');
+
+    [$down] = ext()->adminInventory([(object) ['id' => 9, 'name' => 'Old', 'settings' => ['host' => 'http://127.0.0.1:1/', 'api_key' => 'x']]], []);
+    same(false, $down['ok'], 'an unreachable Wizarr is shown as such');
+    ok($down['error'] !== '', 'with the reason');
+});
+
+test('admin: link an existing user to a subscription; never one that belongs to someone else', function () {
+    $friend = stub('/_test/add-user', ['username' => 'old.friend', 'server_id' => 1]);
+    $service = adminCustomer(false);
+    same('old.friend (Jellyfin)', ext()->adminLinkUser($service, (int) $friend['id']), 'linked');
+    same($friend['id'] . ':old.friend:jellyfin', grantProp($service, 'wizarr_users'), 'stored as the subscription\'s user');
+    same([], array_values(array_filter(state()['invitations'], fn ($i) => !$i['used'])), 'the unused link is withdrawn');
+    same('text:Status=Active', labels(ext()->getActions($service, settings(), $service->propertyArray()))[0], 'the customer is in');
+
+    $other = adminCustomer(false);
+    $other->id = 5;
+    tellsCustomer(fn () => ext()->adminLinkUser($other, (int) $friend['id'], [$service]), 'belongs to subscription #1', 'someone else\'s');
+    $plex = stub('/_test/add-user', ['username' => 'plexy', 'server_id' => 2]);
+    tellsCustomer(fn () => ext()->adminLinkUser($other, (int) $plex['id']), 'does not include', 'a server the subscription does not have');
+});
+
+test('admin: reset can delete the user on the media server too; a failed link is marked for the Problems filter', function () {
+    $service = adminCustomer();
+    ext()->adminResetUser($service, false, true);
+    same(0, count(state()['users']), 'deleted on the media server');
+
+    $failed = adminCustomer(false);
+    stub('/_test/fail-redeem', ['code' => grantProp($failed, 'wizarr_invite_code')]);
+    ext()->getActions($failed, settings(), $failed->propertyArray());
+    ok(!empty($failed->propertyArray()['wizarr_link_failed']), 'marked');
+    ext()->adminNewInvitation($failed, false);
+    ok(empty($failed->propertyArray()['wizarr_link_failed']), 'cleared by a new link');
+
+    same('Deleted.', ext()->adminUserAction((int) stub('/_test/add-user', ['username' => 'x', 'server_id' => 1])['id'], 'delete'), 'Users page: delete');
+});
+
 /* ---------- summary ---------- */
 
 echo "\n" . $results['pass'] . ' passed, ' . count($results['fail']) . " failed\n";

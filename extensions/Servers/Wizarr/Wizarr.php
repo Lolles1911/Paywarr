@@ -184,6 +184,12 @@ class Wizarr extends Server
     /** Set in admin: the customer may get a new invitation link once, even after using theirs. */
     public const PROP_NEW_LINK = 'wizarr_new_link_allowed';
 
+    /** The link was used but no user was made (e.g. a Plex share that failed); for the admin page's filter. */
+    public const PROP_LINK_FAILED = 'wizarr_link_failed';
+
+    /** A note about the customer, kept on the customer (Paywarr → Customers). */
+    public const PROP_NOTE = 'paywarr_note';
+
     /** When the customer last asked for a new link themselves ("Problems? Get a new link"). */
     private const PROP_RELINKED = 'wizarr_relinked_at';
 
@@ -1022,6 +1028,8 @@ class Wizarr extends Server
             }
             if (!$users) {
                 // The link was used but no user was made (e.g. a Plex share that failed).
+                $this->markLinkFailed($service, $properties);
+
                 return [$this->statusField(self::t('Your user was not created')), ...$this->freshLinkButton($properties, 0)];
             }
 
@@ -1081,6 +1089,8 @@ class Wizarr extends Server
                         return [[], []]; // can't tell: show nothing for this server
                     }
                     if (!$found) {
+                        $this->markLinkFailed($service, $view);
+
                         return [[], [$this->statusField(self::t('Your user was not created'), $server), ...$this->freshLinkButton($view, $number, $server)]];
                     }
 
@@ -1468,6 +1478,8 @@ class Wizarr extends Server
                 if ($status === 'used') {
                     $users = $this->resolveUsers($properties, $invitation);
                     if (!$users) {
+                        $this->markLinkFailed($service, $properties);
+
                         return ['state' => 'failed', 'inviteUrl' => ''] + $stored; // used, but no user was made
                     }
                     $this->rememberUsers($service, $users);
@@ -4766,6 +4778,7 @@ HTML;
 
         $invitation = $this->client()->createInvitation($payload);
         $invitation['url'] = $this->absoluteUrl($invitation['url'] ?? null, (string) $invitation['code']);
+        $this->setProperty($service, self::PROP_LINK_FAILED, '', null);
 
         $suffix = $this->grant === '' ? '' : ' (' . $this->grantServerName() . ')';
         $this->setProperty($service, $this->key(self::PROP_INVITATION_ID), 'Wizarr invitation ID' . $suffix, (string) ($invitation['id'] ?? ''));
@@ -4934,6 +4947,9 @@ HTML;
 
         $label = $this->grant === '' ? 'Wizarr users' : 'Wizarr users (' . $this->grantServerName() . ')';
         $this->setProperty($service, $this->key(self::PROP_USERS), $label, $encoded === '' ? null : $encoded);
+        if ($encoded !== '' && !empty(ExtensionHelper::getServiceProperties($service)[self::PROP_LINK_FAILED])) {
+            $this->setProperty($service, self::PROP_LINK_FAILED, '', null);
+        }
     }
 
     /** @return array<int, array{id: int, username: string, type: string}> */
@@ -5071,6 +5087,7 @@ HTML;
                     $this->rememberUsers($service, $users);
                 } elseif (($invitation['status'] ?? '') === 'used') {
                     $spent[] = $this->grantLabel($properties) ?: 'the media server';
+                    $this->markLinkFailed($service, $properties);
                 }
                 foreach ($users as $user) {
                     $found[] = $user['username'];
@@ -5094,13 +5111,20 @@ HTML;
      * new invitation (mailed when $mail). The user stays on the media
      * server; remove it there if it should go.
      */
-    public function adminResetUser(Service $service, bool $mail = true): array
+    public function adminResetUser(Service $service, bool $mail = true, bool $deleteOnServer = false): array
     {
         $properties = ExtensionHelper::getServiceProperties($service);
         foreach ($this->grantKeys($properties) as $grant) {
-            $this->withGrant($grant, fn () => $this->rememberUsers($service, []));
+            $this->withGrant($grant, function () use ($service, $properties, $deleteOnServer) {
+                if ($deleteOnServer) {
+                    foreach ($this->parseUsers((string) ($this->grantView($properties)[self::PROP_USERS] ?? '')) as $user) {
+                        $this->deleteUserQuietly($user['id']);
+                    }
+                }
+                $this->rememberUsers($service, []);
+            });
         }
-        Log::info('Wizarr: the media server user(s) of service ' . $service->id . ' were forgotten in admin.');
+        Log::info('Wizarr: the media server user(s) of service ' . $service->id . ' were ' . ($deleteOnServer ? 'deleted' : 'forgotten') . ' in admin.');
 
         return $this->adminNewInvitation($service, $mail);
     }
@@ -5190,6 +5214,217 @@ HTML;
         $this->setProperty($service, self::PROP_TRIAL_ENDS, '', null);
 
         return 'waiting';
+    }
+
+    /**
+     * Links a user that already exists on the media server (e.g. a friend's
+     * Jellyfin account from before) to this subscription, instead of an
+     * invitation. Refused when another subscription has that user, unless
+     * $force.
+     */
+    public function adminLinkUser(Service $service, int $userId, iterable $services = [], bool $force = false): string
+    {
+        $user = null;
+        foreach ($this->client()->users() as $row) {
+            if ((int) $row['id'] === $userId) {
+                $user = $this->userRow($row);
+            }
+        }
+        if ($user === null) {
+            throw new DisplayException('That user no longer exists on the media server.');
+        }
+        $grant = null;
+        foreach ($this->client()->servers() as $server) {
+            if ((string) ($server['name'] ?? '') === $user['server']) {
+                $grant = (string) $server['id'];
+            }
+        }
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $grants = $this->grantKeys($properties);
+        if ($grant === null || (!in_array($grant, $grants, true) && !($grants === [''] || $grants === []))) {
+            throw new DisplayException('That user is on ' . ($user['server'] ?: 'another server') . ', which this subscription does not include.');
+        }
+        if (!$force) {
+            foreach ($this->adminOwners($services)['users'] as $id => $owner) {
+                if ($id === $userId && (int) $owner['service'] !== (int) $service->id) {
+                    throw new DisplayException('That user belongs to subscription #' . $owner['service'] . ' (' . $owner['customer'] . ').');
+                }
+            }
+        }
+        $grant = in_array($grant, $grants, true) ? $grant : ($grants[0] ?? '');
+        $this->withGrant($grant, function () use ($service, $properties, $user) {
+            $invitation = $this->findInvitation($this->grantView($properties));
+            if ($invitation && ($invitation['status'] ?? '') === 'pending') {
+                $this->deleteInvitationQuietly((int) $invitation['id']); // the link is no longer needed
+            }
+            $this->rememberUsers($service, [$user]);
+            if ($service->status === 'active') {
+                $this->client()->enableUser($user['id']);
+            }
+        });
+        $this->processTrialQuietly($service);
+        $this->syncSeerrQuietly($service, $service->status === 'active' ? 'active' : 'suspended');
+        $this->forgetCustomerCaches($service);
+        Log::info('Wizarr: media server user ' . $user['username'] . ' linked to service ' . $service->id . ' in admin.');
+
+        return $user['username'] . ' (' . $user['server'] . ')';
+    }
+
+    /** Media server users: switch off, back on, or delete (Paywarr → Users). */
+    public function adminUserAction(int $userId, string $action): string
+    {
+        return match ($action) {
+            'disable' => $this->client()->disableUser($userId),
+            'enable' => $this->client()->enableUser($userId),
+            'delete' => ($this->deleteUserQuietly($userId) ?? 'Deleted.'),
+            default => throw new DisplayException('Unknown action.'),
+        };
+    }
+
+    /** Deletes an invitation (Paywarr → Invitations). */
+    public function adminDeleteInvitation(int $id): void
+    {
+        $this->deleteInvitationQuietly($id);
+    }
+
+    /** "wizarr|https://wizarr.example.com": two Paymenter servers on the same Wizarr or Silo share it. */
+    public function backendKey(): string
+    {
+        return ($this->isSilo() ? 'silo' : 'wizarr') . '|' . strtolower(rtrim(trim((string) $this->config('host')), '/'));
+    }
+
+    /**
+     * Which subscription has each media server user and each invitation of
+     * this Wizarr or Silo, from what the subscriptions store.
+     *
+     * @return array{users: array<int, array>, invitations: array<string, array>}
+     */
+    public function adminOwners(iterable $services): array
+    {
+        $users = [];
+        $invitations = [];
+        foreach ($services as $service) {
+            if (($service->product?->server?->extension ?? null) !== 'Wizarr') {
+                continue;
+            }
+            $ext = $this->forServiceServer($service);
+            if ($ext->backendKey() !== $this->backendKey()) {
+                continue;
+            }
+            $properties = ExtensionHelper::getServiceProperties($service);
+            $owner = [
+                'service' => (int) $service->id,
+                'customer' => trim(($service->user->first_name ?? '') . ' ' . ($service->user->last_name ?? '')) ?: (string) ($service->user->email ?? ''),
+                'email' => (string) ($service->user->email ?? ''),
+                'product' => (string) ($service->product->name ?? ''),
+                'status' => (string) $service->status,
+            ];
+            foreach ($ext->grantKeys($properties) as $grant) {
+                $ext->withGrant($grant, function () use ($ext, $properties, $owner, &$users, &$invitations) {
+                    $view = $ext->grantView($properties);
+                    foreach ($ext->parseUsers((string) ($view[self::PROP_USERS] ?? '')) as $user) {
+                        $users[$user['id']] = $owner;
+                    }
+                    if (($view[self::PROP_INVITATION_ID] ?? '') !== '') {
+                        $invitations['id:' . $view[self::PROP_INVITATION_ID]] = $owner;
+                    }
+                    if (($view[self::PROP_INVITE_CODE] ?? '') !== '') {
+                        $invitations['code:' . strtoupper((string) $view[self::PROP_INVITE_CODE])] = $owner;
+                    }
+                });
+            }
+        }
+
+        return ['users' => $users, 'invitations' => $invitations];
+    }
+
+    /**
+     * Everything the Paywarr pages show, per Wizarr or Silo behind the
+     * Paymenter servers: whether it answers, its media servers, libraries,
+     * users and invitations, each user and invitation with the subscription
+     * it belongs to (or none).
+     */
+    public function adminInventory(iterable $servers, iterable $services): array
+    {
+        $services = is_array($services) ? $services : iterator_to_array($services, false);
+        $backends = [];
+        foreach ($servers as $server) {
+            $ext = new static(ExtensionHelper::settingsToArray($server->settings));
+            $key = $ext->backendKey();
+            $backends[$key] ??= ['key' => $key, 'kind' => $ext->isSilo() ? 'silo' : 'wizarr', 'host' => rtrim((string) $ext->config('host'), '/'),
+                'paymenter' => [], 'server_id' => (int) $server->id, 'ext' => $ext];
+            $backends[$key]['paymenter'][(int) $server->id] = (string) $server->name;
+        }
+
+        $result = [];
+        foreach ($backends as $key => $backend) {
+            $ext = $backend['ext'];
+            unset($backend['ext']);
+            $started = microtime(true);
+            try {
+                $client = $ext->client();
+                $client->status();
+                $mediaServers = $client->servers();
+                $libraries = $client->libraries();
+                $users = $client->users();
+                $invitations = $client->invitations();
+                $backend += ['ok' => true, 'error' => '', 'ms' => (int) round(1000 * (microtime(true) - $started))];
+            } catch (Throwable $e) {
+                $result[] = $backend + ['ok' => false, 'error' => $e->getMessage(), 'ms' => null, 'servers' => [], 'libraries' => [], 'users' => [], 'invitations' => []];
+
+                continue;
+            }
+            $owners = $ext->adminOwners($services);
+            $perServer = [];
+            foreach ($users as $user) {
+                $perServer[(string) ($user['server'] ?? '')]['users'] = ($perServer[(string) ($user['server'] ?? '')]['users'] ?? 0) + 1;
+            }
+            foreach ($libraries as $library) {
+                $perServer[(string) ($library['server_name'] ?? '')]['libraries'] = ($perServer[(string) ($library['server_name'] ?? '')]['libraries'] ?? 0) + 1;
+            }
+            $backend['servers'] = array_map(fn ($server) => [
+                'id' => (int) $server['id'],
+                'name' => (string) ($server['name'] ?? ''),
+                'type' => strtolower((string) ($server['server_type'] ?? '')),
+                'verified' => !empty($server['verified']),
+                'url' => (string) ($server['external_url'] ?? ''),
+                'users' => $perServer[(string) ($server['name'] ?? '')]['users'] ?? 0,
+                'libraries' => $perServer[(string) ($server['name'] ?? '')]['libraries'] ?? 0,
+            ], $mediaServers);
+            $backend['libraries'] = array_map(fn ($library) => ['id' => (int) $library['id'], 'name' => (string) ($library['name'] ?? ''),
+                'server_id' => (int) ($library['server_id'] ?? 0), 'server' => (string) ($library['server_name'] ?? '')], $libraries);
+            $backend['users'] = array_map(fn ($user) => [
+                'id' => (int) $user['id'],
+                'username' => (string) ($user['username'] ?? ''),
+                'email' => (string) ($user['email'] ?? ''),
+                'server' => (string) ($user['server'] ?? ''),
+                'type' => strtolower((string) ($user['server_type'] ?? '')),
+                'created' => (string) ($user['created_at'] ?? ''),
+                'expires' => (string) ($user['expires'] ?? ''),
+                'disabled' => array_key_exists('is_disabled', $user) ? (bool) $user['is_disabled'] : (array_key_exists('enabled', $user) ? !$user['enabled'] : null),
+                'owner' => $owners['users'][(int) $user['id']] ?? null,
+            ], $users);
+            $backend['invitations'] = array_map(fn ($invitation) => [
+                'id' => (int) $invitation['id'],
+                'code' => (string) ($invitation['code'] ?? ''),
+                'status' => (string) ($invitation['status'] ?? ''),
+                'servers' => array_values(array_map('strval', (array) ($invitation['server_names'] ?? []))),
+                'expires' => (string) ($invitation['expires'] ?? ''),
+                'used_by' => (string) ($invitation['used_by'] ?? ''),
+                'owner' => $owners['invitations']['id:' . $invitation['id']] ?? $owners['invitations']['code:' . strtoupper((string) ($invitation['code'] ?? ''))] ?? null,
+            ], $invitations);
+            $result[] = $backend;
+        }
+
+        return $result;
+    }
+
+    /** Remembers that the link was used without a user, for the admin page's "Problems" filter. */
+    private function markLinkFailed(Service $service, array $properties): void
+    {
+        if (empty($properties[self::PROP_LINK_FAILED])) {
+            $this->setProperty($service, self::PROP_LINK_FAILED, 'Wizarr: link used, no user made', (string) time());
+        }
     }
 
     /** A trial that had ended is open again: users switched back on (or a new invitation on Plex). */
