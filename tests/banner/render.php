@@ -8,9 +8,13 @@
  */
 
 require __DIR__ . '/../shims.php';
-foreach (['WizarrException', 'WizarrClient', 'DiscordException', 'DiscordClient', 'Wizarr'] as $class) {
+foreach (['WizarrException', 'WizarrClient', 'DiscordException', 'DiscordClient', 'ShopGate', 'SeerrException', 'SeerrClient'] as $class) {
     require __DIR__ . '/../../extensions/Servers/Wizarr/' . $class . '.php';
 }
+foreach (glob(__DIR__ . '/../../extensions/Servers/Wizarr/Concerns/*.php') as $concern) {
+    require $concern;
+}
+require __DIR__ . '/../../extensions/Servers/Wizarr/Wizarr.php';
 
 $out = $argv[1] ?? __DIR__ . '/out';
 @mkdir($out, 0777, true);
