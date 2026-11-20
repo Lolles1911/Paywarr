@@ -3341,6 +3341,27 @@ test('admin: sync tells when the link was used but no user was made (a failed Pl
     same(true, ext()->adminSummary($service)['new_link'], 'allowed');
 });
 
+test('admin: sync of a known user that Wizarr no longer has says so, and marks nothing', function () {
+    $service = adminCustomer();
+    $service->properties()->updateOrCreate(['key' => 'wizarr_link_failed'], ['name' => 'x', 'value' => '1']); // marked by 1.24.0
+    $service->unsetRelation('properties');
+    ext()->adminDeleteInvitation((int) state()['invitations'][0]['id']);   // the used link is cleaned up in Wizarr
+    stub('/_test/set-user', ['id' => 1, 'username' => 'renamed']);       // and the user renamed there
+    tellsCustomer(fn () => ext()->adminSync($service), 'mette on Jellyfin is no longer in Wizarr', 'told');
+    same('1:mette:jellyfin', grantProp($service, 'wizarr_users'), 'the known user is kept');
+    ok(empty($service->propertyArray()['wizarr_link_failed']), 'not a failed link: the old mark is cleared');
+});
+
+test('sync: a user Wizarr re-imported with a new id is found again by name and server', function () {
+    $service = adminCustomer();
+    ext()->adminDeleteInvitation((int) state()['invitations'][0]['id']);
+    stub('/_test/set-user', ['id' => 1, 'username' => 'old-row']);                   // the old row is gone in effect
+    $new = stub('/_test/add-user', ['username' => 'mette', 'server_id' => 1]);         // re-imported with a new id
+    stub('/_test/add-user', ['username' => 'mette', 'server_id' => 2]);                // the same name on Plex is someone else
+    same(['mette'], ext()->adminSync($service), 'found');
+    same($new['id'] . ':mette:jellyfin', grantProp($service, 'wizarr_users'), 'the new id is stored');
+});
+
 test('admin: give trial days, extend, end now and reopen, restart; only on a trial', function () {
     $service = adminCustomer();
     $now = time();

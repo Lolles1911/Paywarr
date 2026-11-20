@@ -4934,10 +4934,24 @@ HTML;
         // Recorded users are only trusted when id AND username still match;
         // an id on its own may have been reused for someone else.
         foreach ($recorded as $known) {
+            $matched = false;
             foreach ($all as $user) {
                 if ((int) $user['id'] === $known['id'] && (string) $user['username'] === $known['username']) {
                     $found[$known['id']] = $this->userRow($user);
+                    $matched = true;
                 }
+            }
+            if ($matched) {
+                continue;
+            }
+            // Wizarr re-imported its users (new ids): the same name on the same
+            // server, if exactly one, is the same account there.
+            $server = $this->grant === '' ? null : $this->grantServerName();
+            $same = array_values(array_filter($all, fn ($user) => strcasecmp((string) $user['username'], $known['username']) === 0
+                && ($server === null || (string) ($user['server'] ?? '') === $server)
+                && ($known['type'] === '' || strtolower((string) ($user['server_type'] ?? '')) === $known['type'])));
+            if (count($same) === 1) {
+                $found[(int) $same[0]['id']] = $this->userRow($same[0]);
             }
         }
 
@@ -5105,15 +5119,21 @@ HTML;
         $properties = ExtensionHelper::getServiceProperties($service);
         $found = [];
         $spent = [];
+        $missing = [];
         foreach ($this->grantKeys($properties) as $grant) {
-            $this->withGrant($grant, function () use ($service, $properties, &$found, &$spent) {
+            $this->withGrant($grant, function () use ($service, $properties, &$found, &$spent, &$missing) {
                 $view = $this->grantView($properties);
+                $recorded = $this->parseUsers((string) ($view[self::PROP_USERS] ?? ''));
                 $invitation = $this->findInvitation($view);
                 $users = $this->resolveUsers($view, $invitation);
+                $server = $this->grantLabel($properties) ?: 'the media server';
                 if ($users) {
                     $this->rememberUsers($service, $users);
+                } elseif ($recorded) {
+                    // Known, but Wizarr no longer has that user (with that id and name): kept, and said so.
+                    $missing[] = implode(', ', array_column($recorded, 'username')) . ' on ' . $server;
                 } elseif (($invitation['status'] ?? '') === 'used') {
-                    $spent[] = $this->grantLabel($properties) ?: 'the media server';
+                    $spent[] = $server;
                     $this->markLinkFailed($service, $properties);
                 }
                 foreach ($users as $user) {
@@ -5121,11 +5141,17 @@ HTML;
                 }
             });
         }
+        if (!$spent && !empty($properties[self::PROP_LINK_FAILED])) {
+            $this->setProperty($service, self::PROP_LINK_FAILED, '', null); // marked before, not so now
+        }
         $this->processTrialQuietly($service);
         $status = (string) $service->status;
         $this->syncRolesQuietly($service, active: $status === 'active');
         $this->syncSeerrQuietly($service, $status === 'active' ? 'active' : ($status === 'suspended' ? 'suspended' : 'ended'));
         $this->forgetCustomerCaches($service);
+        if ($missing && !$found) {
+            throw new DisplayException('The user ' . implode('; ', $missing) . ' is no longer in Wizarr (deleted, or renamed or re-imported there). Check Wizarr\'s users; if it is gone, use "Reset user". Nothing was changed.');
+        }
         if ($spent && !$found) {
             throw new DisplayException('The link on ' . implode(', ', $spent) . ' was used, but no user was made (e.g. a Plex share that failed). Use "Allow a new link" or "New invitation".');
         }
