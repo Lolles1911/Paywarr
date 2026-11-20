@@ -3,6 +3,22 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.24.1 (2026-11-20)
+
+- **New: Re-invite missing users** (Paywarr → Customers: on top for everyone,
+  per customer under Access, and for the ones ticked). After a new media
+  server, or users deleted there, every active subscription whose user no
+  longer exists gets a new invitation, mailed to the customer. Users that
+  exist are left alone. A media server that is gone from Wizarr is dropped and
+  the product's media server takes its place; if the product still points to
+  the old one, nothing is changed and you're told to choose the new one first.
+- **Fixed:** "Sync now" took a known user that Wizarr no longer has for a link
+  used without a user (as after a failed Plex share), and marked the customer
+  as a problem. It now says the user is gone, changes nothing, and clears that
+  wrong mark.
+- A user Wizarr re-imported with a new ID is found again by its name on the
+  same server (when exactly one has that name).
+
 ## 1.24.0 (2026-11-20)
 
 - **New: a Paywarr group in admin.** Six pages:

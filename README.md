@@ -435,6 +435,7 @@ and not bought). The menu shows how many customers need a look.
 | Link an existing user | Gives the subscription a user that already exists, e.g. a friend's account from before |
 | Note | About the customer, for you only |
 | Reset user | Forgets the user and sends a new invitation; can delete the user on the media server too |
+| Re-invite missing users | Where the customer's user no longer exists (a new media server, a user deleted there), a new invitation; users that exist are left alone |
 
 **Subscription:** **Pause** switches the access off as when unpaid, without
 telling the customer, and keeps the paid time: Paymenter sends no invoice and
@@ -452,6 +453,12 @@ trial).
 Tick several customers for **Sync now**, **Allow a new link** or **New
 invitation** at once; **New links for expired ones** does that for every link
 that expired before a user was made.
+
+**After a new media server** (e.g. a new Jellyfin without the old users):
+check **Checks** first. If a product "uses a media server that is gone", the
+new server got a new ID in Wizarr: choose it on the product. Then press **Re-invite
+missing users** on top: every active customer whose user is gone gets a new
+invitation by mail, the others are left alone.
 
 Click a customer's name for their **card**: everything above for that customer,
 their requests, and **what was done here**: each action with who did it and
