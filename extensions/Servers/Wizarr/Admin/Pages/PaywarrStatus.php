@@ -35,6 +35,21 @@ class PaywarrStatus extends Page implements HasTable
 
     protected static ?string $slug = 'paywarr-status';
 
+    public static function getNavigationBadge(): ?string
+    {
+        return ($down = PaywarrInventory::downCount()) > 0 ? (string) $down : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'danger';
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Not answering the last time they were asked';
+    }
+
     public static function canAccess(): bool
     {
         return (bool) Auth::user()?->hasPermission('admin.servers.view');

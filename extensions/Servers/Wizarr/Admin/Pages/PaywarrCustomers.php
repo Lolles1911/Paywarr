@@ -4,8 +4,12 @@ namespace Paymenter\Extensions\Servers\Wizarr\Admin\Pages;
 
 use App\Exceptions\DisplayException;
 use App\Models\Service;
+use App\Models\User;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -13,7 +17,9 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\EmbeddedTable;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -22,7 +28,10 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Livewire\Attributes\Url;
 use Paymenter\Extensions\Servers\Wizarr\Admin\PaywarrInventory;
 use Paymenter\Extensions\Servers\Wizarr\Wizarr;
 use Throwable;
@@ -54,6 +63,68 @@ class PaywarrCustomers extends Page implements HasTable
     /** @var array<int, array> adminSummary() per subscription, for this request */
     private array $summaries = [];
 
+    /** The customer card: only this customer's subscriptions, with everything about them on top. */
+    #[Url]
+    public ?int $customer = null;
+
+    public function getTitle(): string
+    {
+        $user = $this->customer ? User::find($this->customer) : null;
+
+        return $user ? (trim($user->first_name . ' ' . $user->last_name) ?: $user->email) : 'Paywarr customers';
+    }
+
+    /** How many customers need a look: link used without a user, or left the Discord. */
+    public static function getNavigationBadge(): ?string
+    {
+        return ($count = self::problemCount()) > 0 ? (string) $count : null;
+    }
+
+    /** Subscriptions whose link was used without a user, or whose customer left the Discord (kept 5 minutes). */
+    public static function problemCount(): int
+    {
+        return (int) Cache::remember('paywarr:admin:problems', 300, fn () => Service::query()
+            ->whereIn('status', ['active', 'suspended'])
+            ->whereHas('properties', fn (Builder $p) => $p->whereIn('key', [Wizarr::PROP_LINK_FAILED, Wizarr::PROP_DISCORD_LEFT]))
+            ->count());
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Customers to look at: a link used without a user, or left the Discord';
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('back')->label('All customers')->icon('ri-arrow-left-line')->color('gray')
+                ->visible(fn () => $this->customer !== null)->url(fn () => static::getUrl()),
+            Action::make('renewExpired')->label('New links for expired ones')->icon('ri-mail-send-line')->color('gray')
+                ->visible(fn () => $this->customer === null && self::canChange())
+                ->requiresConfirmation()
+                ->modalDescription('Every active subscription whose link expired before a user was made gets a new invitation, mailed to the customer.')
+                ->action(function () {
+                    $done = [];
+                    foreach ($this->problemQuery(Service::query(), 'expired')->where('status', 'active')->with(['user', 'product.server', 'product.settings', 'properties'])->get() as $service) {
+                        try {
+                            (new Wizarr([]))->forService($service)->adminNewInvitation($service, true);
+                            Wizarr::logAdmin($service->user, $service->id, 'New invitation (expired link, all at once)', (string) Auth::user()?->email);
+                            $done[] = '#' . $service->id;
+                        } catch (Throwable $e) {
+                            report($e);
+                        }
+                    }
+                    PaywarrInventory::forget();
+                    Notification::make()->title(count($done) . ' new link(s) sent')->body($done ? implode(', ', $done) : null)->success()->send();
+                }),
+        ];
+    }
+
     public static function canAccess(): bool
     {
         return (bool) Auth::user()?->hasPermission('admin.services.view');
@@ -66,7 +137,62 @@ class PaywarrCustomers extends Page implements HasTable
 
     public function content(Schema $schema): Schema
     {
-        return $schema->components([EmbeddedTable::make()]);
+        return $schema->components([...$this->card(), EmbeddedTable::make()]);
+    }
+
+    /** The customer card: who, Discord, note, requests, and what was done. */
+    private function card(): array
+    {
+        $user = $this->customer ? User::with('properties')->find($this->customer) : null;
+        if (!$user) {
+            return [];
+        }
+        $props = $user->properties->pluck('value', 'key');
+        $services = Service::where('user_id', $user->id)
+            ->whereHas('product.server', fn (Builder $query) => $query->where('extension', 'Wizarr'))
+            ->with(['product.server', 'product.settings', 'properties'])->get();
+        $requests = [];
+        try {
+            $wizarr = new Wizarr([]);
+            foreach ($wizarr->requestsSources($user, $services) as $source) {
+                $quota = $wizarr->requestQuotaOf($source);
+                if ($quota !== null) {
+                    $requests[] = $source['label'] . ': ' . (!empty($quota['unlimited']) ? 'no limit' : implode(', ', array_map(fn ($part) => $part['used'] . ' of ' . $part['limit'] . ' ' . $part['label'], $quota['parts'])));
+                }
+            }
+        } catch (Throwable $e) {
+            $requests[] = 'Can\'t be read right now';
+        }
+        $log = array_map(fn ($entry) => date('M j, Y H:i', (int) $entry['at']) . ' · ' . ($entry['service'] ? '#' . $entry['service'] . ' · ' : '') . $entry['what'] . ($entry['by'] !== '' ? ' (' . $entry['by'] . ')' : ''),
+            json_decode((string) ($props[Wizarr::PROP_LOG] ?? '[]'), true) ?: []);
+
+        return [Section::make('Customer')->columns(4)->schema([
+            TextEntry::make('email')->label('Email')->state($user->email),
+            TextEntry::make('discord')->label('Discord')->state(($props['discord_username'] ?? '') !== '' ? $props['discord_username'] . ' (' . ($props['discord_id'] ?? '') . ')' : 'Not connected'),
+            TextEntry::make('since')->label('Customer since')->state($user->created_at?->format('M j, Y') ?? '—'),
+            TextEntry::make('subscriptions')->label('Paywarr subscriptions')->state($services->count() . ' (' . $services->where('status', 'active')->count() . ' active)'),
+            TextEntry::make('requests')->label('Requests')->state($requests ?: ['None'])->listWithLineBreaks(),
+            TextEntry::make('note')->label('Note')->state((string) ($props[Wizarr::PROP_NOTE] ?? '') ?: '—')->columnSpan(3),
+            TextEntry::make('log')->label('What was done here')->state($log ?: ['Nothing yet'])->listWithLineBreaks()->columnSpanFull(),
+        ])];
+    }
+
+    /** Subscriptions with a problem: failed, expired, new_link, discord_left or trial_over. */
+    private function problemQuery(Builder $query, ?string $problem): Builder
+    {
+        return match ($problem) {
+            'failed' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_LINK_FAILED)),
+            'expired' => $query
+                ->whereHas('properties', fn (Builder $p) => $p->where('key', 'like', 'wizarr_invite_expires%')->where('value', '<', now()->utc()->format('Y-m-d\\TH:i:s')))
+                ->whereDoesntHave('properties', fn (Builder $p) => $p->where('key', 'like', 'wizarr_users%')->where('value', '!=', '')),
+            'new_link' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_NEW_LINK)),
+            'discord_left' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_DISCORD_LEFT)),
+            'paused' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_PAUSED)),
+            'trial_over' => $query->where('status', 'cancelled')
+                ->whereHas('properties', fn (Builder $p) => $p->where('key', 'trial_ended_at'))
+                ->whereDoesntHave('properties', fn (Builder $p) => $p->where('key', 'trial_converted_to')),
+            default => $query,
+        };
     }
 
     public function table(Table $table): Table
@@ -74,11 +200,14 @@ class PaywarrCustomers extends Page implements HasTable
         return $table
             ->query(fn () => Service::query()
                 ->whereHas('product.server', fn (Builder $query) => $query->where('extension', 'Wizarr'))
+                ->when($this->customer, fn (Builder $query) => $query->where('user_id', $this->customer))
                 ->with(['user.properties', 'product.server', 'product.settings', 'properties']))
             ->columns([
                 TextColumn::make('user.email')
                     ->label('Customer')
                     ->formatStateUsing(fn (Service $record) => trim(($record->user->first_name ?? '') . ' ' . ($record->user->last_name ?? '')) ?: $record->user->email)
+                    ->url(fn (Service $record) => static::getUrl(['customer' => $record->user_id]))
+                    ->color('primary')
                     ->description(fn (Service $record) => $record->user->email . (($discord = $this->summary($record)['discord']) !== '' ? ' · Discord: ' . $discord : '')
                         . (($note = $this->note($record)) !== '' ? ' · Note: ' . mb_strimwidth($note, 0, 60, '…') : ''))
                     ->searchable(query: fn (Builder $query, string $search) => $query->whereHas('user', fn (Builder $user) => $user
@@ -120,20 +249,10 @@ class PaywarrCustomers extends Page implements HasTable
                         'expired' => 'Link expired, no user',
                         'new_link' => 'May get a new link',
                         'discord_left' => 'Left the Discord',
+                        'paused' => 'Paused',
                         'trial_over' => 'Trial ended, not bought',
                     ])
-                    ->query(fn (Builder $query, array $data) => match ($data['value'] ?? null) {
-                        'failed' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_LINK_FAILED)),
-                        'expired' => $query
-                            ->whereHas('properties', fn (Builder $p) => $p->where('key', 'like', 'wizarr_invite_expires%')->where('value', '<', now()->utc()->format('Y-m-d\TH:i:s')))
-                            ->whereDoesntHave('properties', fn (Builder $p) => $p->where('key', 'like', 'wizarr_users%')->where('value', '!=', '')),
-                        'new_link' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_NEW_LINK)),
-                        'discord_left' => $query->whereHas('properties', fn (Builder $p) => $p->where('key', Wizarr::PROP_DISCORD_LEFT)),
-                        'trial_over' => $query->where('status', 'cancelled')
-                            ->whereHas('properties', fn (Builder $p) => $p->where('key', 'trial_ended_at'))
-                            ->whereDoesntHave('properties', fn (Builder $p) => $p->where('key', 'trial_converted_to')),
-                        default => $query,
-                    }),
+                    ->query(fn (Builder $query, array $data) => $this->problemQuery($query, $data['value'] ?? null)),
                 TernaryFilter::make('no_user')
                     ->label('Without a user')
                     ->queries(
@@ -186,6 +305,41 @@ class PaywarrCustomers extends Page implements HasTable
 
                             return 'Reset. New link: ' . implode(', ', $links);
                         })),
+                    $this->action('passwordReset', 'Password reset link', 'ri-lock-password-line', confirm: false)
+                        ->modalDescription('A link where the customer chooses a new password on Jellyfin, Emby or Silo. Plex users use their own Plex account.')
+                        ->schema([Toggle::make('mail')->label('Email the link to the customer')->default(true)])
+                        ->action(fn (Service $record, array $data) => $this->run($record, function (Wizarr $wizarr) use ($record, $data) {
+                            $links = $wizarr->adminPasswordReset($record, (bool) $data['mail']);
+
+                            return 'Password link: ' . implode(', ', array_map(fn ($server, $url) => $server . ' ' . $url, array_keys($links), $links));
+                        })),
+                    $this->action('changeServers', 'Change media server', 'ri-swap-line', confirm: false)
+                        ->visible(fn (Service $record) => ($b = PaywarrInventory::backendFor((int) ($record->product->server->id ?? 0))) !== null && $b['kind'] === 'wizarr' && $b['ok'])
+                        ->modalDescription('E.g. from Jellyfin to Plex. New servers get an invitation (mailed); the user on servers taken away is removed, as at an upgrade.')
+                        ->fillForm(fn (Service $record) => ['servers' => array_map('strval', $this->summary($record)['servers'])])
+                        ->schema(fn (Service $record) => [
+                            CheckboxList::make('servers')->label('Media servers')->required()
+                                ->options(collect(PaywarrInventory::backendFor((int) $record->product->server->id)['servers'] ?? [])
+                                    ->filter(fn ($s) => $s['verified'])->mapWithKeys(fn ($s) => [(string) $s['id'] => $s['name'] . ' (' . ucfirst($s['type']) . ')'])->all()),
+                        ])
+                        ->action(fn (Service $record, array $data) => $this->run($record, function (Wizarr $wizarr) use ($record, $data) {
+                            $wizarr->adminChangeServers($record, $data['servers']);
+
+                            return 'Media servers changed.';
+                        })),
+                    $this->action('libraries', 'Libraries for this customer', 'ri-film-line', confirm: false)
+                        ->modalDescription('Used for the customer\'s next invitation instead of the product\'s. Wizarr can\'t change the libraries of a user that exists; use "Reset user" or "New invitation" to apply them.')
+                        ->fillForm(fn (Service $record) => ['libraries' => array_map('strval', $this->summary($record)['libraries'])])
+                        ->schema(fn (Service $record) => [
+                            CheckboxList::make('libraries')->label('Libraries')->columns(2)->helperText('None chosen: the product\'s libraries.')
+                                ->options(collect(PaywarrInventory::backendFor((int) ($record->product->server->id ?? 0))['libraries'] ?? [])
+                                    ->mapWithKeys(fn ($l) => [(string) $l['id'] => $l['name'] . ($l['server'] !== '' ? ' · ' . $l['server'] : '')])->all()),
+                        ])
+                        ->action(fn (Service $record, array $data) => $this->run($record, function (Wizarr $wizarr) use ($record, $data) {
+                            $wizarr->adminSetLibraries($record, $data['libraries'] ?? []);
+
+                            return ($data['libraries'] ?? []) ? 'Own libraries saved for the next invitation.' : 'Back to the product\'s libraries.';
+                        })),
                     $this->action('linkUser', 'Link an existing user', 'ri-user-shared-line', confirm: false)
                         ->modalDescription('Gives the subscription a user that already exists on the media server (e.g. an account from before), instead of an invitation.')
                         ->schema(fn (Service $record) => [
@@ -204,6 +358,25 @@ class PaywarrCustomers extends Page implements HasTable
                             Notification::make()->title('Note saved')->success()->send();
                         }),
                 ])->label('Access')->tooltip('Access: invitation, new link, sync, reset')->icon('ri-key-2-line'),
+                ActionGroup::make([
+                    $this->action('pause', 'Pause', 'ri-pause-circle-line', confirm: false)
+                        ->visible(fn (Service $record) => $record->status === 'active' && !$this->summary($record)['paused'])
+                        ->modalDescription('The access is switched off as when unpaid, without telling the customer, and the paid time left is kept. Paymenter sends no invoice while paused. A card or PayPal subscription at the payment provider keeps charging: pause it there too. On Plex the share is removed, and the customer gets a new invitation when it resumes.')
+                        ->schema([DateTimePicker::make('until')->label('Resume by itself on')->seconds(false)->helperText('Empty: until you resume it.')])
+                        ->action(fn (Service $record, array $data) => $this->run($record, function (Wizarr $wizarr) use ($record, $data) {
+                            $wizarr->adminPause($record, $data['until'] ? strtotime($data['until']) : null);
+
+                            return 'Paused' . ($data['until'] ? ' until ' . date('M j, Y H:i', strtotime($data['until'])) : '') . '.';
+                        })),
+                    $this->action('resume', 'Resume', 'ri-play-circle-line')
+                        ->visible(fn (Service $record) => (bool) $this->summary($record)['paused'])
+                        ->modalDescription('The access is switched on again, with the paid time that was left.')
+                        ->action(fn (Service $record) => $this->run($record, function (Wizarr $wizarr) use ($record) {
+                            $wizarr->adminResume($record);
+
+                            return 'Resumed.';
+                        })),
+                ])->label('Subscription')->tooltip('Subscription: pause, resume')->icon('ri-calendar-pause-line'),
                 ActionGroup::make([
                     $this->action('setTrial', 'Set start and end', 'ri-calendar-event-line', confirm: false)
                         ->visible(fn (Service $record) => $this->summary($record)['trial'] !== null)
@@ -247,7 +420,37 @@ class PaywarrCustomers extends Page implements HasTable
                         ->schema([TextInput::make('days')->label('Days')->integer()->minValue(1)->default(7)->required()])
                         ->action(fn (Service $record, array $data) => $this->run($record, fn (Wizarr $wizarr) => $this->trialResult($wizarr->adminGiveTrialDays($record, (int) $data['days'])))),
                 ])->label('Trial')->tooltip('Trial: dates, extend, start over, end, give days')->icon('ri-timer-line'),
+            ])
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    $this->bulk('bulkSync', 'Sync now', 'ri-refresh-line', fn (Wizarr $wizarr, Service $service) => $wizarr->adminSync($service)),
+                    $this->bulk('bulkNewLink', 'Allow a new link', 'ri-link', fn (Wizarr $wizarr, Service $service) => $wizarr->adminAllowNewLink($service)),
+                    $this->bulk('bulkInvite', 'New invitation (mailed)', 'ri-mail-send-line', fn (Wizarr $wizarr, Service $service) => $wizarr->adminNewInvitation($service, true)),
+                ])->visible(fn () => self::canChange()),
             ]);
+    }
+
+    /** The same action on every selected subscription; tells which worked. */
+    private function bulk(string $name, string $label, string $icon, callable $fn): BulkAction
+    {
+        return BulkAction::make($name)->label($label)->icon($icon)->requiresConfirmation()
+            ->action(function (Collection $records) use ($label, $fn) {
+                $done = [];
+                $failed = [];
+                foreach ($records as $record) {
+                    try {
+                        $fn((new Wizarr([]))->forService($record), $record);
+                        Wizarr::logAdmin($record->user, $record->id, $label . ' (several at once)', (string) Auth::user()?->email);
+                        $done[] = '#' . $record->id;
+                    } catch (Throwable $e) {
+                        $failed[] = '#' . $record->id . ': ' . $e->getMessage();
+                    }
+                }
+                PaywarrInventory::forget();
+                Cache::forget('paywarr:admin:problems');
+                Notification::make()->title(count($done) . ' done' . ($failed ? ', ' . count($failed) . ' not' : ''))->body($failed ? implode("\n", $failed) : null)->{$failed ? 'warning' : 'success'}()->send();
+            })
+            ->deselectRecordsAfterCompletion();
     }
 
     /** An action that changes something: staff who may edit services only, confirmed first unless $confirm is false. */
@@ -264,6 +467,7 @@ class PaywarrCustomers extends Page implements HasTable
         try {
             $message = $fn((new Wizarr([]))->forService($record));
             Notification::make()->title('Done')->body($message)->success()->send();
+            Wizarr::logAdmin($record->user, $record->id, $message, (string) Auth::user()?->email);
         } catch (DisplayException $e) {
             Notification::make()->title('Not done')->body($e->getMessage())->warning()->send();
         } catch (Throwable $e) {
@@ -272,6 +476,7 @@ class PaywarrCustomers extends Page implements HasTable
         }
         unset($this->summaries[$record->id]);
         PaywarrInventory::forget();
+        Cache::forget('paywarr:admin:problems');
     }
 
     private function note(Service $record): string
@@ -316,6 +521,12 @@ class PaywarrCustomers extends Page implements HasTable
         }
         if ($summary['new_link']) {
             $lines[] = 'May get a new link';
+        }
+        if ($summary['paused']) {
+            $lines[] = 'Paused' . ($summary['paused']['until'] ? ' until ' . date('M j, Y', $summary['paused']['until']) : '');
+        }
+        if ($summary['libraries']) {
+            $lines[] = 'Own libraries for the next invitation';
         }
         if ($summary['discord_left']) {
             $lines[] = 'Left the Discord ' . date('M j, H:i', $summary['discord_left']);

@@ -593,6 +593,15 @@ class Wizarr extends Server
         require __DIR__ . '/routes.php';
         View::addNamespace('wizarr', __DIR__ . '/resources/views');
 
+        // A line on top of the admin dashboard when customers or servers need a look.
+        if (class_exists(\Filament\Support\Facades\FilamentView::class) && class_exists(\App\Admin\Pages\Dashboard::class)) {
+            \Filament\Support\Facades\FilamentView::registerRenderHook(
+                \Filament\View\PanelsRenderHook::PAGE_START,
+                fn () => $this->dashboardNotice(),
+                scopes: \App\Admin\Pages\Dashboard::class,
+            );
+        }
+
         // Checkout creates the services inside a database transaction; an
         // exception here rolls the whole order back and Paymenter shows a
         // DisplayException's message to the customer.
@@ -5028,6 +5037,9 @@ HTML;
                 'forgiven' => !empty($properties[self::PROP_TRIAL_FORGIVEN]),
             ] : null,
             'new_link' => !empty($properties[self::PROP_NEW_LINK]),
+            'paused' => !empty($properties[self::PROP_PAUSED]) ? ['since' => (int) $properties[self::PROP_PAUSED], 'until' => (int) ($properties[self::PROP_PAUSED_UNTIL] ?? 0) ?: null] : null,
+            'libraries' => $this->idList((string) ($properties[self::PROP_LIBRARIES] ?? '')),
+            'servers' => $this->idList((string) ($properties[self::PROP_SERVERS] ?? '')) ?: array_map('intval', array_filter($this->grantKeys($properties))),
             'discord' => $service->user ? (string) ($this->propertyValue($service->user, self::PROP_DISCORD_NAME) ?? '') : '',
             'discord_id' => $service->user ? (string) ($this->propertyValue($service->user, self::PROP_DISCORD_ID) ?? '') : '',
             'discord_left' => (int) ($properties[self::PROP_DISCORD_LEFT] ?? 0) ?: null,
@@ -5432,6 +5444,30 @@ HTML;
         }
 
         return $result;
+    }
+
+    /** The admin dashboard's Paywarr line: problems and servers not answering, with links. Empty when all is well. */
+    public function dashboardNotice(): HtmlString|string
+    {
+        try {
+            $problems = Admin\Pages\PaywarrCustomers::problemCount();
+            $down = Admin\PaywarrInventory::downCount();
+        } catch (Throwable $e) {
+            return '';
+        }
+        if ($problems === 0 && $down === 0) {
+            return '';
+        }
+        $parts = [];
+        if ($down > 0) {
+            $parts[] = '<a href="' . e(url('admin/paywarr-status')) . '" style="font-weight:600;text-decoration:underline">' . $down . ' Wizarr/Silo not answering</a>';
+        }
+        if ($problems > 0) {
+            $parts[] = '<a href="' . e(url('admin/paywarr-customers')) . '" style="font-weight:600;text-decoration:underline">' . $problems . ' customer(s) to look at</a>';
+        }
+
+        return new HtmlString('<div style="margin-bottom:1rem;padding:.75rem 1rem;border-radius:.75rem;border:1px solid rgb(245 158 11 / .5);background:rgb(245 158 11 / .1);font-size:.875rem">'
+            . '<strong>Paywarr:</strong> ' . implode(' · ', $parts) . ' · <a href="' . e(url('admin/paywarr-checks')) . '" style="text-decoration:underline">Checks</a></div>');
     }
 
     /** Remembers that the link was used without a user, for the admin page's "Problems" filter. */

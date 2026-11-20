@@ -19,10 +19,28 @@ class PaywarrInventory
     /** @return array<int, array> one entry per Wizarr or Silo */
     public static function get(): array
     {
-        return Cache::remember(self::KEY, 60, fn () => (new Wizarr([]))->adminInventory(
+        $inventory = Cache::remember(self::KEY, 60, fn () => (new Wizarr([]))->adminInventory(
             Server::where('extension', 'Wizarr')->with('settings')->get(),
             self::services(),
         ));
+        // For the menu badge and the dashboard, which never ask themselves.
+        Cache::put(self::KEY . ':down', count(array_filter($inventory, fn ($backend) => !$backend['ok'])), 3600);
+
+        return $inventory;
+    }
+
+    /** What was asked last, without asking again (null: nothing kept). */
+    public static function cached(): ?array
+    {
+        $value = Cache::get(self::KEY);
+
+        return is_array($value) ? $value : null;
+    }
+
+    /** How many Wizarr or Silo did not answer the last time a Paywarr page asked (kept an hour). */
+    public static function downCount(): int
+    {
+        return (int) Cache::get(self::KEY . ':down', 0);
     }
 
     /** After a change: the next view asks again. */
