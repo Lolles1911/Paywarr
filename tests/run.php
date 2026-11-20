@@ -3587,6 +3587,108 @@ test('admin: the health check finds what is wrong in the setup', function () {
     ok(str_contains(ext()->adminHealth($down, [], [], [])[0]['what'], 'does not answer'), 'a Wizarr that does not answer');
 });
 
+/* ---------- welcome mail, gift cards, reminders, queue ---------- */
+
+function mailsTo(string $email): array
+{
+    return array_values(array_filter(\Illuminate\Support\Facades\Mail::$sent, fn ($m) => $m['to'] === $email));
+}
+
+test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $service = wizarrService(60);
+    $service->product->name = 'Jellyfin Plus';
+    $welcome = ext(['welcome_mail' => '1', 'welcome_text' => "Velkommen til familien!\nHusk at hygge.", 'discord_invite_url' => 'https://discord.gg/waffle']);
+    $data = $welcome->createServer($service, settings(), []);
+    [$mail] = mailsTo('customer60@example.com');
+    same('Welcome to Jellyfin Plus', $mail['subject'], 'subject');
+    foreach ([$data['invite_url'], 'Create your user on Jellyfin', 'Velkommen til familien!<br />', 'jellyfin.org/downloads/clients', 'https://discord.gg/waffle', 'Getting started', 'jellyfin.example.com'] as $needle) {
+        ok(str_contains($mail['html'], $needle), 'has ' . $needle);
+    }
+    \App\Helpers\NotificationHelper::$sent = [];
+    $welcome->adminNewInvitation($service, true);
+    same(['Your new link for Jellyfin Plus'], array_column(array_slice(mailsTo('customer60@example.com'), 1), 'subject'), 'a new link: Paywarr\'s mail');
+    same([], \App\Helpers\NotificationHelper::$sent, 'not Paymenter\'s');
+
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    ext()->createServer(wizarrService(61), settings(), []);
+    same([], mailsTo('customer61@example.com'), 'off: no welcome mail (Paymenter sends its own)');
+});
+
+test('gift card: a one-time code worth what was paid, the client area, sending it to a friend', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $service = wizarrService(62);
+    $service->price = 147.0;
+    $service->product->settings = ['gift_months' => '3'];
+    $made = [];
+    $data = ext()->createGift($service, $service->product->settings, function (array $coupon, array $products) use (&$made) { $made[] = $coupon; return 501; });
+    ok(preg_match('/^GIFT-[A-Z0-9]{4}-[A-Z0-9]{4}$/', $data['gift_code']) === 1, 'a code: ' . $data['gift_code']);
+    same(['fixed', 49.0, 3, 1, 1, 'price'], [$made[0]['type'], $made[0]['value'], $made[0]['recurring'], $made[0]['max_uses'], $made[0]['max_uses_per_user'], $made[0]['applies_to']], '49 off three periods, once');
+    same([], state()['invitations'], 'no invitation');
+    ok(str_contains(mailsTo('customer62@example.com')[0]['html'] ?? '', $data['gift_code']), 'the buyer gets the code');
+    same($data, ext()->createGift($service, $service->product->settings, fn () => throw new RuntimeException('twice')), 'run again: the same code');
+
+    same(['text:Gift code=' . $data['gift_code'], 'button:Send it to a friend'], array_values(array_filter(labels(ext()->getActions($service, $service->product->settings, $service->propertyArray())), fn ($l) => !str_starts_with($l, 'text:Status'))), 'client area');
+    ext()->sendGift($service, 'friend@example.com', 'Ole', 'Glædelig jul!');
+    [$friend] = mailsTo('friend@example.com');
+    ok(str_contains($friend['subject'], 'gave you a gift') && str_contains($friend['html'], $data['gift_code']) && str_contains($friend['html'], 'Glædelig jul!') && str_contains($friend['html'], 'Hi Ole,'), 'the friend gets code, message and how');
+    same('friend@example.com', $service->propertyArray()['gift_sent_to'] ?? null, 'noted');
+    tellsCustomer(fn () => ext()->sendGift($service, 'not-an-email'), 'doesn\'t look right', 'a bad address');
+    same(null, ext()->bannerState($service, $service->propertyArray()), 'no access box for a gift card');
+});
+
+test('reminders: trial ending, unused link, renewal with an unpaid invoice; each once, by mail and Discord, only when switched on', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $on = ['remind_trial' => '1', 'remind_link' => '1', 'remind_renewal' => '1'] + discordSettings();
+    $now = time();
+    $trial = adminCustomer(true, ['trial_days' => '7']);
+    $trial->product->server->settings = $on;
+    $trial->user->properties()->updateOrCreate(['key' => 'discord_id'], ['name' => 'Discord ID', 'value' => '4242']);
+    $trial->properties()->updateOrCreate(['key' => 'trial_ends_at'], ['name' => 'x', 'value' => date(DATE_ATOM, $now + 86400)]);
+    $trial->unsetRelation('properties');
+    $none = fn () => null;
+    same([1 => ['trial']], ext($on)->sendReminders([$trial], $now, $none), 'trial ends tomorrow');
+    same('Your trial ends soon', mailsTo('customer1@example.com')[0]['subject'] ?? null, 'mailed');
+    ok(str_contains(end(state()['discord']['dms'])['content'] ?? '', 'Your trial ends soon'), 'and a Discord message');
+    same([], ext($on)->sendReminders([$trial], $now + 3600, $none), 'once');
+
+    $link = wizarrService(63, $on);
+    ext()->createServer($link, settings(), []);
+    same([], ext($on)->sendReminders([$link], $now, $none), 'a new link: not yet');
+    same([63 => ['link']], ext($on)->sendReminders([$link], $now + 2 * 86400 + 60, $none), 'unused after two days');
+    ok(str_contains(mailsTo('customer63@example.com')[0]['html'] ?? '', grantProp($link, 'wizarr_invite_url')), 'with the link');
+
+    $paid = adminCustomer();
+    $paid->product->server->settings = $on;
+    $paid->expires_at = date('Y-m-d H:i:s', $now + 2 * 86400);
+    same([], ext($on)->sendReminders([$paid], $now, $none), 'nothing unpaid: no reminder');
+    same([1 => ['renewal']], ext($on)->sendReminders([$paid], $now, fn () => (object) ['id' => 9]), 'renews in two days, invoice unpaid');
+    $paid->subscription_id = 'sub_123';
+    $paid->properties()->where('key', 'reminded_renewal')->delete();
+    $paid->unsetRelation('properties');
+    same([], ext($on)->sendReminders([$paid], $now, fn () => (object) ['id' => 9]), 'paid automatically: no reminder');
+
+    $off = adminCustomer(true, ['trial_days' => '7']);
+    $off->properties()->updateOrCreate(['key' => 'trial_ends_at'], ['name' => 'x', 'value' => date(DATE_ATOM, $now + 86400)]);
+    $off->unsetRelation('properties');
+    same([], ext()->sendReminders([$off], $now, $none), 'switched off: nothing');
+});
+
+test('queue watch: a job sent and not run for 15 minutes means Paymenter\'s queue stands still', function () {
+    \Illuminate\Support\Facades\Cache::$store = [];
+    $w = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    same(null, $w::queueStuckSince(), 'nothing sent yet');
+    \Illuminate\Support\Facades\Cache::put('paywarr:queue:sent', time() - 1200, 3600);
+    same(time() - 1200, $w::queueStuckSince(), 'sent 20 minutes ago, never ran');
+    \Illuminate\Support\Facades\Cache::put('paywarr:queue:ran', time() - 1100, 3600);
+    same(null, $w::queueStuckSince(), 'it ran');
+    \Illuminate\Support\Facades\Cache::put('paywarr:queue:sent', time() - 300, 3600);
+    same(null, $w::queueStuckSince(), 'sent 5 minutes ago: give it time');
+    \Illuminate\Support\Facades\Cache::put('paywarr:queue:sent', time() - 1200, 3600);
+    \Illuminate\Support\Facades\Cache::put('paywarr:queue:ran', 0, 3600);
+    ok(str_contains(implode(' ', array_column(ext()->adminHealth([], [], [], []), 'what')), 'queue stands still'), 'Checks says so');
+});
+
 /* ---------- summary ---------- */
 
 echo "\n" . $results['pass'] . ' passed, ' . count($results['fail']) . " failed\n";

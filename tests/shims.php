@@ -647,6 +647,44 @@ namespace Illuminate\Foundation {
 }
 
 namespace Illuminate\Support\Facades {
+    /** Mail::html(), recording what would be sent. */
+    class Mail
+    {
+        /** @var array<int, array{to: string, subject: string, html: string}> */
+        public static array $sent = [];
+
+        public static bool $fail = false;
+
+        public static function html(string $html, callable $callback): void
+        {
+            if (self::$fail) {
+                throw new \RuntimeException('SMTP is down');
+            }
+            $message = new class
+            {
+                public string $to = '';
+
+                public string $subject = '';
+
+                public function to($to): static
+                {
+                    $this->to = (string) $to;
+
+                    return $this;
+                }
+
+                public function subject($subject): static
+                {
+                    $this->subject = (string) $subject;
+
+                    return $this;
+                }
+            };
+            $callback($message);
+            self::$sent[] = ['to' => $message->to, 'subject' => $message->subject, 'html' => $html];
+        }
+    }
+
     class Event
     {
         public static array $listeners = [];
@@ -775,6 +813,21 @@ namespace Illuminate\Support\Facades {
 }
 
 namespace {
+    if (!function_exists('e')) {
+        /** Laravel's e(): escapes for HTML. */
+        function e($value): string
+        {
+            return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+        }
+    }
+
+    if (!function_exists('url')) {
+        function url($path = ''): string
+        {
+            return 'https://pay.example.com/' . ltrim((string) $path, '/');
+        }
+    }
+
     function app($abstract = null)
     {
         // Laravel always has an application; create one the first time.

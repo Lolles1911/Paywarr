@@ -9,7 +9,6 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\HtmlString;
-use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -46,7 +45,7 @@ trait Gifts
         $code = (string) ($properties[self::PROP_GIFT_CODE] ?? '');
         if ($code === '') {
             $months = max(1, (int) $settings['gift_months']);
-            $code = 'GIFT-' . strtoupper(Str::random(4) . '-' . Str::random(4));
+            $code = 'GIFT-' . $this->giftChars(4) . '-' . $this->giftChars(4);
             $paid = (float) ($service->price ?? 0) * max(1, (int) ($service->quantity ?? 1));
             $expires = time() + 365 * 86400;
             $makeCoupon ??= fn (array $coupon, array $products) => $this->makeCoupon($coupon, $products);
@@ -187,6 +186,18 @@ trait Gifts
         Log::info('Wizarr: gift code of service ' . $service->id . ' sent to a friend.');
     }
 
+    /** Letters and digits that can't be mistaken for each other (no 0/O, 1/I/L). */
+    private function giftChars(int $n): string
+    {
+        $alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+        $out = '';
+        for ($i = 0; $i < $n; $i++) {
+            $out .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+
+        return $out;
+    }
+
     private function giftUsed(array $properties): bool
     {
         $id = (int) ($properties[self::PROP_GIFT_COUPON] ?? 0);
@@ -211,11 +222,15 @@ trait Gifts
     private function giftableProductIds(): array
     {
         $ids = [];
-        foreach (\App\Models\Product::whereHas('server', fn ($q) => $q->where('extension', 'Wizarr'))->with('settings')->get() as $product) {
-            $settings = ExtensionHelper::settingsToArray($product->settings);
-            if (!$this->isTrial($settings) && !$this->isTopUp($settings) && !$this->isGift($settings)) {
-                $ids[] = (int) $product->id;
+        try {
+            foreach (\App\Models\Product::whereHas('server', fn ($q) => $q->where('extension', 'Wizarr'))->with('settings')->get() as $product) {
+                $settings = ExtensionHelper::settingsToArray($product->settings);
+                if (!$this->isTrial($settings) && !$this->isTopUp($settings) && !$this->isGift($settings)) {
+                    $ids[] = (int) $product->id;
+                }
             }
+        } catch (Throwable $e) {
+            Log::warning('Wizarr: the products a gift code works on could not be read: ' . $e->getMessage());
         }
 
         return $ids;
