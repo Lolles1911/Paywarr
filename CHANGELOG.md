@@ -3,6 +3,29 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.25.0 (2026-11-20)
+
+- **New: Paywarr's own welcome mail** (Wizarr server: "Send Paywarr's welcome
+  mail"). The link(s) to create the user, three steps to get going, where to
+  get the apps for Jellyfin, Emby, Plex or Silo, your Discord and your own
+  words. A new link for an existing subscription is mailed the same way, as
+  "Your new link". Switch off Paymenter's "Service activated" mail when you
+  use it, or customers get two.
+- **New: gift cards.** Set "Gift card: months" on a product. The buyer gets a
+  one-time code worth what they paid, and can send it to a friend with a
+  greeting from their subscription. The code works once within a year, and is
+  an ordinary Paymenter coupon.
+- **New: reminders**, by mail and a private message from the Discord bot, each
+  sent once and switched on per Wizarr server: the trial ends in two days, the
+  user isn't made two days after the link was sent, and the subscription
+  renews in three days with the invoice unpaid.
+- **New: a watch on Paymenter's queue.** When it stands still for more than a
+  quarter of an hour (so no mails go out), Checks and the dashboard say so.
+- **Fixed in Checks:** a gift card product was flagged as having no media
+  server, and Discord with only the invite link was called half set up.
+- The code is split into one file per topic, and the README is short; the
+  rest is in `docs/`, one page per topic.
+
 ## 1.24.1 (2026-11-20)
 
 - **New: Re-invite missing users** (Paywarr → Customers: on top for everyone,
