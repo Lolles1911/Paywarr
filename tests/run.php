@@ -3362,6 +3362,46 @@ test('sync: a user Wizarr re-imported with a new id is found again by name and s
     same($new['id'] . ':mette:jellyfin', grantProp($service, 'wizarr_users'), 'the new id is stored');
 });
 
+test('admin: re-invite after a new media server: missing users get a new link, present ones are left alone', function () {
+    $service = adminCustomer();
+    same([], ext()->adminReinvite($service), 'the user exists: nothing to do');
+    ext()->adminDeleteInvitation((int) state()['invitations'][0]['id']);
+    ext()->adminUserAction(1, 'delete');                                   // the new Jellyfin has no users
+    \App\Helpers\NotificationHelper::$sent = [];
+    [$url] = ext()->adminReinvite($service);
+    $pending = array_values(array_filter(state()['invitations'], fn ($i) => !$i['used']));
+    same(['https://join.example.com/j/' . $pending[0]['code'], [1]], [$url, $pending[0]['server_ids']], 'a new link to Jellyfin');
+    same(null, grantProp($service, 'wizarr_users'), 'the gone user is forgotten');
+    same(1, count(\App\Helpers\NotificationHelper::$sent), 'mailed');
+    same(['text:Status=Waiting for you to create your user', 'button:Create your user', 'button:Problems? Get a new link'], labels(ext()->getActions($service, settings(), $service->propertyArray())), 'the customer sees the new link');
+});
+
+test('admin: re-invite when the media server itself is gone from Wizarr: the product\'s server takes its place', function () {
+    $service = adminCustomer(false);
+    foreach (['wizarr_invitation_id:1', 'wizarr_invite_code:1', 'wizarr_invite_url:1', 'wizarr_invite_expires:1', 'wizarr_server:1', 'wizarr_server_url:1'] as $key) {
+        $service->properties()->where('key', $key)->delete();
+    }
+    foreach (['wizarr_users:9' => '77:mette:jellyfin', 'wizarr_server:9' => 'Old Jellyfin', 'wizarr_servers' => '9'] as $key => $value) {
+        $service->properties()->updateOrCreate(['key' => $key], ['name' => $key, 'value' => $value]);
+    }
+    $service->unsetRelation('properties');
+    [$url] = ext()->adminReinvite($service, false);
+    $props = $service->propertyArray();
+    ok(!isset($props['wizarr_users:9']) && !isset($props['wizarr_server:9']), 'the gone server is dropped');
+    same('1', $props['wizarr_servers'] ?? null, 'the product\'s Jellyfin instead');
+    ok(str_contains($url, '/j/'), 'a new link: ' . $url);
+
+    $stuck = adminCustomer(false);
+    $stuck->product->settings = settings(['server_ids' => ['9']]);
+    foreach (['wizarr_users:1' => '78:x:jellyfin'] as $key => $value) {
+        $stuck->properties()->updateOrCreate(['key' => $key], ['name' => $key, 'value' => $value]);
+    }
+    $stuck->properties()->updateOrCreate(['key' => 'wizarr_servers'], ['name' => 'x', 'value' => '9']);
+    $stuck->unsetRelation('properties');
+    tellsCustomer(fn () => ext()->adminReinvite($stuck, false), 'Choose the new one on the product first', 'the product still points to the old server');
+    same('78:x:jellyfin', grantProp($stuck, 'wizarr_users'), 'and nothing was changed');
+});
+
 test('admin: give trial days, extend, end now and reopen, restart; only on a trial', function () {
     $service = adminCustomer();
     $now = time();

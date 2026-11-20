@@ -5103,6 +5103,79 @@ HTML;
         return array_values(array_map(fn ($i) => (string) ($i['url'] ?? ''), $made));
     }
 
+    /**
+     * After the media server changed (a new Jellyfin, users gone): every
+     * server of the subscription where the customer's user no longer exists
+     * gets a new invitation, mailed when $mail. A server that is gone from
+     * Wizarr is dropped, and the product's media servers take its place.
+     * Users that still exist are left alone. Returns the new links.
+     */
+    public function adminReinvite(Service $service, bool $mail = true): array
+    {
+        $settings = ExtensionHelper::settingsToArray($service->product->settings);
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $existing = array_map(fn ($server) => (int) $server['id'], $this->client()->servers());
+
+        // First only look: which servers are gone, and where is the user gone.
+        $gone = [];
+        $missing = [];
+        foreach ($this->grantKeys($properties) as $grant) {
+            if ($grant !== '' && !in_array((int) $grant, $existing, true)) {
+                $gone[] = $grant;
+
+                continue;
+            }
+            $this->withGrant($grant, function () use ($service, $properties, $grant, &$missing) {
+                $view = $this->grantView($properties);
+                if (!$this->parseUsers((string) ($view[self::PROP_USERS] ?? ''))) {
+                    return; // no user yet: the invitation it has stays
+                }
+                $invitation = $this->findInvitation($view);
+                $users = $this->resolveUsers($view, $invitation);
+                if ($users) {
+                    $this->rememberUsers($service, $users); // e.g. found again under a new id
+                } else {
+                    $missing[$grant] = $invitation;
+                }
+            });
+        }
+        if (!$gone && !$missing) {
+            return [];
+        }
+        $keep = array_values(array_intersect($this->idList((string) ($properties[self::PROP_SERVERS] ?? '')), $existing));
+        if (!$keep && !array_intersect($this->idList($settings['server_ids'] ?? null), $existing) && trim((string) ($properties[self::MEDIA_OPTION] ?? '')) === '') {
+            throw new DisplayException('Product "' . ($service->product->name ?? '') . '" uses a media server that no longer exists in Wizarr. Choose the new one on the product first (Paywarr → Libraries per product, or edit the product). Nothing was changed.');
+        }
+
+        // Then change: forget the gone servers and users, and invite again.
+        foreach ($gone as $grant) {
+            foreach (self::GRANT_PROPS as $prop) {
+                $this->setProperty($service, $prop . ':' . $grant, '', null);
+            }
+        }
+        foreach ($missing as $grant => $invitation) {
+            $this->withGrant((string) $grant, function () use ($service, $invitation) {
+                if ($invitation) {
+                    $this->deleteInvitationQuietly((int) $invitation['id']);
+                }
+                $this->rememberUsers($service, []);
+                foreach ([self::PROP_INVITATION_ID, self::PROP_INVITE_CODE, self::PROP_INVITE_URL, self::PROP_INVITE_EXPIRES] as $prop) {
+                    $this->setProperty($service, $this->key($prop), '', null);
+                }
+            });
+        }
+        $this->setProperty($service, self::PROP_SERVERS, 'Wizarr media servers', $keep ? implode(',', $keep) : null);
+        $made = array_filter($this->syncGrants($service, $settings, ExtensionHelper::getServiceProperties($service)),
+            fn ($invitation) => ($invitation['code'] ?? '') !== '' && empty($invitation['has_user']));
+        if ($made && $mail) {
+            $this->notifyNewInvitation($service, $this->mailDataFor($made, $settings));
+        }
+        $this->forgetCustomerCaches($service);
+        Log::info('Wizarr: service ' . $service->id . ' re-invited after its media server user was gone (' . count($made) . ' new invitation(s)).');
+
+        return array_values(array_map(fn ($invitation) => (string) ($invitation['url'] ?? ''), $made));
+    }
+
     /** The customer may get a new link once (on their subscription), even after using theirs. */
     public function adminAllowNewLink(Service $service, bool $allowed = true): void
     {
@@ -5150,7 +5223,7 @@ HTML;
         $this->syncSeerrQuietly($service, $status === 'active' ? 'active' : ($status === 'suspended' ? 'suspended' : 'ended'));
         $this->forgetCustomerCaches($service);
         if ($missing && !$found) {
-            throw new DisplayException('The user ' . implode('; ', $missing) . ' is no longer in Wizarr (deleted, or renamed or re-imported there). Check Wizarr\'s users; if it is gone, use "Reset user". Nothing was changed.');
+            throw new DisplayException('The user ' . implode('; ', $missing) . ' is no longer in Wizarr (deleted, or renamed or re-imported there). Check Wizarr\'s users; if it is gone (e.g. a new media server), use "Re-invite missing users". Nothing was changed.');
         }
         if ($spent && !$found) {
             throw new DisplayException('The link on ' . implode(', ', $spent) . ' was used, but no user was made (e.g. a Plex share that failed). Use "Allow a new link" or "New invitation".');

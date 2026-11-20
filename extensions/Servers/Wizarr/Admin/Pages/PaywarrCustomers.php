@@ -104,6 +104,34 @@ class PaywarrCustomers extends Page implements HasTable
         return [
             Action::make('back')->label('All customers')->icon('ri-arrow-left-line')->color('gray')
                 ->visible(fn () => $this->customer !== null)->url(fn () => static::getUrl()),
+            Action::make('reinviteAll')->label('Re-invite missing users')->icon('ri-user-received-line')->color('gray')
+                ->visible(fn () => $this->customer === null && self::canChange())
+                ->requiresConfirmation()
+                ->modalHeading('Re-invite everyone whose user is gone')
+                ->modalDescription('For a new media server, or users deleted there. Every active subscription whose user no longer exists on the media server gets a new invitation, mailed to the customer. Users that exist are left alone. If the media server got a new ID in Wizarr, choose it on the products first (Libraries per product).')
+                ->action(function () {
+                    $done = [];
+                    $failed = [];
+                    $services = Service::query()->where('status', 'active')
+                        ->whereHas('product.server', fn (Builder $query) => $query->where('extension', 'Wizarr'))
+                        ->with(['user', 'product.server', 'product.settings', 'properties'])->get();
+                    foreach ($services as $service) {
+                        try {
+                            if ((new Wizarr([]))->forService($service)->adminReinvite($service, true)) {
+                                Wizarr::logAdmin($service->user, $service->id, 'Re-invited: the user on the media server was gone', (string) Auth::user()?->email);
+                                $done[] = '#' . $service->id;
+                            }
+                        } catch (Throwable $e) {
+                            $failed[] = '#' . $service->id . ': ' . $e->getMessage();
+                        }
+                    }
+                    PaywarrInventory::forget();
+                    Cache::forget('paywarr:admin:problems');
+                    $this->resetTable();
+                    Notification::make()->title(count($done) . ' re-invited, ' . (count($services) - count($done) - count($failed)) . ' nothing to do')
+                        ->body($failed ? implode("\n", array_slice($failed, 0, 8)) . (count($failed) > 8 ? "\n…" : '') : ($done ? implode(', ', $done) : null))
+                        ->{$failed ? 'warning' : 'success'}()->persistent()->send();
+                }),
             Action::make('renewExpired')->label('New links for expired ones')->icon('ri-mail-send-line')->color('gray')
                 ->visible(fn () => $this->customer === null && self::canChange())
                 ->requiresConfirmation()
@@ -340,6 +368,14 @@ class PaywarrCustomers extends Page implements HasTable
 
                             return ($data['libraries'] ?? []) ? 'Own libraries saved for the next invitation.' : 'Back to the product\'s libraries.';
                         })),
+                    $this->action('reinvite', 'Re-invite missing users', 'ri-user-received-line', confirm: false)
+                        ->modalDescription('For a new media server, or a user deleted there: where the customer\'s user no longer exists, they get a new invitation. A user that exists is left alone.')
+                        ->schema([Toggle::make('mail')->label('Email the link to the customer')->default(true)])
+                        ->action(fn (Service $record, array $data) => $this->run($record, function (Wizarr $wizarr) use ($record, $data) {
+                            $links = $wizarr->adminReinvite($record, (bool) $data['mail']);
+
+                            return $links ? 'Re-invited: ' . implode(', ', $links) : 'Nothing to do: the customer\'s user exists.';
+                        })),
                     $this->action('linkUser', 'Link an existing user', 'ri-user-shared-line', confirm: false)
                         ->modalDescription('Gives the subscription a user that already exists on the media server (e.g. an account from before), instead of an invitation.')
                         ->schema(fn (Service $record) => [
@@ -426,6 +462,7 @@ class PaywarrCustomers extends Page implements HasTable
                     $this->bulk('bulkSync', 'Sync now', 'ri-refresh-line', fn (Wizarr $wizarr, Service $service) => $wizarr->adminSync($service)),
                     $this->bulk('bulkNewLink', 'Allow a new link', 'ri-link', fn (Wizarr $wizarr, Service $service) => $wizarr->adminAllowNewLink($service)),
                     $this->bulk('bulkInvite', 'New invitation (mailed)', 'ri-mail-send-line', fn (Wizarr $wizarr, Service $service) => $wizarr->adminNewInvitation($service, true)),
+                    $this->bulk('bulkReinvite', 'Re-invite missing users (mailed)', 'ri-user-received-line', fn (Wizarr $wizarr, Service $service) => $wizarr->adminReinvite($service, true)),
                 ])->visible(fn () => self::canChange()),
             ]);
     }
