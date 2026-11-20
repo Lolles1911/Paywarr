@@ -16,6 +16,9 @@ require __DIR__ . '/../extensions/Servers/Wizarr/DiscordClient.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/ShopGate.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/SeerrException.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/SeerrClient.php';
+foreach (glob(__DIR__ . '/../extensions/Servers/Wizarr/Concerns/*.php') as $concern) {
+    require $concern;
+}
 require __DIR__ . '/../extensions/Servers/Wizarr/Wizarr.php';
 
 use App\Exceptions\DisplayException;
@@ -2248,7 +2251,11 @@ test('languages: the client area, the box and the Discord button follow the lang
 test('languages: every text in the code has a Danish translation, and no translation is left over', function () {
     $dir = __DIR__ . '/../extensions/Servers/Wizarr';
     $code = '';
-    foreach (['Wizarr.php', 'ShopGate.php', 'resources/views/discord.blade.php', 'resources/views/report.blade.php'] as $file) {
+    $files = ['Wizarr.php', 'ShopGate.php', 'resources/views/discord.blade.php', 'resources/views/report.blade.php'];
+    foreach (glob(__DIR__ . '/../extensions/Servers/Wizarr/Concerns/*.php') as $concern) {
+        $files[] = 'Concerns/' . basename($concern);
+    }
+    foreach ($files as $file) {
         $code .= file_get_contents($dir . '/' . $file);
     }
     preg_match_all('/(?:self::t|Wizarr::t|\$t)\(\s*(\'(?:[^\'\\\\]|\\\\.)*\'|"(?:[^"\\\\]|\\\\.)*")/', $code, $m);
