@@ -323,5 +323,7 @@
     "Everything is running.": "Alt kører.",
     "Running": "Kører",
     "Down": "Nede",
-    "The last 14 days": "De sidste 14 dage"
+    "The last 14 days": "De sidste 14 dage",
+    "Still watching?": "Ser du stadig med?",
+    "You haven't watched anything for :days days. Your free access ends on :date unless you watch something before then; just start anything and it stays.": "Du har ikke set noget i :days dage. Din gratis adgang slutter :date, medmindre du ser noget inden da. Start bare hvad som helst, så bliver den."
 }

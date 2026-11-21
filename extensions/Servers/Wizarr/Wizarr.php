@@ -91,6 +91,7 @@ class Wizarr extends Server
     use Concerns\Anniversary;
     use Concerns\MonthlyReport;
     use Concerns\Cleanup;
+    use Concerns\FreeAccess;
 
     /** Wizarr only accepts these lifetimes (in days) for an invitation link. */
     private const LINK_LIFETIMES = [1, 7, 30];
@@ -791,6 +792,12 @@ class Wizarr extends Server
                 'description' => 'Optional. More at the same time on one subscription are stopped or warned about (the server\'s "Too many streams at once"). Needs Tracearr on the server. Empty: no limit.',
             ],
             [
+                'name' => 'free_access',
+                'label' => 'Free access',
+                'type' => 'checkbox',
+                'description' => 'A free product: its subscriptions end when they aren\'t used (the rules are under Paywarr -> Free access), and you can give it to customers from there. Give it a free plan (or a price of 0). Subscriptions with a price of 0 count as free too.',
+            ],
+            [
                 'name' => 'extra_users_max',
                 'label' => 'Extra users: at most',
                 'type' => 'number',
@@ -985,6 +992,7 @@ class Wizarr extends Server
                 $this->sendAnniversaries();
                 $this->makeMonthlyReportIfDue();
                 $this->runCleanup();
+                $this->runFreeAccess();
                 $this->sendNewsIfDue();
                 $this->registerDiscordCommandsIfNeeded();
                 $this->queueHeartbeat();

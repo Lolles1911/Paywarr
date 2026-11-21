@@ -302,6 +302,19 @@ class SiloClient
             ? ['body' => $response->body(), 'type' => $type] : null;
     }
 
+    /** The account's latest plays, newest first (admin:monitor:read): started_at, media_title, ... */
+    public function watchHistory(int $id, int $limit = 1): array
+    {
+        $rows = [];
+        foreach ($this->request('get', '/api/v2/admin/playback-history?' . http_build_query(['user_id' => (string) $id, 'limit' => max(1, min(200, $limit))]))['items'] ?? [] as $play) {
+            if ((string) ($play['user_id'] ?? '') === (string) $id) {
+                $rows[] = $play;
+            }
+        }
+
+        return $rows;
+    }
+
     /* ------------------------------------------------------------------
      | The Requests tab
      * ----------------------------------------------------------------- */

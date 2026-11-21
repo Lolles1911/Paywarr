@@ -4054,6 +4054,59 @@ test('extra users: each their own stream limit, or one shared', function () {
     same('b', $shared->stopped[0][0] ?? null, 'the newest stopped');
 });
 
+/* ---------- free access ---------- */
+
+test('free access: who is free, the rules, warned, then removed; watching again or exempt keeps them', function () {
+    \App\Models\Property::$rows = [];
+    $now = time();
+    $day = 86400;
+    $free = wizarrService(110); $free->user->id = $free->user_id = 110; $free->price = 0; $free->created_at = date('Y-m-d H:i:s', $now - 100 * $day);
+    $free->properties()->updateOrCreate(['key' => 'wizarr_users:1'], ['name' => 'x', 'value' => '50:freja:plex']);
+    $paid = wizarrService(111); $paid->user->id = $paid->user_id = 111; $paid->price = 9.0;
+    $trial = wizarrService(112); $trial->price = 0; $trial->product->settings = settings(['trial_days' => '7']);
+    $product = wizarrService(113); $product->price = 5.0; $product->product->settings = settings(['free_access' => '1']); $product->user->id = $product->user_id = 113;
+    $backend = ['key' => 'wizarr|x', 'ok' => true, 'server_id' => 1, 'kind' => 'wizarr', 'users' => [
+        ['id' => 7, 'username' => 'oldfriend', 'email' => 'old@example.com', 'server' => 'Jellyfin', 'type' => 'jellyfin', 'created' => date(DATE_ATOM, $now - 200 * $day), 'disabled' => false, 'owner' => null],
+        ['id' => 8, 'username' => 'newbie', 'email' => '', 'server' => 'Jellyfin', 'type' => 'jellyfin', 'created' => date(DATE_ATOM, $now - 3 * $day), 'disabled' => false, 'owner' => null],
+        ['id' => 9, 'username' => 'mette', 'email' => '', 'server' => 'Jellyfin', 'type' => 'jellyfin', 'created' => '', 'disabled' => false, 'owner' => ['service' => 1]],
+    ]];
+    $members = ext()->freeMembers([$backend], [$free, $paid, $trial, $product]);
+    same(['service:110', 'service:113', 'user:wizarr|x|7', 'user:wizarr|x|8'], array_keys($members), 'free subscriptions (price 0, or "Free access"), and users without one; not trials, paid or owned users');
+
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::setFreeRules(['enabled' => true, 'days' => 30, 'warn_days' => 7, 'grace_days' => 14, 'delete_days' => 30]);
+    $plays = ['plex|freja' => $now - 40 * $day, 'jellyfin|oldfriend' => $now - 5 * $day];
+    $rows = ext()->freeRows($members, $plays, $now);
+    same(['idle', 'active', 'new'], [$rows['service:110']['status'], $rows['user:wizarr|x|7']['status'], $rows['user:wizarr|x|8']['status']], 'idle 40 days; watched 5 days ago; new');
+
+    $did = [];
+    $act = function ($action, $row) use (&$did) { $did[] = $action . ' ' . $row['name']; return true; };
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::setFreeExempt('service:113', true);
+    ext()->runFreeAccess($members, $plays, $now, $act);
+    same(['warn customer110@example.com'], array_values(array_filter($did, fn ($d) => str_contains($d, '110'))), 'warned first');
+    ok(!array_filter($did, fn ($d) => str_contains($d, '113')), 'the exempt one is left alone');
+    ext()->runFreeAccess($members, $plays, $now + 3 * $day, $act);
+    same(1, count(array_filter($did, fn ($d) => str_contains($d, '110'))), 'not removed before the warning days are over');
+    ext()->runFreeAccess($members, $plays, $now + 8 * $day, $act);
+    same('remove customer110@example.com', end($did), 'removed after them');
+
+    $did = [];
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::storePut('free_state', []);
+    $members2 = ['user:wizarr|x|7' => $members['user:wizarr|x|7']];
+    $old = ['jellyfin|oldfriend' => $now - 60 * $day];
+    ext()->runFreeAccess($members2, $old, $now, $act);
+    ext()->runFreeAccess($members2, ['jellyfin|oldfriend' => $now + $day], $now + 2 * $day, $act);
+    same([], \Paymenter\Extensions\Servers\Wizarr\Wizarr::storeGet('free_state'), 'watched after the warning: back to normal');
+    ext()->runFreeAccess($members2, $old, $now + 3 * $day, $act);
+    ext()->runFreeAccess($members2, $old, $now + 11 * $day, $act);
+    same('Switched off', substr(\Paymenter\Extensions\Servers\Wizarr\Wizarr::freeLog()[0]['what'], 0, 12), 'a Jellyfin user switched off');
+    ext()->runFreeAccess($members2, $old, $now + 42 * $day, $act);
+    same('delete oldfriend', end($did), 'deleted 30 days later');
+
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::setFreeRules(['enabled' => false]);
+    same([], ext()->runFreeAccess($members, $plays, $now, fn () => throw new RuntimeException('off')), 'off: nothing');
+    \App\Models\Property::$rows = [];
+});
+
 /* ---------- summary ---------- */
 
 echo "\n" . $results['pass'] . ' passed, ' . count($results['fail']) . " failed\n";
