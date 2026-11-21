@@ -59,17 +59,29 @@ trait Requests
     /**
      * The top bar's "Open Silo" (or "Open Jellyfin"): the first "Open" button
      * of the customer's active subscriptions, as their client area shows it.
-     * Kept for 10 minutes, as building it may ask Wizarr or Silo.
      *
      * @return array{label: string, url: string}|null
      */
     public function navWatchLink($user, ?iterable $services = null): ?array
     {
+        return $this->navWatchLinks($user, $services)[0] ?? null;
+    }
+
+    /**
+     * Every "Open ..." button of the customer's active subscriptions (Open
+     * Plex, Open Jellyfin, Open Emby, Open Silo), each once, for the top bar.
+     * Kept for 10 minutes, as building them may ask Wizarr or Silo.
+     *
+     * @return array<int, array{label: string, url: string}>
+     */
+    public function navWatchLinks($user, ?iterable $services = null): array
+    {
         if (!$user) {
-            return null;
+            return [];
         }
         $find = function () use ($user, $services) {
             $services ??= Service::where('user_id', $user->id)->where('status', 'active')->with(['product.server', 'properties'])->orderBy('id')->get();
+            $links = [];
             foreach ($services as $service) {
                 if (($service->status ?? '') !== 'active' || $service->product?->server?->extension !== 'Wizarr') {
                     continue;
@@ -86,28 +98,53 @@ trait Requests
                     $label = (string) ($action['label'] ?? '');
                     if (($action['type'] ?? '') === 'button' && !empty($action['url']) && str_starts_with($label, $open . ' ')) {
                         if ($label === self::t('Open the media library')) {
-                            $label = $this->forServiceServer($service)->isSilo() ? self::t('Open :server', ['server' => 'Silo']) : self::t('Watch');
+                            $label = ($name = $this->mediaServerName($service)) !== '' ? self::t('Open :server', ['server' => $name]) : self::t('Watch');
                         }
-
-                        return ['label' => $label, 'url' => (string) $action['url']];
+                        $url = (string) $action['url'];
+                        if (!in_array($url, array_column($links, 'url'), true) && !in_array($label, array_column($links, 'label'), true)) {
+                            $links[] = ['label' => $label, 'url' => $url];
+                        }
                     }
                 }
             }
 
-            return [];
+            return $links;
         };
         if ($services !== null) {
-            return $find() ?: null;
+            return $find();
         }
         // A customer whose user isn't created yet gets the link within a minute of creating it.
         $key = 'wizarr:nav-watch:' . $user->id;
-        $link = Cache::get($key);
-        if (!is_array($link)) {
-            $link = $find();
-            Cache::put($key, $link, $link ? 600 : 60);
+        $links = Cache::get($key);
+        if (!is_array($links) || isset($links['url'])) { // isset: one link, as kept before 1.29.1
+            $links = $find();
+            Cache::put($key, $links, $links ? 600 : 60);
         }
 
-        return $link ?: null;
+        return $links;
+    }
+
+    /** "Silo", the server's name in Wizarr ("Plex"), or the customer's user's type ("Jellyfin"); "" when unknown. */
+    private function mediaServerName(Service $service): string
+    {
+        $ext = $this->forServiceServer($service);
+        if ($ext->isSilo()) {
+            return 'Silo';
+        }
+        $properties = ExtensionHelper::getServiceProperties($service);
+        $grant = (string) ($ext->grantKeys($properties)[0] ?? '');
+        $name = trim(preg_replace('/^server \d+$/', '', $ext->withGrant($grant, fn () => $ext->grantLabel($properties))));
+        if ($name !== '') {
+            return $name;
+        }
+        foreach ($this->streamAccounts($properties) as $account) {
+            $type = explode('|', $account)[0];
+            if ($type !== '') {
+                return ucfirst($type);
+            }
+        }
+
+        return '';
     }
 
     public function requestsSources($user, ?iterable $services = null): array

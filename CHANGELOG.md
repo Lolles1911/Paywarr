@@ -3,6 +3,19 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.29.1 (2026-11-21)
+
+- **Customer menus only for subscribers:** Help, Service status and the
+  status bar now show only to customers with a Paywarr subscription (active
+  or suspended), like Requests, Invite a friend and Report a problem. The
+  menus appear and disappear right after an order or a cancellation.
+- **The top bar opens every media server** the customer has: "Open Plex",
+  "Open Jellyfin", "Open Emby" and "Open Silo", each once, after what they
+  ordered (before: only the first, and "Watch" for one server).
+- **Fixed:** "Give free access" on Paywarr → Free access failed with "Error
+  while loading page" once a customer was chosen.
+- **Fixed:** Paywarr → Help page showed no form, only the buttons.
+
 ## 1.29.0 (2026-11-21)
 
 - **New: Help** for customers: guides per device for their media servers,

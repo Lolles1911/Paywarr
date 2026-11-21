@@ -954,7 +954,7 @@ trait Admin
         if ($user === null) {
             return;
         }
-        foreach (['wizarr:nav-watch:', 'wizarr:can-request:', 'wizarr:can-report:'] as $key) {
+        foreach (['wizarr:nav-watch:', 'wizarr:can-request:', 'wizarr:can-report:', 'wizarr:can-refer:', 'wizarr:has-subscription:', 'paywarr-stats:has-subscription:'] as $key) {
             Cache::forget($key . $user);
         }
     }

@@ -1836,6 +1836,10 @@ test('media: the client area shows each server\'s link, then a reset button per 
     ], labels($actions), 'both done');
     same(['https://jellyfin.example.com', 'https://emby.example.com'], array_column(array_filter($actions, fn ($a) => str_starts_with($a['label'] ?? '', 'Open ')), 'url'), 'each to its own server');
     same(['resetPassword1', 'resetPassword2'], array_values(array_filter(array_column($actions, 'function'))), 'numbered buttons');
+    $service->status = 'active';
+    $service->product->server->extension = 'Wizarr';
+    same([['label' => 'Open Jellyfin', 'url' => 'https://jellyfin.example.com'], ['label' => 'Open Emby', 'url' => 'https://emby.example.com']],
+        ext()->navWatchLinks((object) ['id' => 1], [$service]), 'the top bar: one link per server the customer has');
 
     ext()->resetPassword2($service, mediaSettings(), props($service));
     same(userOn(4)['id'], resetTokens()[0]['user_id'], 'button 2 resets the Emby user');
@@ -3953,7 +3957,9 @@ test('status: a media server down twice in a row gets a notice by itself, ended 
     \Illuminate\Support\Facades\Cache::$store = [];
     same([], ext()->renderStatusBar(), 'the footer hook: nothing while nothing is on');
     ext()->addNotice('Something for everyone', 'Hello.', 'info', [], $now - 10, null);
-    \Illuminate\Support\Facades\Cache::$store = [];
+    \Illuminate\Support\Facades\Cache::$store = ['wizarr:has-subscription:' . $viewer->id => false];
+    same([], ext()->renderStatusBar(), 'no subscription: no bar');
+    \Illuminate\Support\Facades\Cache::$store = ['wizarr:has-subscription:' . $viewer->id => true];
     $bar = ext()->renderStatusBar();
     ok(isset($bar['view']) && str_contains((string) $bar['view'], 'Something for everyone'), 'the footer hook wants ["view" => …], as Paymenter merges it');
     \Illuminate\Support\Facades\Auth::$user = null;
@@ -4193,6 +4199,18 @@ test('CSV: a header and rows Excel opens (UTF-8, semicolons, quotes)', function 
     require_once __DIR__ . '/../extensions/Servers/Wizarr/Admin/Csv.php';
     $text = \Paymenter\Extensions\Servers\Wizarr\Admin\Csv::text(['Name', 'Note'], [['Ølgod', 'a; b'], ['x', ['y', 'z']]]);
     same("\xEF\xBB\xBFName;Note\nØlgod;\"a; b\"\nx;\"y, z\"\n", $text, 'as Excel reads it');
+});
+
+test('admin pages: a page with a form shows it, and a searchable select without options can name its choice', function () {
+    foreach (glob(__DIR__ . '/../extensions/Servers/Wizarr/Admin/Pages/*.php') as $file) {
+        $code = file_get_contents($file);
+        if (str_contains($code, 'public function form(Schema')) {
+            ok(str_contains($code, "EmbeddedSchema::make('form')"), basename($file) . ': the form is in content()');
+        }
+        if (str_contains($code, 'getSearchResultsUsing(')) {
+            ok(str_contains($code, 'getOptionLabelUsing('), basename($file) . ': getOptionLabelUsing next to getSearchResultsUsing');
+        }
+    }
 });
 
 /* ---------- summary ---------- */

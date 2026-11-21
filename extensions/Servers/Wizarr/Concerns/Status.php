@@ -274,7 +274,7 @@ trait Status
     /** The bar on top of the client area (footer hook, as ['view' => …]; moved to the top by a line of script). */
     public function renderStatusBar(): array
     {
-        if (!Auth::check()) {
+        if (!Auth::check() || !$this->hasSubscription(Auth::user())) {
             return [];
         }
         try {

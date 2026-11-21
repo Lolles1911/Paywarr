@@ -108,7 +108,8 @@ class PaywarrFree extends Page implements HasTable
                 ->schema([
                     Select::make('user')->label('Customer')->required()->searchable()
                         ->getSearchResultsUsing(fn (string $search) => User::where('email', 'like', '%' . $search . '%')->orWhere('first_name', 'like', '%' . $search . '%')->limit(20)->get()
-                            ->mapWithKeys(fn ($u) => [$u->id => trim($u->first_name . ' ' . $u->last_name) . ' (' . $u->email . ')'])->all()),
+                            ->mapWithKeys(fn ($u) => [$u->id => trim($u->first_name . ' ' . $u->last_name) . ' (' . $u->email . ')'])->all())
+                        ->getOptionLabelUsing(fn ($value) => ($u = User::find($value)) ? trim($u->first_name . ' ' . $u->last_name) . ' (' . $u->email . ')' : null),
                     Select::make('product')->label('Product')->required()->options(fn () => self::freeProducts()),
                 ])
                 ->action(function (array $data) {
@@ -120,6 +121,7 @@ class PaywarrFree extends Page implements HasTable
                         Notification::make()->title('Not given')->body($e->getMessage())->danger()->send();
                     }
                     PaywarrInventory::forget();
+                    $this->rows = null;
                     $this->resetTable();
                 }),
             Action::make('log')->label('Log')->icon('ri-history-line')->color('gray')

@@ -9,6 +9,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\EmbeddedSchema;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Auth;
@@ -48,6 +49,12 @@ class PaywarrHelp extends Page
     public function getSubheading(): ?string
     {
         return 'What customers see under Help (/wizarr/help): a guide shows to customers on the media servers ticked (none ticked: everyone). An empty line in a text starts a new step.';
+    }
+
+    /** The form is shown on the page (Filament shows nothing by itself). */
+    public function content(Schema $schema): Schema
+    {
+        return $schema->components([EmbeddedSchema::make('form')]);
     }
 
     public function form(Schema $schema): Schema

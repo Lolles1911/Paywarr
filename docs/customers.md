@@ -134,8 +134,9 @@ rewarded backwards.
 
 ## Service status
 
-Customers see a bar on top of the client area while a notice concerns them,
-and **Service status** (`/status`, also for visitors) lists every media server,
+Customers with a subscription see a bar on top of the client area while a
+notice concerns them, and **Service status** in their menu (`/status`, also
+open to visitors who have the address) lists every media server,
 up or down, the notices, and those of the last 14 days. A media server that
 goes down (two checks in a row, every minute: Tracearr's servers, and every
 Silo) gets a notice by itself, posted in the announcements channel, and ended
@@ -143,7 +144,7 @@ when it is back. Your own notices are made in admin (see Admin).
 
 ## Help and getting started
 
-**Help** in the menu (`/wizarr/help`): guides per device (TV, Apple TV, Android,
+**Help** in the menu of customers with a subscription (`/wizarr/help`): guides per device (TV, Apple TV, Android,
 computer, Plex, Silo), only for the media servers the customer has, frequently
 asked questions, a search, and "Didn't help?" with Report a problem and a
 ticket. Paywarr's own texts, in the customer's language, until you edit them
@@ -169,13 +170,17 @@ with **remind again after (hours)**). Orders older than a week are left alone.
 
 ## In the top bar
 
+The customer menu items (Help, Service status, Invite a friend, Requests,
+Report a problem, and My stats from Paywarr Stats) show only to customers with
+a Paywarr subscription (active or suspended).
+
 Signed-in customers get links next to Home and Shop (in the menu on a phone):
 
 | Link | Who sees it |
 |---|---|
 | **Requests** | Customers with requests (see *The Requests tab*) |
 | **Report a problem** | Every customer with an active subscription |
-| **Open Silo** (or **Open Jellyfin** …) | Customers who have created their user: the same address as the "Open" button on their subscription, their first one if they have several |
+| **Open Plex**, **Open Jellyfin**, **Open Emby**, **Open Silo** | Customers who have created their user: one link per media server they have, the same addresses as the "Open" buttons on their subscriptions |
 
 [Paywarr Stats](https://github.com/Lolles1911/Paywarr-stats) adds **My stats**
 there too. Paymenter shows them as plain links; how they look is up to the
