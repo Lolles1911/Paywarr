@@ -88,4 +88,21 @@ that the queue stands still, so a worker that stopped (e.g. during an update)
 doesn't go unnoticed for days. `systemctl restart paymenter` starts it again;
 `journalctl -u paymenter` tells why it stopped.
 
+## Streams and sharing
+
+With **Tracearr URL** and **API key** on the Wizarr server (Tracearr:
+Settings → Data & API → API), Paywarr knows what is streaming:
+
+- **Max streams at once** on a product: checked every minute. More at the same
+  time on one subscription, and the newest are stopped (Plex shows the reason
+  on the screen; Jellyfin and Emby just stop), or only warned about with
+  **Too many streams at once: Only warn the customer**. The customer gets a
+  mail and Discord message, at most once a day.
+- **Paywarr → Streams and sharing** lists those, and Tracearr's own rule breaks
+  (rules you make in Tracearr, such as one account in two places), each with
+  its customer; the menu shows how many in the last 7 days. The customer card
+  shows them too.
+
+Silo is not in Tracearr, so Silo subscriptions have no stream limit.
+
 [← Paywarr](../README.md)

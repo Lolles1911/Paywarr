@@ -3,6 +3,31 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.26.0 (2026-11-21)
+
+- **New: customers pause themselves** ("Pause subscription", instead of
+  cancelling): access off, the renewal date moved as many days, resume at any
+  time. Times a year and the longest pause are settings on the Wizarr server.
+- **New: a come-back code**, by mail and Discord, some days after a
+  subscription was cancelled (days, discount and how long it's valid are
+  settings). Once a year per customer.
+- **New: invite a friend.** Every paying customer gets their own code ("Invite
+  a friend" in the menu). The friend gets a discount on their first month;
+  once they have paid, the customer gets free months added.
+- **New: Tracearr in Paywarr** (URL and key on the Wizarr server; Paywarr Stats
+  uses them too):
+  - **Max streams at once** on a product, checked every minute: the newest over
+    the limit is stopped (or only warned about), and the customer is told.
+  - **Paywarr → Streams and sharing**: the stops, and Tracearr's own rule
+    breaks (e.g. one account in two places), each with its customer, also on
+    the customer card.
+- **New: Discord commands** for customers: /status, /newlink, /stats and
+  /password (in Danish /nytlink and /kodeord). Needs the application's public
+  key and the Interactions Endpoint URL (see Discord in the docs).
+- **New: "New on the server"** every week: the movies and shows added, posted
+  in a Discord channel and, if you want, mailed to customers (with a link to
+  stop them).
+
 ## 1.25.1 (2026-11-20)
 
 - **Fixed:** Silo customers could be sent to your Jellyfin. Paywarr kept one

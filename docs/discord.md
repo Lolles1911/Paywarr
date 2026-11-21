@@ -167,4 +167,32 @@ customer:
 su -s /bin/bash www-data -c "php /opt/paywarr/tools/discord-check.php /opt/paymenter customer@example.com"
 ```
 
+## Commands
+
+Customers can ask the bot, and only they see the answer:
+
+| Command | Danish | Answers |
+|---|---|---|
+| `/status` | `/status` | Their subscriptions: active and renewal date, trial, paused, and their user |
+| `/newlink` | `/nytlink` | Their invitation link, a new one when it expired; not when the user exists |
+| `/stats` | `/stats` | Plays and watch time over 7 and 30 days (with Paywarr Stats) |
+| `/password` | `/kodeord` | A link to choose a new password (Jellyfin, Emby, Silo) |
+
+To switch them on: in the [Discord developer portal](https://discord.com/developers/applications),
+your application → **General Information**: copy the **Public Key** into
+**Discord application: Public key** on the Wizarr server, and set
+**Interactions Endpoint URL** to `https://your-paymenter/wizarr/discord/interactions`
+(Discord checks it when you save). Paywarr registers the commands on your
+Discord server within the hour. Customers need to have connected Discord
+under their account.
+
+## Announcements
+
+With **Discord: announcements channel ID** set (right-click the channel → Copy
+Channel ID; the bot needs to be allowed to post there), the bot posts "New on
+the server" every week (**New on the server: weekly on**, at 17:00: the movies
+and shows Tracearr saw added, and with **mail it to customers too** also as a
+mail with a link to stop them) and, with Paywarr Stats, the server's year in
+review in December.
+
 [← Paywarr](../README.md)

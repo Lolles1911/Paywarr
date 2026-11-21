@@ -85,6 +85,33 @@ subscription's own user. Plex has no button, because Wizarr can't change a Plex
 password. If Wizarr can't be reached, the customer gets a short message to try
 again, and the actual error is written to Paymenter's log.
 
+## Pausing
+
+With **Customers may pause: times a year** set on the Wizarr server, active
+subscriptions (not trials) get **Pause subscription**. The customer chooses
+how long (up to **Longest pause (days)**, 30 by default): access is switched
+off, the renewal date moves as many days, and their user and history stay.
+They get a mail (and a Discord message) with a link to resume early; the pause
+ends by itself on the day. Each pause shows on the customer card in admin.
+
+## Coming back
+
+With **Come-back code: days after cancelling** and **% off the first month**
+set, a customer whose subscription was cancelled that many days ago (and who
+has none running) gets one code by mail and Discord, valid for **Come-back
+code: valid for (days)** (30 by default). At most once a year per customer;
+trials get their own reminder instead.
+
+## Invite a friend
+
+With **Invite a friend: % off the friend's first month** set, customers with a
+paid subscription get **Invite a friend** in the menu: their own code (e.g.
+`PETER-DTH9`, a Paymenter coupon), and a form to email it. A friend who pays
+with it gets that discount on their first period; once their first invoice is
+paid, the customer gets **free months** (1 by default) added to their
+subscription, and a mail saying so. Each friend can use a code once, and
+nobody can use their own.
+
 ## In the top bar
 
 Signed-in customers get links next to Home and Shop (in the menu on a phone):

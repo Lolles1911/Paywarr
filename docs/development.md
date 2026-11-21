@@ -69,7 +69,7 @@ two extra things:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-253 scenarios run the extension through the whole lifecycle against
+259 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -120,7 +120,7 @@ it*) does. Run it before you take on paying customers.
 | File | Contents |
 |---|---|
 | `extensions/Servers/Wizarr/Wizarr.php` | The extension: settings, boot, Paymenter's hooks, small helpers |
-| `extensions/Servers/Wizarr/Concerns/` | The rest, one file per topic: client area, trials, gift cards, Seerr, requests, reports, Discord, grants, admin, mails and reminders |
+| `extensions/Servers/Wizarr/Concerns/` | The rest, one file per topic: client area, trials, gift cards, Seerr, requests, reports, Discord, grants, admin, mails, reminders, pausing and codes (Loyalty), stream limits (Streams), Discord commands and "New on the server" |
 | `extensions/Servers/Wizarr/Jobs/QueueHeartbeat.php` | The hourly test job that shows the queue moves |
 | `extensions/Servers/Wizarr/WizarrClient.php` | The calls to Wizarr's API |
 | `extensions/Servers/Wizarr/WizarrException.php` | Error type |
@@ -129,6 +129,7 @@ it*) does. Run it before you take on paying customers.
 | `extensions/Servers/Wizarr/ShopGate.php` | The gatekeeper in front of the shop |
 | `extensions/Servers/Wizarr/SiloClient.php` | The calls to Silo, answering like the Wizarr client |
 | `extensions/Servers/Wizarr/SeerrClient.php` | The calls to Seerr (import, permissions, deletion) |
+| `extensions/Servers/Wizarr/TracearrClient.php` | The calls to Tracearr (streams, stopping one, rule breaks, recently added) |
 | `extensions/Servers/Wizarr/SeerrException.php` | Error type |
 | `extensions/Servers/Wizarr/Admin/Pages/` | The Paywarr pages in Paymenter's admin |
 | `extensions/Servers/Wizarr/Admin/PaywarrInventory.php` | What those pages read from Wizarr and Silo, kept a minute |
