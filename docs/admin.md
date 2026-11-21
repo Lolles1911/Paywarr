@@ -134,4 +134,26 @@ shows when each will be switched off and deleted; **Keep** a user (an old
 friend, your own) and the clean-up never touches it. **Clean-up log** lists
 what was done.
 
+## Free access
+
+**Paywarr → Free access** follows everyone who watches for free: free
+subscriptions (a price of 0, or a product with **Free access**) and users on
+the media servers without a subscription. It shows when each last watched
+(from Tracearr, and Silo itself), and what happens if nothing changes.
+
+**Rules** (set on the page): after **Nothing watched for (days)** they get a
+warning ("Still watching?"; customers by mail and Discord, users without a
+subscription by mail when Wizarr or Silo knows their address), and **removed
+after (days)** later: Plex's share is removed, Jellyfin, Emby and Silo users
+are switched off and deleted after **(days)** more, and a free subscription is
+cancelled. Watching anything in between resets it. New users are left alone
+for **(days)**. With the rules off, the page only shows who would be warned and
+removed. Checked daily.
+
+**Exempt** a user (family, your own) and they are never warned or removed; it
+is the same list as **Keep** for the clean-up. **Give free access** gives an
+existing customer a free subscription from here, with the invitation by mail.
+**Log** lists who was warned and removed, and when. A product with **Free
+access** can also be in the shop for anyone to order.
+
 [← Paywarr](../README.md)

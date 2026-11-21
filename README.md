@@ -79,7 +79,8 @@ Paymenter decides **when**; the extension translates that into Wizarr:
 - **Admin:** a Paywarr group in Paymenter's admin with customers (and
   everything you can do for them), server status, media server users,
   invitations, libraries and checks; messages to customers, service status,
-  monthly reports and a clean-up of users without a subscription; with
+  monthly reports, a clean-up of users without a subscription, and free access
+  that ends when it isn't used; with
   Tracearr, a limit on streams at once and a list of sharing. → [Admin](docs/admin.md)
 
 ## Installation

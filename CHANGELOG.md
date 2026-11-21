@@ -3,6 +3,17 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.28.0 (2026-11-21)
+
+- **New: Paywarr → Free access.** Free subscriptions (a price of 0, or a product
+  with the new "Free access") and users without a subscription, with when they
+  last watched. Who watched nothing for a number of days is warned, and some
+  days later their access goes: Plex's share removed; Jellyfin, Emby and Silo
+  switched off, then deleted; a free subscription cancelled. Watching resets
+  it. The rules are set on the page; new users get a grace period; "Exempt"
+  (the same list as the clean-up's "Keep"); a log; and "Give free access" to a
+  customer from admin.
+
 ## 1.27.0 (2026-11-21)
 
 - **New: extra users** (e.g. family): a configurable option `extra_users` and
