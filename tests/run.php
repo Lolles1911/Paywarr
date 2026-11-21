@@ -1836,6 +1836,10 @@ test('media: the client area shows each server\'s link, then a reset button per 
     ], labels($actions), 'both done');
     same(['https://jellyfin.example.com', 'https://emby.example.com'], array_column(array_filter($actions, fn ($a) => str_starts_with($a['label'] ?? '', 'Open ')), 'url'), 'each to its own server');
     same(['resetPassword1', 'resetPassword2'], array_values(array_filter(array_column($actions, 'function'))), 'numbered buttons');
+    $service->status = 'active';
+    $service->product->server->extension = 'Wizarr';
+    same([['label' => 'Open Jellyfin', 'url' => 'https://jellyfin.example.com'], ['label' => 'Open Emby', 'url' => 'https://emby.example.com']],
+        ext()->navWatchLinks((object) ['id' => 1], [$service]), 'the top bar: one link per server the customer has');
 
     ext()->resetPassword2($service, mediaSettings(), props($service));
     same(userOn(4)['id'], resetTokens()[0]['user_id'], 'button 2 resets the Emby user');

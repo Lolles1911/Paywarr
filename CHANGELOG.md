@@ -9,6 +9,9 @@ release on GitHub (`.github/release-notes.sh` puts it there).
   status bar now show only to customers with a Paywarr subscription (active
   or suspended), like Requests, Invite a friend and Report a problem. The
   menus appear and disappear right after an order or a cancellation.
+- **The top bar opens every media server** the customer has: "Open Plex",
+  "Open Jellyfin", "Open Emby" and "Open Silo", each once, after what they
+  ordered (before: only the first, and "Watch" for one server).
 - **Fixed:** "Give free access" on Paywarr → Free access failed with "Error
   while loading page" once a customer was chosen.
 - **Fixed:** Paywarr → Help page showed no form, only the buttons.

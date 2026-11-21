@@ -995,8 +995,8 @@ class Wizarr extends Server
             if (Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== [])) {
                 $items[] = ['name' => self::t('Report a problem'), 'url' => route('extensions.wizarr.report'), 'icon' => 'ri-error-warning', 'priority' => 12];
             }
-            if ($watch = $this->navWatchLink(Auth::user())) {
-                $items[] = ['name' => $watch['label'], 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 13];
+            foreach ($this->navWatchLinks(Auth::user()) as $i => $watch) {
+                $items[] = ['name' => $watch['label'], 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 13 + $i];
             }
 
             return $items;
