@@ -4197,6 +4197,18 @@ test('CSV: a header and rows Excel opens (UTF-8, semicolons, quotes)', function 
     same("\xEF\xBB\xBFName;Note\nØlgod;\"a; b\"\nx;\"y, z\"\n", $text, 'as Excel reads it');
 });
 
+test('admin pages: a page with a form shows it, and a searchable select without options can name its choice', function () {
+    foreach (glob(__DIR__ . '/../extensions/Servers/Wizarr/Admin/Pages/*.php') as $file) {
+        $code = file_get_contents($file);
+        if (str_contains($code, 'public function form(Schema')) {
+            ok(str_contains($code, "EmbeddedSchema::make('form')"), basename($file) . ': the form is in content()');
+        }
+        if (str_contains($code, 'getSearchResultsUsing(')) {
+            ok(str_contains($code, 'getOptionLabelUsing('), basename($file) . ': getOptionLabelUsing next to getSearchResultsUsing');
+        }
+    }
+});
+
 /* ---------- summary ---------- */
 
 echo "\n" . $results['pass'] . ' passed, ' . count($results['fail']) . " failed\n";

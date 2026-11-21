@@ -11,6 +11,7 @@ release on GitHub (`.github/release-notes.sh` puts it there).
   menus appear and disappear right after an order or a cancellation.
 - **Fixed:** "Give free access" on Paywarr → Free access failed with "Error
   while loading page" once a customer was chosen.
+- **Fixed:** Paywarr → Help page showed no form, only the buttons.
 
 ## 1.29.0 (2026-11-21)
 
