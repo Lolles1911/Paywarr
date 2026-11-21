@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.29.0',
+    version: '1.29.1',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -961,7 +961,7 @@ class Wizarr extends Server
             'route' => 'extensions.wizarr.help',
             'icon' => 'ri-question',
             'priority' => 32,
-            'condition' => Auth::check(),
+            'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
         ]);
         Event::listen('pages.dashboard', fn () => $this->renderChecklist());
 
@@ -971,7 +971,7 @@ class Wizarr extends Server
             'route' => 'extensions.wizarr.status-page',
             'icon' => 'ri-pulse',
             'priority' => 33,
-            'condition' => Auth::check(),
+            'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
         ]);
 
         // "Report a problem", for every customer with a subscription to report from.
@@ -1069,6 +1069,7 @@ class Wizarr extends Server
      */
     public function createServer(Service $service, $settings, $properties)
     {
+        $this->forgetCustomerCaches($service);
         if ($this->isTopUp($settings)) {
             $n = $this->applyTopUp($service, $settings);
 
@@ -1278,6 +1279,7 @@ class Wizarr extends Server
      */
     public function terminateServer(Service $service, $settings, $properties)
     {
+        $this->forgetCustomerCaches($service);
         if ($this->isGift($settings)) {
             $this->setGiftActive($service, false);
 

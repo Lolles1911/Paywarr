@@ -3953,7 +3953,9 @@ test('status: a media server down twice in a row gets a notice by itself, ended 
     \Illuminate\Support\Facades\Cache::$store = [];
     same([], ext()->renderStatusBar(), 'the footer hook: nothing while nothing is on');
     ext()->addNotice('Something for everyone', 'Hello.', 'info', [], $now - 10, null);
-    \Illuminate\Support\Facades\Cache::$store = [];
+    \Illuminate\Support\Facades\Cache::$store = ['wizarr:has-subscription:' . $viewer->id => false];
+    same([], ext()->renderStatusBar(), 'no subscription: no bar');
+    \Illuminate\Support\Facades\Cache::$store = ['wizarr:has-subscription:' . $viewer->id => true];
     $bar = ext()->renderStatusBar();
     ok(isset($bar['view']) && str_contains((string) $bar['view'], 'Something for everyone'), 'the footer hook wants ["view" => …], as Paymenter merges it');
     \Illuminate\Support\Facades\Auth::$user = null;

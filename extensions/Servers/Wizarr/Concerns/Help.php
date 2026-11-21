@@ -48,6 +48,24 @@ trait Help
         return ['guides' => $stored['guides'] ?? self::defaultGuides(), 'faq' => $stored['faq'] ?? self::defaultFaq(), 'intro' => (string) ($stored['intro'] ?? '')];
     }
 
+    /** Whether the customer has a Paywarr subscription (active or suspended); for the menu items. Kept 5 minutes. */
+    public function hasSubscription($user): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        return (bool) \Illuminate\Support\Facades\Cache::remember('wizarr:has-subscription:' . $user->id, 300, function () use ($user) {
+            foreach (Service::where('user_id', $user->id)->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr'))->with('product.server')->get() as $service) {
+                if (in_array($service->status, ['active', 'suspended'], true) && ($service->product?->server?->extension ?? null) === 'Wizarr') {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+    }
+
     /** The media server types of the customer's subscriptions ([] = show every guide). */
     private function customerTypes($user): array
     {
