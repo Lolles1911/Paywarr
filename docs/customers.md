@@ -141,6 +141,32 @@ goes down (two checks in a row, every minute: Tracearr's servers, and every
 Silo) gets a notice by itself, posted in the announcements channel, and ended
 when it is back. Your own notices are made in admin (see Admin).
 
+## Help and getting started
+
+**Help** in the menu (`/wizarr/help`): guides per device (TV, Apple TV, Android,
+computer, Plex, Silo), only for the media servers the customer has, frequently
+asked questions, a search, and "Didn't help?" with Report a problem and a
+ticket. Paywarr's own texts, in the customer's language, until you edit them
+under Paywarr → Help page.
+
+New customers (their first 30 days) see **Getting started** on the dashboard:
+create your user, watch something, connect Discord, ask for a movie or show,
+get the app. Steps tick themselves; the customer can hide it.
+
+## Changing media server
+
+**Change media server** on the subscription, when there is a choice: another
+value of the `media_server` option at the same price, or another of the
+product's servers. Free, once a month; a dearer choice links to Paymenter's
+Upgrade. The new invitation is mailed, and the old user stays until the new one
+is made (at most 7 days).
+
+## Unpaid orders
+
+With **Unpaid order: remind after (hours)** on the Wizarr server, an order
+whose first invoice is unpaid gets one mail with the link to pay (and a second
+with **remind again after (hours)**). Orders older than a week are left alone.
+
 ## In the top bar
 
 Signed-in customers get links next to Home and Shop (in the menu on a phone):

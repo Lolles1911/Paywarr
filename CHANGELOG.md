@@ -3,6 +3,25 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.29.0 (2026-11-21)
+
+- **New: Help** for customers: guides per device for their media servers,
+  frequently asked questions, a search, and "Didn't help?". Edit the texts
+  under Paywarr → Help page.
+- **New: Getting started** on the dashboard for new customers, ticking itself
+  off: create your user, watch, Discord, a request, the app.
+- **New: Change media server** on the subscription: free to a choice of the
+  same price, once a month (dearer: Paymenter's Upgrade); the old user stays
+  until the new one is made.
+- **New: unpaid order reminders** (hours, and optionally a second).
+- **New: uptime** per media server, per day, on Service status and /status.
+- **New: Paywarr → Satisfaction**: a one-click "would you recommend us?" mail
+  after a month and every half year, and "why do you stop?" when cancelling;
+  NPS, answers and reasons.
+- **New: Paywarr → Invite a friend**: who brings the most.
+- **New: Export CSV** on Customers, Monthly reports, Satisfaction and Invite a
+  friend.
+
 ## 1.28.0 (2026-11-21)
 
 - **New: Paywarr → Free access.** Free subscriptions (a price of 0, or a product

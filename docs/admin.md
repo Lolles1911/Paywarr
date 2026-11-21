@@ -156,4 +156,19 @@ existing customer a free subscription from here, with the invitation by mail.
 **Log** lists who was warned and removed, and when. A product with **Free
 access** can also be in the shop for anyone to order.
 
+## Satisfaction, Invite a friend board, CSV
+
+- **Satisfaction** (with **Satisfaction survey** on the Wizarr server): after a
+  month as a paying customer and every half year after, a mail asks "How likely
+  are you to recommend us?" (0-10, one click, then a comment); customers who
+  cancel are asked why (one click). The page shows the NPS, the answers, and
+  why customers cancelled, also in their own words from Paymenter.
+- **Invite a friend**: who brought the most friends, how many still pay, what
+  they paid, and the free months given.
+- **Help page**: the guides and questions customers see under Help.
+- **Export CSV** on Customers, Monthly reports, Satisfaction and Invite a
+  friend (and Viewing per customer in Paywarr Stats), for Excel.
+- **Uptime**: Service status keeps each server's checks per day: percent over
+  30 and 90 days, and a bar per day, also on `/status`.
+
 [← Paywarr](../README.md)

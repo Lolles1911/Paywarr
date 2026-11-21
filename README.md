@@ -66,8 +66,9 @@ Paymenter decides **when**; the extension translates that into Wizarr:
   with apps and your Discord, reminders, "Problems? Get a new link", password
   reset, pausing instead of cancelling, extra users for family, a code to invite
   friends (free months for them), a come-back code after cancelling, an
-  anniversary thank-you, service status with a bar when a server is down, and
-  Requests, "Report a problem" and Open in the top bar. → [What customers see](docs/customers.md)
+  anniversary thank-you, service status with a bar when a server is down, Help
+  with guides per device, Getting started, changing media server themselves,
+  and Requests, "Report a problem" and Open in the top bar. → [What customers see](docs/customers.md)
 - **Trials, gift cards and refunds:** a trial per server that becomes a
   subscription with the same user, gift codes a customer can send a friend.
   → [Trials, gift cards and refunds](docs/subscriptions.md)
@@ -80,7 +81,8 @@ Paymenter decides **when**; the extension translates that into Wizarr:
   everything you can do for them), server status, media server users,
   invitations, libraries and checks; messages to customers, service status,
   monthly reports, a clean-up of users without a subscription, and free access
-  that ends when it isn't used; with
+  that ends when it isn't used, satisfaction surveys, an Invite a friend board
+  and CSV exports; with
   Tracearr, a limit on streams at once and a list of sharing. → [Admin](docs/admin.md)
 
 ## Installation

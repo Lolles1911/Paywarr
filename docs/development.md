@@ -69,7 +69,7 @@ two extra things:
 tests/run.sh      # requires php 8.3+, python3, curl
 ```
 
-267 scenarios run the extension through the whole lifecycle against
+273 scenarios run the extension through the whole lifecycle against
 `tests/stub_wizarr.py` (which also plays Discord, including role permissions,
 Seerr, and Silo through `tests/stub_silo.py`): first payment, the Seerr add-on through purchase, suspension,
 upgrade and cancellation, the shop gate, Discord roles through the whole
@@ -120,7 +120,7 @@ it*) does. Run it before you take on paying customers.
 | File | Contents |
 |---|---|
 | `extensions/Servers/Wizarr/Wizarr.php` | The extension: settings, boot, Paymenter's hooks, small helpers |
-| `extensions/Servers/Wizarr/Concerns/` | The rest, one file per topic: client area, trials, gift cards, Seerr, requests, reports, Discord, grants, admin, mails, reminders, pausing and codes (Loyalty), stream limits (Streams), Discord commands, "New on the server", messages (Broadcast), service status, anniversaries, monthly reports, clean-up, free access, and a small lasting store (Store) |
+| `extensions/Servers/Wizarr/Concerns/` | The rest, one file per topic: client area, trials, gift cards, Seerr, requests, reports, Discord, grants, admin, mails, reminders, pausing and codes (Loyalty), stream limits (Streams), Discord commands, "New on the server", messages (Broadcast), service status, anniversaries, monthly reports, clean-up, free access, help and getting started, changing media server, unpaid orders, satisfaction, and a small lasting store (Store) |
 | `extensions/Servers/Wizarr/Jobs/QueueHeartbeat.php` | The hourly test job that shows the queue moves |
 | `extensions/Servers/Wizarr/WizarrClient.php` | The calls to Wizarr's API |
 | `extensions/Servers/Wizarr/WizarrException.php` | Error type |
