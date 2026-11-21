@@ -62,6 +62,7 @@ trait Discord
         }
 
         $productSettings = ExtensionHelper::settingsToArray($product->settings);
+        $this->guardReferral($service);
 
         if ($this->isTrial($productSettings)) {
             $refusal = $this->trialRefusal($this->trialHistory($service, $service->user->services()->with(['product.settings', 'product.server'])->get()));

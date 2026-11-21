@@ -44,3 +44,25 @@ Route::middleware(['web', 'auth', 'throttle:30,1'])->name('extensions.wizarr.gif
     Route::get('wizarr/gift/{service}', [Wizarr::class, 'giftPage'])->whereNumber('service');
     Route::post('wizarr/gift/{service}', [Wizarr::class, 'giftPage'])->whereNumber('service');
 });
+
+// Customers pause their subscription themselves, and resume (Loyalty).
+Route::middleware(['web', 'auth', 'throttle:30,1'])->name('extensions.wizarr.pause')->group(function () {
+    Route::get('wizarr/pause/{service}', [Wizarr::class, 'pausePage'])->whereNumber('service');
+    Route::post('wizarr/pause/{service}', [Wizarr::class, 'pausePage'])->whereNumber('service');
+});
+
+// "Invite a friend": the customer's own code (Loyalty).
+Route::middleware(['web', 'auth', 'throttle:30,1'])->name('extensions.wizarr.invite')->group(function () {
+    Route::get('wizarr/invite', [Wizarr::class, 'referralPage']);
+    Route::post('wizarr/invite', [Wizarr::class, 'referralPage']);
+});
+
+// Discord's slash commands (/status, /newlink, /stats, /password). Signed by Discord; no session or CSRF.
+Route::middleware(['throttle:120,1'])
+    ->post('/wizarr/discord/interactions', [Wizarr::class, 'discordInteraction'])
+    ->name('extensions.wizarr.discord.interactions');
+
+// "New on the server" mails: stop getting them (a signed link in the mail).
+Route::middleware(['web', 'signed'])
+    ->get('/wizarr/news/off/{user}', [Wizarr::class, 'newsUnsubscribe'])->whereNumber('user')
+    ->name('extensions.wizarr.news.off');

@@ -106,6 +106,12 @@ class DiscordClient
         $this->call('post', '/channels/' . $this->id((string) ($channel['id'] ?? '')) . '/messages', body: ['content' => mb_substr($content, 0, 2000)]);
     }
 
+    /** A message in a channel of your server (the bot needs "Send Messages" there). */
+    public function postMessage(string $channelId, string $content): void
+    {
+        $this->call('post', '/channels/' . $this->id($channelId) . '/messages', notMember: 'throw', body: ['content' => mb_substr($content, 0, 2000)]);
+    }
+
     private function call(string $method, string $path, string $notMember = 'null', array $body = []): ?array
     {
         try {

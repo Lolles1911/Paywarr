@@ -56,6 +56,21 @@ trait ClientArea
      */
     public function getActions(Service $service, $settings, $properties): array
     {
+        $actions = $this->accessActions($service, $settings, $properties);
+        // "Pause", when customers may pause (Loyalty).
+        try {
+            if ($this->pauseRules()['per_year'] > 0 && $this->pauseRefusal($service, $settings, time()) === null) {
+                $actions[] = ['type' => 'button', 'label' => self::t('Pause subscription'), 'url' => $this->pausePageUrl($service)];
+            }
+        } catch (Throwable $e) {
+            // Without it the rest still shows.
+        }
+
+        return $actions;
+    }
+
+    private function accessActions(Service $service, $settings, $properties): array
+    {
         if ($this->isTopUp($settings)) {
             return $this->topUpActions($properties);
         }

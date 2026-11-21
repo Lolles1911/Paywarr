@@ -507,7 +507,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(403, {"message": "Cannot send messages to this user", "code": 50007})
             return self.send_json(200, {"id": "9" + recipient, "type": 1})
         if method == "POST" and len(parts) == 3 and parts[0] == "channels" and parts[2] == "messages":
-            d.setdefault("dms", []).append({"to": parts[1][1:], "content": (body or {}).get("content", "")})
+            if parts[1].startswith("9"):
+                d.setdefault("dms", []).append({"to": parts[1][1:], "content": (body or {}).get("content", "")})
+            else:
+                d.setdefault("messages", []).append({"channel": parts[1], "content": (body or {}).get("content", "")})
             return self.send_json(200, {"id": "m1", "content": (body or {}).get("content", "")})
         if method == "GET" and len(parts) == 3 and parts[0] == "guilds" and parts[2] == "roles":
             if parts[1] != d["guild"]:

@@ -3,6 +3,7 @@
 namespace Paymenter\Extensions\Servers\Wizarr\Admin\Pages;
 
 use App\Exceptions\DisplayException;
+use App\Helpers\ExtensionHelper;
 use App\Models\Service;
 use App\Models\User;
 use Filament\Actions\Action;
@@ -201,8 +202,37 @@ class PaywarrCustomers extends Page implements HasTable
             TextEntry::make('subscriptions')->label('Paywarr subscriptions')->state($services->count() . ' (' . $services->where('status', 'active')->count() . ' active)'),
             TextEntry::make('requests')->label('Requests')->state($requests ?: ['None'])->listWithLineBreaks(),
             TextEntry::make('note')->label('Note')->state((string) ($props[Wizarr::PROP_NOTE] ?? '') ?: '—')->columnSpan(3),
+            TextEntry::make('streams')->label('Streams and sharing (Tracearr)')->state($this->sharingLines($user, $services) ?: ['Nothing in the last 30 days'])->listWithLineBreaks()->columnSpanFull(),
             TextEntry::make('log')->label('What was done here')->state($log ?: ['Nothing yet'])->listWithLineBreaks()->columnSpanFull(),
         ])];
+    }
+
+    /** Times over the stream limit, and Tracearr's rule breaks, for this customer (last 30 days). */
+    private function sharingLines(User $user, $services): array
+    {
+        $lines = [];
+        foreach ($services as $service) {
+            foreach (json_decode((string) (ExtensionHelper::getServiceProperties($service)[Wizarr::PROP_STREAMS_OVER] ?? '[]'), true) ?: [] as $event) {
+                if ((int) $event['at'] > time() - 30 * 86400) {
+                    $lines[(int) $event['at'] . '-' . count($lines)] = date('M j, H:i', (int) $event['at']) . ' · #' . $service->id . ' · ' . $event['streams'] . ' streams at once (max ' . $event['max'] . ')'
+                        . (!empty($event['which']) ? ($event['stopped'] ? ', stopped: ' : ', over: ') . implode('; ', $event['which']) : '');
+                }
+            }
+        }
+        try {
+            $wizarr = new Wizarr([]);
+            $ext = $services->first() ? $wizarr->forService($services->first()) : $wizarr;
+            foreach ($ext->sharingRows($services) as $row) {
+                if ($row['service'] !== null && (int) $row['service']->user_id === (int) $user->id) {
+                    $lines[(int) $row['at'] . '-' . count($lines)] = date('M j, H:i', (int) $row['at']) . ' · ' . $row['rule'] . ' (' . $row['severity'] . ') · ' . $row['username'] . ' on ' . $row['server'];
+                }
+            }
+        } catch (Throwable $e) {
+            $lines['0'] = 'Tracearr can\'t be read right now';
+        }
+        krsort($lines, SORT_NATURAL);
+
+        return array_values(array_slice($lines, 0, 12));
     }
 
     /** Subscriptions with a problem: failed, expired, new_link, discord_left or trial_over. */

@@ -16,6 +16,7 @@ require __DIR__ . '/../extensions/Servers/Wizarr/DiscordClient.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/ShopGate.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/SeerrException.php';
 require __DIR__ . '/../extensions/Servers/Wizarr/SeerrClient.php';
+require __DIR__ . '/../extensions/Servers/Wizarr/TracearrClient.php';
 foreach (glob(__DIR__ . '/../extensions/Servers/Wizarr/Concerns/*.php') as $concern) {
     require $concern;
 }
@@ -1016,6 +1017,9 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/requests extensions.wizarr.requests',
         'POST wizarr/requests extensions.wizarr.requests.submit',
         'GET wizarr/gift/{service} extensions.wizarr.gift', 'POST wizarr/gift/{service} extensions.wizarr.gift',
+        'GET wizarr/pause/{service} extensions.wizarr.pause', 'POST wizarr/pause/{service} extensions.wizarr.pause',
+        'GET wizarr/invite extensions.wizarr.invite', 'POST wizarr/invite extensions.wizarr.invite',
+        'POST wizarr/discord/interactions extensions.wizarr.discord.interactions', 'GET wizarr/news/off/{user} extensions.wizarr.news.off',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -1039,7 +1043,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
 
     // The scheduler is created later, when schedule:run starts.
     $schedule = $app->make(\Illuminate\Console\Scheduling\Schedule::class);
-    same(1, count($schedule->events), 'one scheduled task');
+    same(2, count($schedule->events), 'two scheduled tasks: hourly, and the stream limits every minute');
     same('wizarr-retry-pending', $schedule->events[0]->description, 'named');
     same('0 * * * *', $schedule->events[0]->expression, 'hourly');
     same(true, $schedule->events[0]->withoutOverlapping, 'never two at once');
@@ -1048,7 +1052,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
 test('boot also works when the scheduler already exists', function () {
     $app = freshBoot(scheduleAlreadyResolved: true);
     ext(discordSettings())->boot();
-    same(1, count($app->make(\Illuminate\Console\Scheduling\Schedule::class)->events), 'registered right away');
+    same(2, count($app->make(\Illuminate\Console\Scheduling\Schedule::class)->events), 'registered right away: the hourly run and the stream limits');
 });
 
 test('the scheduled task runs the retry', function () {
@@ -3730,6 +3734,177 @@ test('queue watch: a job sent and not run for 15 minutes means Paymenter\'s queu
     \Illuminate\Support\Facades\Cache::put('paywarr:queue:sent', time() - 1200, 3600);
     \Illuminate\Support\Facades\Cache::put('paywarr:queue:ran', 0, 3600);
     ok(str_contains(implode(' ', array_column(ext()->adminHealth([], [], [], []), 'what')), 'queue stands still'), 'Checks says so');
+});
+
+/* ---------- loyalty: pause, come back, invite a friend ---------- */
+
+test('pause: the customer pauses themselves, within the limits, and resumes', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $now = time();
+    $service = adminCustomer();
+    $service->expires_at = date('Y-m-d H:i:s', $now + 10 * 86400);
+    $on = ['pause_per_year' => '1', 'pause_max_days' => '30'];
+    same(false, in_array('button:Pause subscription', labels(ext()->getActions($service, $service->product->settings, $service->propertyArray())), true), 'off: no button');
+    ok(in_array('button:Pause subscription', labels(ext($on)->getActions($service, $service->product->settings, $service->propertyArray())), true), 'on: a button');
+    tellsCustomer(fn () => ext($on)->customerPause($service, 45, $now), '1 to 30 days', 'too long');
+    $until = ext($on)->customerPause($service, 14, $now);
+    same([$now + 14 * 86400, 'suspended'], [$until, $service->status], 'paused 14 days');
+    same(date('Y-m-d H:i:s', $now + 24 * 86400), $service->expires_at, 'renewal moved 14 days');
+    same('Your subscription is paused', mailsTo('customer1@example.com')[0]['subject'] ?? null, 'told, with a link to resume');
+    ext($on)->customerResume($service, $now + 86400);
+    same(['active', date('Y-m-d H:i:s', $now + 86400 + 10 * 86400)], [$service->status, $service->expires_at], 'resumed early: the paid time left');
+    tellsCustomer(fn () => ext($on)->customerPause($service, 7, $now + 2 * 86400), 'used your pauses', 'once a year');
+    same(null, ext($on)->pauseRefusal($service, $service->product->settings, $now + 366 * 86400), 'again next year');
+    $trial = adminCustomer(true, ['trial_days' => '7']);
+    ok(ext($on)->pauseRefusal($trial, $trial->product->settings, $now) !== null, 'not a trial');
+});
+
+test('come back: a code some days after cancelling, once a year, not while another subscription runs', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $now = time();
+    $gone = wizarrService(70);
+    $gone->status = 'cancelled';
+    $gone->updated_at = new DateTimeImmutable('@' . ($now - 15 * 86400));
+    $still = wizarrService(71);
+    $still->status = 'cancelled';
+    $still->updated_at = new DateTimeImmutable('@' . ($now - 15 * 86400));
+    $other = service(72, 'customer71@example.com');
+    $other->user = $still->user;
+    $other->user_id = $still->user_id = $still->user->id = 71;
+    $gone->user->id = $gone->user_id = 70;
+    $other->product = $still->product;
+    $other->status = 'active';
+    $on = ['winback_days' => '14', 'winback_percent' => '50', 'winback_valid_days' => '30'];
+    $made = [];
+    $make = function (array $coupon) use (&$made) { $made[] = $coupon; return 900 + count($made); };
+    same([], ext()->sendWinbacks([$gone], $now, $make), 'off');
+    same([70], ext($on)->sendWinbacks([$gone, $still, $other], $now, $make), 'only who has nothing running');
+    same(['percentage', 50, 1, 1], [$made[0]['type'], $made[0]['value'], $made[0]['recurring'], $made[0]['max_uses']], '50% off the first period, once');
+    ok(str_contains(mailsTo('customer70@example.com')[0]['html'] ?? '', $made[0]['code']), 'the code mailed');
+    same([], ext($on)->sendWinbacks([$gone], $now + 86400, $make), 'not twice');
+    $fresh = wizarrService(73);
+    $fresh->status = 'cancelled';
+    $fresh->user->id = $fresh->user_id = 73;
+    $fresh->updated_at = new DateTimeImmutable('@' . ($now - 3 * 86400));
+    same([], ext($on)->sendWinbacks([$fresh], $now, $make), 'too soon');
+});
+
+test('invite a friend: a code per customer, not for oneself, and free months once the friend has paid', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $now = time();
+    $on = ['referral_percent' => '50', 'referral_reward_months' => '1'];
+    $mette = adminCustomer();
+    $mette->user->first_name = 'Mette';
+    $mette->expires_at = date('Y-m-d H:i:s', $now + 5 * 86400);
+    $made = [];
+    $code = ext($on)->referralCode($mette->user, function (array $coupon) use (&$made) { $made[] = $coupon; return 77; });
+    ok(preg_match('/^METTE-[A-Z0-9]{4}$/', $code) === 1, 'a code with their name: ' . $code);
+    same(['percentage', 50, null, 1], [$made[0]['type'], $made[0]['value'], $made[0]['max_uses'], $made[0]['max_uses_per_user']], 'half off, once per friend, any number of friends');
+    same($code, ext($on)->referralCode($mette->user, fn () => throw new RuntimeException('twice')), 'the same code again');
+    \App\Models\Property::$rows = [['key' => 'paywarr_referral_coupon', 'value' => '77', 'model_type' => \App\Models\User::class, 'model_id' => $mette->user->id]];
+
+    $friend = wizarrService(80);
+    $friend->user->id = $friend->user_id = 80;
+    $friend->coupon_id = 77;
+    \App\Models\Service::$all = [$mette, $friend];
+    $invoice = (object) ['id' => 5, 'items' => [(object) ['reference_type' => \App\Models\Service::class, 'reference_id' => 80]]];
+    same([$mette->user->id], ext($on)->rewardReferrals($invoice), 'Mette rewarded');
+    same(date('Y-m-d H:i:s', strtotime('+1 months', $now + 5 * 86400)), $mette->expires_at, 'a month added');
+    same([], ext($on)->rewardReferrals($invoice), 'once per friend');
+    ok(str_contains(mailsTo('customer1@example.com')[0]['subject'] ?? '', 'A friend joined'), 'Mette told');
+
+    $self = wizarrService(81);
+    $self->user_id = $mette->user->id;
+    $self->coupon_id = 77;
+    tellsCustomer(fn () => ext($on)->guardReferral($self), 'your own code', 'not one\'s own code');
+    ext($on)->sendReferral($mette->user, 'ven@example.com', 'Ole');
+    ok(str_contains(mailsTo('ven@example.com')[0]['html'] ?? '', $code), 'the friend gets the code');
+    \App\Models\Service::$all = [];
+    \App\Models\Property::$rows = [];
+});
+
+/* ---------- Tracearr: max streams at once, sharing ---------- */
+
+/** A Tracearr that records what it was asked to stop. */
+function fakeTracearr(): \Paymenter\Extensions\Servers\Wizarr\TracearrClient
+{
+    return new class('http://x', 'k') extends \Paymenter\Extensions\Servers\Wizarr\TracearrClient
+    {
+        public array $stopped = [];
+
+        public function terminate(string $sessionId, string $reason): void
+        {
+            $this->stopped[] = [$sessionId, $reason];
+        }
+    };
+}
+
+test('streams: over "Max streams at once" the newest are stopped, the customer warned once a day, and it is noted', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $now = time();
+    $service = adminCustomer(true, ['max_streams' => '2']);
+    $stream = fn (string $id, int $ago, string $user = 'mette') => ['id' => $id, 'server_type' => 'jellyfin', 'username' => $user, 'media_title' => 'Film ' . $id, 'started_at' => gmdate('Y-m-d\TH:i:s\Z', $now - $ago), 'device' => 'TV ' . $id, 'product' => 'Jellyfin'];
+    $tracearr = fakeTracearr();
+    same([], ext()->enforceStreamLimits([$stream('a', 60), $stream('b', 30)], [$service], $now, $tracearr), 'two is fine');
+    same([1 => 1], ext()->enforceStreamLimits([$stream('a', 60), $stream('b', 30), $stream('c', 5), $stream('x', 1, 'someoneelse')], [$service], $now, $tracearr), 'three: one over');
+    same('c', $tracearr->stopped[0][0] ?? null, 'the newest stopped');
+    ok(str_contains($tracearr->stopped[0][1], '2 stream(s) at once'), 'with a message');
+    same('Too many streams at once', mailsTo('customer1@example.com')[0]['subject'] ?? null, 'the customer warned');
+    ext()->enforceStreamLimits([$stream('a', 60), $stream('b', 30), $stream('d', 2)], [$service], $now + 60, $tracearr);
+    same(1, count(mailsTo('customer1@example.com')), 'warned once a day');
+    $log = json_decode($service->propertyArray()['streams_over'], true);
+    same([2, 3, true], [count($log), $log[0]['streams'], $log[0]['stopped']], 'noted on the subscription');
+    $warn = fakeTracearr();
+    ext(['streams_over_limit' => 'warn'])->enforceStreamLimits([$stream('a', 60), $stream('b', 30), $stream('e', 2)], [$service], $now + 120, $warn);
+    same([], $warn->stopped, '"Only warn": nothing stopped');
+    same([], ext()->enforceStreamLimits([$stream('a', 1), $stream('b', 1), $stream('c', 1)], [adminCustomer()], $now, fakeTracearr()), 'no limit on the product: nothing');
+});
+
+/* ---------- Discord commands, New on the server ---------- */
+
+test('Discord commands: signed requests only, and answers for the customer who asks', function () {
+    $keys = sodium_crypto_sign_keypair();
+    $public = bin2hex(sodium_crypto_sign_publickey($keys));
+    $body = '{"type":1}';
+    $ts = (string) time();
+    $signature = bin2hex(sodium_crypto_sign_detached($ts . $body, sodium_crypto_sign_secretkey($keys)));
+    same(true, \Paymenter\Extensions\Servers\Wizarr\Wizarr::discordSignatureValid($public, $signature, $ts, $body), 'signed');
+    same(false, \Paymenter\Extensions\Servers\Wizarr\Wizarr::discordSignatureValid($public, $signature, $ts, '{"type":2}'), 'changed body');
+    same(false, \Paymenter\Extensions\Servers\Wizarr\Wizarr::discordSignatureValid($public, $signature, (string) (time() - 3600), $body), 'old');
+    same(['status', 'newlink', 'stats', 'password'], array_column(\Paymenter\Extensions\Servers\Wizarr\Wizarr::commandDefinitions(), 'name'), 'four commands');
+    same('nytlink', \Paymenter\Extensions\Servers\Wizarr\Wizarr::commandDefinitions()[1]['name_localizations']['da'], 'in Danish too');
+
+    ok(str_contains(ext()->answerCommand('status', '999'), 'Connect Discord'), 'unknown: connect first');
+    $service = adminCustomer(false);
+    $service->expires_at = date('Y-m-d H:i:s', time() + 9 * 86400);
+    \App\Models\User::$all = [$service->user->id => $service->user];
+    \App\Models\Property::$rows = [['key' => 'discord_id', 'value' => '4242', 'model_type' => \App\Models\User::class, 'model_id' => $service->user->id]];
+    \App\Models\Service::$all = [$service];
+    $status = ext()->answerCommand('status', '4242');
+    ok(str_contains($status, 'renews') && str_contains($status, '/newlink'), 'status: renewal, and no user yet: ' . $status);
+    $link = ext()->answerCommand('newlink', '4242');
+    ok(str_contains($link, 'https://join.example.com/j/'), 'newlink: the pending link: ' . $link);
+    ok(str_contains(ext()->answerCommand('status', '4242', 'da'), 'fornyes'), 'in Danish for a Danish Discord');
+    \App\Models\Service::$all = [];
+    \App\Models\Property::$rows = [];
+    \App\Models\User::$all = [];
+});
+
+test('new on the server: weekly on the chosen day from 17:00, movies and shows each once, posted and mailed', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $sunday = strtotime('next sunday 18:00');
+    $items = [['media_type' => 'movie', 'title' => 'Arrival', 'year' => 2016], ['media_type' => 'movie', 'title' => 'Arrival', 'year' => 2016],
+        ['media_type' => 'show', 'title' => 'Glass Harbor', 'year' => 2024], ['media_type' => 'episode', 'title' => 'Pilot']];
+    $config = ['news_day' => '7', 'news_mail' => '1', 'announce_channel_id' => '555'] + discordSettings();
+    $customer = new \App\Models\User('viewer@example.com');
+    same(null, ext($config)->sendNewsIfDue($sunday - 86400, $items, [$customer]), 'not the day');
+    same(null, ext($config)->sendNewsIfDue($sunday - 3 * 3600, $items, [$customer]), 'before 17:00');
+    same(['discord' => true, 'mails' => 1], ext($config)->sendNewsIfDue($sunday, $items, [$customer]), 'sent');
+    same(null, ext($config)->sendNewsIfDue($sunday + 3600, $items, [$customer]), 'once that day');
+    $html = mailsTo('viewer@example.com')[0]['html'] ?? '';
+    ok(substr_count($html, 'Arrival (2016)') === 1 && str_contains($html, 'Glass Harbor (2024)') && !str_contains($html, 'Pilot'), 'each once, no single episodes');
+    $post = end(state()['discord']['messages']);
+    ok(str_contains($post['content'] ?? '', 'Glass Harbor') && ($post['channel'] ?? '') === '555', 'posted in the channel');
 });
 
 /* ---------- summary ---------- */

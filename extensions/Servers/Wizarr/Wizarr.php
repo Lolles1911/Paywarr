@@ -7,6 +7,7 @@ use App\Classes\Extension\Server;
 use App\Events\Service\Created as ServiceCreated;
 use App\Events\InvoiceItem\Creating as InvoiceItemCreating;
 use App\Events\InvoiceTransaction\Updated as TransactionUpdated;
+use App\Events\Invoice\Paid as InvoicePaid;
 use App\Events\ServiceUpgrade\Updated as ServiceUpgradeUpdated;
 use App\Jobs\Server\SuspendJob;
 use App\Jobs\Server\UnsuspendJob;
@@ -80,6 +81,10 @@ class Wizarr extends Server
     use Concerns\Welcome;
     use Concerns\Gifts;
     use Concerns\Reminders;
+    use Concerns\Loyalty;
+    use Concerns\Streams;
+    use Concerns\Commands;
+    use Concerns\News;
 
     /** Wizarr only accepts these lifetimes (in days) for an invitation link. */
     private const LINK_LIFETIMES = [1, 7, 30];
@@ -420,6 +425,114 @@ class Wizarr extends Server
                 'description' => 'Not for subscriptions paid automatically (card or PayPal subscription). Paymenter\'s own invoice mail goes 7 days before, as always.',
             ],
             [
+                'name' => 'pause_per_year',
+                'label' => 'Customers may pause: times a year',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:0|max:12',
+                'description' => 'Optional. "Pause" on the subscription, instead of cancelling (a holiday): access off, the renewal moves as many days. Empty or 0: off.',
+            ],
+            [
+                'name' => 'pause_max_days',
+                'label' => 'Longest pause (days)',
+                'type' => 'number',
+                'required' => false,
+                'default' => 30,
+                'validation' => 'nullable|integer|min:1|max:90',
+            ],
+            [
+                'name' => 'winback_days',
+                'label' => 'Come-back code: days after cancelling',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:365',
+                'description' => 'Optional. This many days after a subscription was cancelled (and none is running), the customer gets one code by mail and Discord, at most once a year. Empty: off.',
+            ],
+            [
+                'name' => 'winback_percent',
+                'label' => 'Come-back code: % off the first month',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:100',
+            ],
+            [
+                'name' => 'winback_valid_days',
+                'label' => 'Come-back code: valid for (days)',
+                'type' => 'number',
+                'required' => false,
+                'default' => 30,
+                'validation' => 'nullable|integer|min:1|max:365',
+            ],
+            [
+                'name' => 'referral_percent',
+                'label' => 'Invite a friend: % off the friend\'s first month',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:100',
+                'description' => 'Optional. Every customer gets their own code for friends ("Invite a friend" in the menu). Empty: off.',
+            ],
+            [
+                'name' => 'referral_reward_months',
+                'label' => 'Invite a friend: free months when the friend has paid',
+                'type' => 'number',
+                'required' => false,
+                'default' => 1,
+                'validation' => 'nullable|integer|min:1|max:12',
+                'description' => 'Added to the customer\'s subscription once the friend\'s first invoice is paid.',
+            ],
+            [
+                'name' => 'news_day',
+                'label' => 'New on the server: weekly on',
+                'type' => 'select',
+                'default' => '',
+                'options' => [
+                    ['value' => '', 'label' => 'Off'],
+                    ['value' => '1', 'label' => 'Monday'], ['value' => '2', 'label' => 'Tuesday'], ['value' => '3', 'label' => 'Wednesday'],
+                    ['value' => '4', 'label' => 'Thursday'], ['value' => '5', 'label' => 'Friday'], ['value' => '6', 'label' => 'Saturday'], ['value' => '7', 'label' => 'Sunday'],
+                ],
+                'description' => 'The movies and shows added that week, from Tracearr (and Silo), at 17:00. Posted in the announcements channel and/or mailed (below).',
+            ],
+            [
+                'name' => 'news_mail',
+                'label' => 'New on the server: mail it to customers too',
+                'type' => 'checkbox',
+                'description' => 'To active customers, with a link to stop getting it.',
+            ],
+            [
+                'name' => 'announce_channel_id',
+                'label' => 'Discord: announcements channel ID',
+                'type' => 'text',
+                'required' => false,
+                'description' => 'Optional. Where the bot posts "New on the server" and the year in review (Paywarr Stats). Right-click the channel -> Copy Channel ID. The bot needs to be allowed to post there.',
+            ],
+            [
+                'name' => 'tracearr_url',
+                'label' => 'Tracearr URL (internal)',
+                'type' => 'text',
+                'required' => false,
+                'placeholder' => 'http://tracearr:3000',
+                'description' => 'Optional. For "Max streams at once" on products, account sharing on the customer card, and "New on the server". Paywarr Stats uses it too, when it has none of its own.',
+            ],
+            [
+                'name' => 'tracearr_api_key',
+                'label' => 'Tracearr API key',
+                'type' => 'password',
+                'required' => false,
+                'encrypted' => true,
+                'description' => 'Tracearr: Settings -> Data & API -> API -> Generate key (starts with trr_pub_).',
+            ],
+            [
+                'name' => 'streams_over_limit',
+                'label' => 'Too many streams at once',
+                'type' => 'select',
+                'default' => 'stop',
+                'options' => [
+                    ['value' => 'stop', 'label' => 'Stop the newest, with a message on the screen, and warn the customer'],
+                    ['value' => 'warn', 'label' => 'Only warn the customer'],
+                ],
+                'description' => 'For products with "Max streams at once". Checked every minute through Tracearr.',
+            ],
+            [
                 'name' => 'discord_client_id',
                 'label' => 'Discord application: Client ID',
                 'type' => 'text',
@@ -438,6 +551,14 @@ class Wizarr extends Server
                 'type' => 'password',
                 'required' => false,
                 'encrypted' => true,
+            ],
+            [
+                'name' => 'discord_public_key',
+                'label' => 'Discord application: Public key (for commands)',
+                'type' => 'text',
+                'required' => false,
+                'description' => 'Optional. Lets customers use /status, /newlink, /stats and /password with the bot. Discord developer portal -> your application -> General Information -> Public Key; '
+                    . 'and there, set "Interactions Endpoint URL" to https://your-paymenter/wizarr/discord/interactions. The commands are registered on your server within the hour.',
             ],
         ];
     }
@@ -610,6 +731,14 @@ class Wizarr extends Server
                 'description' => 'Makes this a gift card: the buyer gets a one-time code worth what they paid, spread over this many billing periods of a subscription (with monthly plans: that many months free). No invitation is sent. Leave empty for normal products.',
             ],
             [
+                'name' => 'max_streams',
+                'label' => 'Max streams at once',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:20',
+                'description' => 'Optional. More at the same time on one subscription are stopped or warned about (the server\'s "Too many streams at once"). Needs Tracearr on the server. Empty: no limit.',
+            ],
+            [
                 'name' => 'extra_requests',
                 'label' => 'Extra requests (top-up product)',
                 'type' => 'number',
@@ -672,6 +801,18 @@ class Wizarr extends Server
             });
         }
 
+        // A friend's first payment with a customer's code: the customer's reward (Loyalty).
+        if (!self::$referralListener) {
+            self::$referralListener = true;
+            Event::listen(InvoicePaid::class, function (InvoicePaid $event) {
+                try {
+                    $this->rewardReferrals($event->invoice);
+                } catch (Throwable $e) {
+                    Log::warning('Wizarr: referral rewards for invoice ' . ($event->invoice->id ?? '?') . ' not given: ' . $e->getMessage());
+                }
+            });
+        }
+
         // Requests (Seerr) only with a media server Seerr knows: checked when
         // the order's or upgrade's invoice is made, so nothing is charged.
         if (!self::$seerrGuardListener) {
@@ -701,6 +842,15 @@ class Wizarr extends Server
             'icon' => 'ri-movie-2',
             'priority' => 29,
             'condition' => Auth::check() && Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== []),
+        ]);
+
+        // "Invite a friend", when on and the customer has a paid subscription.
+        Event::listen('navigation.dashboard', fn () => [
+            'name' => self::t('Invite a friend'),
+            'route' => 'extensions.wizarr.invite',
+            'icon' => 'ri-gift-2',
+            'priority' => 31,
+            'condition' => Auth::check() && Cache::remember('wizarr:can-refer:' . Auth::id(), 300, fn () => $this->canRefer(Auth::user())),
         ]);
 
         // "Report a problem", for every customer with a subscription to report from.
@@ -754,6 +904,9 @@ class Wizarr extends Server
                 $this->reconcileDiscordMembership();
                 $this->resumePausedServices();
                 $this->sendReminders();
+                $this->sendWinbacks();
+                $this->sendNewsIfDue();
+                $this->registerDiscordCommandsIfNeeded();
                 $this->queueHeartbeat();
                 $this->reconcileSeerr();
                 $this->processTrials();
@@ -761,6 +914,11 @@ class Wizarr extends Server
             })
                 ->hourly()
                 ->name('wizarr-retry-pending')
+                ->withoutOverlapping();
+            // Max streams at once (products with a limit, through Tracearr).
+            $schedule->call(fn () => $this->enforceStreamLimits())
+                ->everyMinute()
+                ->name('wizarr-stream-limits')
                 ->withoutOverlapping();
         };
         app()->afterResolving(Schedule::class, $register);

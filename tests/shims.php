@@ -90,8 +90,49 @@ namespace App\Models {
         }
     }
 
+    /** Property::where(...)->where(...)->value('model_id') over Property::$rows. */
+    class Property
+    {
+        /** @var array<int, array{key: string, value: string, model_type: string, model_id: int}> */
+        public static array $rows = [];
+
+        public static function where($column, $value): object
+        {
+            return (new class
+            {
+                public array $wheres = [];
+
+                public function where($column, $value): static
+                {
+                    $this->wheres[$column] = $value;
+
+                    return $this;
+                }
+
+                public function value($column)
+                {
+                    foreach (Property::$rows as $row) {
+                        if (!array_diff_assoc(array_map('strval', $this->wheres), array_map('strval', array_intersect_key($row, $this->wheres)))) {
+                            return $row[$column] ?? null;
+                        }
+                    }
+
+                    return null;
+                }
+            })->where($column, $value);
+        }
+    }
+
     class User
     {
+        /** @var array<int, User> what User::find() finds */
+        public static array $all = [];
+
+        public static function find($id): ?User
+        {
+            return self::$all[(int) $id] ?? null;
+        }
+
         /** @var callable[] User::deleting() listeners, as Eloquent keeps them */
         public static array $deleting = [];
 
@@ -160,6 +201,17 @@ namespace App\Models {
             return $this;
         }
 
+        public function find($id): ?Service
+        {
+            foreach (Service::$all as $service) {
+                if ((int) $service->id === (int) $id) {
+                    return $service;
+                }
+            }
+
+            return null;
+        }
+
         /** Relation filters are not modelled: callers check the rows again. */
         public function whereHas($relation, $callback = null): static
         {
@@ -187,6 +239,17 @@ namespace App\Models {
         {
             return (new ServiceQuery)->where(...func_get_args());
         }
+
+        public static function with($relations): ServiceQuery
+        {
+            return new ServiceQuery;
+        }
+
+        public ?int $coupon_id = null;
+
+        public float $price = 0;
+
+        public ?string $subscription_id = null;
 
         public const STATUS_ACTIVE = 'active';
 
@@ -543,6 +606,13 @@ namespace Illuminate\Console\Scheduling {
             return $this;
         }
 
+        public function everyMinute(): static
+        {
+            $this->expression = '* * * * *';
+
+            return $this;
+        }
+
         public function name($description): static
         {
             $this->description = $description;
@@ -770,6 +840,11 @@ namespace Illuminate\Support\Facades {
         public function get($uri, $action): RegisteredRoute
         {
             return $this->add('GET', $uri, $action);
+        }
+
+        public function post($uri, $action): RegisteredRoute
+        {
+            return $this->add('POST', $uri, $action);
         }
 
         public function add(string $method, string $uri, $action): RegisteredRoute

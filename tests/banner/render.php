@@ -8,7 +8,7 @@
  */
 
 require __DIR__ . '/../shims.php';
-foreach (['WizarrException', 'WizarrClient', 'DiscordException', 'DiscordClient', 'ShopGate', 'SeerrException', 'SeerrClient'] as $class) {
+foreach (['WizarrException', 'WizarrClient', 'DiscordException', 'DiscordClient', 'ShopGate', 'SeerrException', 'SeerrClient', 'TracearrClient'] as $class) {
     require __DIR__ . '/../../extensions/Servers/Wizarr/' . $class . '.php';
 }
 foreach (glob(__DIR__ . '/../../extensions/Servers/Wizarr/Concerns/*.php') as $concern) {
