@@ -105,6 +105,17 @@ class PaywarrCustomers extends Page implements HasTable
         return [
             Action::make('back')->label('All customers')->icon('ri-arrow-left-line')->color('gray')
                 ->visible(fn () => $this->customer !== null)->url(fn () => static::getUrl()),
+            Action::make('message')->label('Send a message')->icon('ri-send-plane-line')->color('gray')
+                ->visible(fn () => $this->customer !== null && self::canChange())
+                ->modalWidth('2xl')->schema(PaywarrMessages::messageFields(false))->modalSubmitActionLabel('Send')
+                ->action(function (array $data) {
+                    try {
+                        Notification::make()->title('Sent')->body(PaywarrMessages::send('user:' . $this->customer, $data))->success()->send();
+                    } catch (Throwable $e) {
+                        report($e);
+                        Notification::make()->title('Not sent')->body($e->getMessage())->danger()->send();
+                    }
+                }),
             Action::make('reinviteAll')->label('Re-invite missing users')->icon('ri-user-received-line')->color('gray')
                 ->visible(fn () => $this->customer === null && self::canChange())
                 ->requiresConfirmation()

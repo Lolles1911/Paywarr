@@ -66,3 +66,8 @@ Route::middleware(['throttle:120,1'])
 Route::middleware(['web', 'signed'])
     ->get('/wizarr/news/off/{user}', [Wizarr::class, 'newsUnsubscribe'])->whereNumber('user')
     ->name('extensions.wizarr.news.off');
+
+// Service status: every media server, up or down, and notices. For everyone.
+Route::middleware(['web', 'throttle:60,1'])
+    ->get('/status', [Wizarr::class, 'statusPage'])
+    ->name('extensions.wizarr.status-page');

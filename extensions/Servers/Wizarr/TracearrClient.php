@@ -19,6 +19,12 @@ class TracearrClient
         private readonly int $timeout = 10,
     ) {}
 
+    /** The media servers Tracearr watches: server_name, server_type, status ("up", "down", "unknown"), historical. */
+    public function servers(): array
+    {
+        return $this->call('get', '/api/v2/public/servers')['data'] ?? [];
+    }
+
     /** Every stream now: id, server_type, server_name, username, media_title, show_title, started_at, device, product, player. */
     public function streams(): array
     {
@@ -29,6 +35,22 @@ class TracearrClient
     public function terminate(string $sessionId, string $reason): void
     {
         $this->call('post', '/api/v1/public/streams/' . rawurlencode($sessionId) . '/terminate', ['reason' => mb_substr($reason, 0, 500)]);
+    }
+
+    /** Every play since $since, newest first, up to $max: server_type, user.username, media_type, media_title, show_title, duration_ms, watched, started_at. */
+    public function history(int $since, int $max = 3000): array
+    {
+        $rows = [];
+        $cursor = null;
+        do {
+            $page = $this->call('get', '/api/v2/public/history', array_filter(['pageSize' => 100, 'since' => gmdate('Y-m-d\TH:i:s\Z', $since), 'cursor' => $cursor]));
+            foreach ($page['data'] ?? [] as $row) {
+                $rows[] = $row;
+            }
+            $cursor = $page['meta']['nextCursor'] ?? null;
+        } while ($cursor !== null && count($rows) < $max);
+
+        return $rows;
     }
 
     /** Tracearr's rule breaks since $since, newest first (up to $max): rule.name, user.username, server.type, created_at, severity. */

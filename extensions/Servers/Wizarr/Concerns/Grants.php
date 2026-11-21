@@ -117,15 +117,38 @@ trait Grants
                 }
                 if ($name === $prop) {
                     $keys[''] = true;
-                } elseif (str_starts_with((string) $name, $prop . ':') && ctype_digit(substr((string) $name, strlen($prop) + 1))) {
+                } elseif (str_starts_with((string) $name, $prop . ':') && preg_match('/^\d+(\.\d+)?$/', substr((string) $name, strlen($prop) + 1))) {
+                    // "4" a server; "4.2" an extra user on it.
                     $keys[substr((string) $name, strlen($prop) + 1)] = true;
                 }
             }
         }
         $keys = array_map('strval', array_keys($keys));
-        usort($keys, fn ($a, $b) => ($a === '' ? -1 : (int) $a) <=> ($b === '' ? -1 : (int) $b));
+        usort($keys, fn ($a, $b) => ($a === '' ? [-1, 0] : [(int) $a, self::seatOf($a)]) <=> ($b === '' ? [-1, 0] : [(int) $b, self::seatOf($b)]));
 
         return $keys;
+    }
+
+    /** Which user on the server a grant is: 1 for the subscription's own, 2 and up for extra users ("4.2"). */
+    public static function seatOf(string $grant): int
+    {
+        return str_contains($grant, '.') ? max(1, (int) substr($grant, strpos($grant, '.') + 1)) : 1;
+    }
+
+    /** " · user 2" for an extra user, '' otherwise. */
+    private function seatSuffix(): string
+    {
+        $seat = self::seatOf($this->grant);
+
+        return $seat > 1 ? ' · ' . self::t('user :n', ['n' => $seat]) : '';
+    }
+
+    /** How many extra users the subscription has: the "extra_users" option, up to the product's "extra_users_max". */
+    public function extraUsers(array $settings, array $properties): int
+    {
+        $max = (int) ($settings['extra_users_max'] ?? 0);
+
+        return $max < 1 ? 0 : max(0, min($max, (int) ($properties[self::EXTRA_USERS_OPTION] ?? 0)));
     }
 
     /** True when the service has at least one invitation or user. */
@@ -231,7 +254,7 @@ trait Grants
     {
         $label = (string) ($this->grantView($properties)[self::PROP_SERVER_LABEL] ?? '');
 
-        return $label !== '' ? $label : ($this->grant === '' ? '' : 'server ' . $this->grant);
+        return ($label !== '' ? $label : ($this->grant === '' ? '' : 'server ' . (int) $this->grant)) . $this->seatSuffix();
     }
 
     /**
@@ -338,24 +361,39 @@ trait Grants
         }
 
         // Servers chosen: an invitation for each that has none, or the one it has.
+        $ensure = function () use ($service, $settings, $properties) {
+            $view = $this->grantView($properties);
+            $invitation = $this->findInvitation($view);
+            if ($invitation && ($invitation['status'] ?? '') === 'used') {
+                $this->rememberUsers($service, $this->resolveUsers($view, $invitation));
+            }
+            if ($invitation || !empty($view[self::PROP_USERS])) {
+                return ($invitation ?? []) + ['has_user' => !empty($view[self::PROP_USERS]) || ($invitation['status'] ?? '') === 'used'];
+            }
+
+            return $this->issueInvitation($service, $settings);
+        };
         $invitations = [];
         foreach ($wanted as $id) {
             $grant = $covered[$id] ?? (string) $id;
             if (isset($invitations[$grant])) {
                 continue;
             }
-            $invitations[$grant] = $this->withGrant($grant, function () use ($service, $settings, $properties) {
-                $view = $this->grantView($properties);
-                $invitation = $this->findInvitation($view);
-                if ($invitation && ($invitation['status'] ?? '') === 'used') {
-                    $this->rememberUsers($service, $this->resolveUsers($view, $invitation));
-                }
-                if ($invitation || !empty($view[self::PROP_USERS])) {
-                    return ($invitation ?? []) + ['has_user' => !empty($view[self::PROP_USERS]) || ($invitation['status'] ?? '') === 'used'];
-                }
+            $invitations[$grant] = $this->withGrant($grant, $ensure);
+        }
 
-                return $this->issueInvitation($service, $settings);
-            });
+        // Extra users: one more invitation per chosen server for each; those no longer bought lose their user.
+        $extra = $this->extraUsers($settings, $properties);
+        foreach ($this->grantKeys($properties) as $grant) {
+            if (self::seatOf($grant) > 1 && (!in_array((int) $grant, $wanted, true) || self::seatOf($grant) > $extra + 1)) {
+                $this->withGrant($grant, fn () => $this->terminateNow($service, $properties));
+                Log::info('Wizarr: service ' . $service->id . ' no longer has extra user ' . $grant . '; its user there was removed.');
+            }
+        }
+        foreach ($wanted as $id) {
+            for ($seat = 2; $seat <= $extra + 1; $seat++) {
+                $invitations[$id . '.' . $seat] = $this->withGrant($id . '.' . $seat, $ensure);
+            }
         }
 
         return $invitations;
@@ -370,6 +408,9 @@ trait Grants
     {
         $covered = [];
         foreach ($this->grantKeys($properties) as $grant) {
+            if (self::seatOf($grant) > 1) {
+                continue; // an extra user: syncGrants() handles those apart
+            }
             foreach ($this->withGrant($grant, fn () => $this->grantServerIds($settings, $properties)) as $id) {
                 $covered[$id] = $grant;
             }

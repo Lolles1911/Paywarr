@@ -1020,6 +1020,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/pause/{service} extensions.wizarr.pause', 'POST wizarr/pause/{service} extensions.wizarr.pause',
         'GET wizarr/invite extensions.wizarr.invite', 'POST wizarr/invite extensions.wizarr.invite',
         'POST wizarr/discord/interactions extensions.wizarr.discord.interactions', 'GET wizarr/news/off/{user} extensions.wizarr.news.off',
+        'GET status extensions.wizarr.status-page',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -3905,6 +3906,143 @@ test('new on the server: weekly on the chosen day from 17:00, movies and shows e
     ok(substr_count($html, 'Arrival (2016)') === 1 && str_contains($html, 'Glass Harbor (2024)') && !str_contains($html, 'Pilot'), 'each once, no single episodes');
     $post = end(state()['discord']['messages']);
     ok(str_contains($post['content'] ?? '', 'Glass Harbor') && ($post['channel'] ?? '') === '555', 'posted in the channel');
+});
+
+/* ---------- messages, status, anniversary, monthly report, clean-up, extra users ---------- */
+
+test('messages: to everyone active, a status, or one customer; by mail and the bell; logged', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    \App\Models\Property::$rows = [];
+    $a = wizarrService(90); $a->user->id = $a->user_id = 90; $a->product->id = 5;
+    $b = wizarrService(91); $b->user->id = $b->user_id = 91; $b->status = 'suspended';
+    $c = wizarrService(92); $c->user->id = $c->user_id = 92; $c->status = 'cancelled';
+    $all = [$a, $b, $c];
+    same([90], array_keys(ext()->broadcastRecipients('all', $all)), 'all active');
+    same([91], array_keys(ext()->broadcastRecipients('status:suspended', $all)), 'suspended');
+    same([92], array_keys(ext()->broadcastRecipients('status:cancelled', $all)), 'cancelled with nothing running');
+    same([90], array_keys(ext()->broadcastRecipients('product:5', $all)), 'by product');
+    same([91], array_keys(ext()->broadcastRecipients('user:91', $all)), 'one customer');
+    $result = ext()->broadcast('all', 'Black Friday', "Half price this weekend.\n\nOnly until Monday.", ['See subscriptions', 'https://pay.example.com'], ['mail'], 'admin@example.com', $all);
+    same([1, 1, 0], [$result['recipients'], $result['mail'], $result['discord']], 'one mail');
+    ok(str_contains(mailsTo('customer90@example.com')[0]['html'] ?? '', 'Only until Monday.'), 'the message in the mail');
+    same('Black Friday', \Paymenter\Extensions\Servers\Wizarr\Wizarr::storeGet('broadcasts')[0]['subject'] ?? null, 'logged');
+    \App\Models\Property::$rows = [];
+});
+
+test('status: a media server down twice in a row gets a notice by itself, ended when it is back; your own notices too', function () {
+    \App\Models\Property::$rows = [];
+    $now = time();
+    $down = [['server_name' => 'Wafflehub Jellyfin', 'server_type' => 'jellyfin', 'status' => 'down', 'historical' => false]];
+    $up = [['server_name' => 'Wafflehub Jellyfin', 'server_type' => 'jellyfin', 'status' => 'up', 'historical' => false]];
+    ext()->monitorStatus($now, $down, []);
+    same([], \Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now), 'once down: could be a blip');
+    $state = ext()->monitorStatus($now + 60, $down, [7 => ['Silo', true]]);
+    $active = \Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now + 60);
+    same(['Wafflehub Jellyfin is down', 'outage', ['jellyfin']], [$active[0]['title'] ?? null, $active[0]['kind'] ?? null, $active[0]['types'] ?? null], 'twice: a notice for Jellyfin users');
+    same([false, true], [$state['tracearr:Wafflehub Jellyfin']['up'], $state['silo:7']['up']], 'the state per server');
+    ext()->monitorStatus($now + 120, $up, []);
+    same([], \Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now + 121), 'back up: ended');
+    $notice = ext()->addNotice('Maintenance Sunday', 'From 2 to 4 at night.', 'maintenance', [], $now + 3600, $now + 7200);
+    same([], array_column(\Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now), 'title'), 'planned: not yet');
+    same(['Maintenance Sunday'], array_column(\Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now + 4000), 'title'), 'while it lasts');
+    ext()->endNotice($notice['id'], $now + 4100);
+    same([], \Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now + 4200), 'ended early');
+    \App\Models\Property::$rows = [];
+});
+
+test('anniversary: every N months as a paying customer, the gift once; not backwards when switched on later', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $now = time();
+    $on = ['anniversary_months' => '12', 'anniversary_reward' => 'days', 'anniversary_amount' => '7'];
+    $service = wizarrService(93); $service->user->id = $service->user_id = 93;
+    $service->created_at = date('Y-m-d H:i:s', strtotime('-12 months -2 days', $now));
+    $service->expires_at = date('Y-m-d H:i:s', $now + 10 * 86400);
+    same([93], ext($on)->sendAnniversaries([$service], $now), 'a year');
+    same(date('Y-m-d H:i:s', $now + 17 * 86400), $service->expires_at, '7 days added');
+    same('Thank you for a year with us', mailsTo('customer93@example.com')[0]['subject'] ?? null, 'thanked');
+    same([], ext($on)->sendAnniversaries([$service], $now + 86400), 'once');
+    $old = wizarrService(94); $old->user->id = $old->user_id = 94;
+    $old->created_at = date('Y-m-d H:i:s', strtotime('-14 months', $now));
+    same([], ext($on)->sendAnniversaries([$old], $now), 'passed two months ago: not rewarded backwards');
+    $made = [];
+    $coupon = wizarrService(95); $coupon->user->id = $coupon->user_id = 95;
+    $coupon->created_at = date('Y-m-d H:i:s', strtotime('-6 months -1 day', $now));
+    same([95], ext(['anniversary_months' => '6', 'anniversary_reward' => 'coupon', 'anniversary_amount' => '20'])->sendAnniversaries([$coupon], $now, function ($c) use (&$made) { $made[] = $c; return 1; }), 'half a year');
+    same(['percentage', 20], [$made[0]['type'], $made[0]['value']], 'a 20% code');
+});
+
+test('monthly report: money, subscriptions, trials, watching and streams for a month', function () {
+    $now = strtotime('2026-11-20 12:00');
+    $paid = wizarrService(96); $paid->user->id = $paid->user_id = 96; $paid->created_at = '2026-11-03 10:00:00';
+    $gone = wizarrService(97); $gone->user->id = $gone->user_id = 97; $gone->created_at = '2026-01-03 10:00:00'; $gone->status = 'cancelled'; $gone->updated_at = new DateTimeImmutable('2026-11-10 10:00');
+    $trial = wizarrService(98); $trial->user->id = $trial->user_id = 98; $trial->created_at = '2026-11-15 10:00:00'; $trial->product->settings = settings(['trial_days' => '7']);
+    $paid->properties()->updateOrCreate(['key' => 'streams_over'], ['name' => 'x', 'value' => json_encode([['at' => strtotime('2026-11-12'), 'streams' => 3, 'max' => 2, 'stopped' => true, 'which' => ['Film']]])]);
+    $invoice = (object) ['currency_code' => 'DKK', 'items' => [(object) ['reference_type' => \App\Models\Service::class, 'reference_id' => 96, 'price' => 69.0, 'quantity' => 1]]];
+    $plays = [['server_type' => 'jellyfin', 'user' => ['username' => 'a'], 'media_type' => 'movie', 'media_title' => 'Arrival', 'duration_ms' => 7200000, 'watched' => true, 'started_at' => '2026-11-05T20:00:00Z'],
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'b'], 'media_type' => 'episode', 'show_title' => 'Glass Harbor', 'media_title' => 'Ep 1', 'duration_ms' => 2700000, 'watched' => true, 'started_at' => '2026-11-06T20:00:00Z'],
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'b'], 'media_type' => 'movie', 'media_title' => 'Clip', 'duration_ms' => 30000, 'watched' => false, 'started_at' => '2026-11-06T21:00:00Z']];
+    $r = ext()->monthlyReport('2026-11', $now, [$paid, $gone, $trial], [$invoice], $plays, []);
+    same(['DKK' => 69.0], $r['money'], 'paid for subscriptions');
+    same([1, 1, 1, 1], [$r['subscriptions']['new'], $r['subscriptions']['trials'], $r['subscriptions']['cancelled'], $r['subscriptions']['paying']], 'new, trial, cancelled, paying');
+    same([2, 3, 2], [$r['watching']['plays'], $r['watching']['hours'], $r['watching']['viewers']], 'plays (the clip left out), hours, viewers');
+    same([1, 1, 0], [$r['streams']['over'], $r['streams']['stopped'], $r['streams']['rule_breaks']], 'streams');
+    same(true, $r['partial'], 'the month is not over yet');
+});
+
+test('clean-up: users without a subscription switched off, later deleted; kept ones and owned ones left alone', function () {
+    \App\Models\Property::$rows = [];
+    $now = time();
+    $backend = ['key' => 'wizarr|x', 'ok' => true, 'server_id' => 1, 'users' => [
+        ['id' => 1, 'username' => 'leftover', 'server' => 'Jellyfin', 'type' => 'jellyfin', 'disabled' => false, 'owner' => null],
+        ['id' => 2, 'username' => 'mette', 'server' => 'Jellyfin', 'type' => 'jellyfin', 'disabled' => false, 'owner' => ['service' => 1]],
+        ['id' => 3, 'username' => 'friend', 'server' => 'Jellyfin', 'type' => 'jellyfin', 'disabled' => false, 'owner' => null],
+    ], 'invitations' => [['id' => 9, 'code' => 'OLD', 'status' => 'expired', 'expires' => date(DATE_ATOM, $now - 10 * 86400), 'owner' => null]]];
+    $did = [];
+    $act = function ($b, $action, $id) use (&$did) { $did[] = $action . ' ' . $id; };
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::setCleanupKeep('wizarr|x|3', true);
+    $on = ['cleanup_disable_days' => '14', 'cleanup_delete_days' => '30'];
+    ext($on)->runCleanup([$backend], $now, $act);
+    same(['invitation 9'], $did, 'day one: only the old invitation');
+    ext($on)->runCleanup([$backend], $now + 15 * 86400, $act);
+    same(['invitation 9', 'disable 1', 'invitation 9'], $did, 'after 14 days: switched off; the friend is kept');
+    ext($on)->runCleanup([$backend], $now + 46 * 86400, $act);
+    same('delete 1', $did[3] ?? null, '30 days later: deleted');
+    ok(str_starts_with(\Paymenter\Extensions\Servers\Wizarr\Wizarr::cleanupLog()[0]['what'] ?? '', 'Removed expired invitation') || str_starts_with(\Paymenter\Extensions\Servers\Wizarr\Wizarr::cleanupLog()[1]['what'] ?? '', 'Deleted leftover'), 'logged');
+    same([], ext()->runCleanup([$backend], $now + 100 * 86400, fn () => throw new RuntimeException('off')), 'off without the setting');
+    \App\Models\Property::$rows = [];
+});
+
+test('extra users: an invitation each on every server; fewer bought, the extra user is removed; each with the stream limit', function () {
+    $service = chosen('');
+    $service->configs = [Wizarr::EXTRA_USERS_OPTION => '2'];
+    $product = settings(['server_ids' => ['1'], 'extra_users_max' => '3', 'max_streams' => '1']);
+    $data = ext()->createServer($service, $product, props($service));
+    same(['Jellyfin', 'Jellyfin · user 2', 'Jellyfin · user 3'], array_column($data['invites'], 'label'), 'three invitations, labelled');
+    same(3, count(state()['invitations']), 'made in Wizarr');
+    same(['1', '1.2', '1.3'], ext()->grantKeys($service->propertyArray()), 'grants per user');
+    $service->configs = [Wizarr::EXTRA_USERS_OPTION => '1'];
+    ext()->upgradeServer($service, $product, props($service));
+    same(['1', '1.2'], ext()->grantKeys($service->propertyArray()), 'one fewer: the third removed');
+    same(2, count(state()['invitations']), 'its invitation withdrawn');
+    $service->configs = [Wizarr::EXTRA_USERS_OPTION => '9'];
+    same(3, ext()->extraUsers($product, props($service)), 'never more than the product allows');
+    same(0, ext()->extraUsers(settings(), props($service)), 'none without "extra_users_max"');
+});
+
+test('extra users: each their own stream limit, or one shared', function () {
+    $now = time();
+    $service = wizarrService(99);
+    $service->properties()->updateOrCreate(['key' => 'wizarr_users:1'], ['name' => 'x', 'value' => '5:mette:jellyfin']);
+    $service->properties()->updateOrCreate(['key' => 'wizarr_users:1.2'], ['name' => 'x', 'value' => '6:ole:jellyfin']);
+    $stream = fn ($id, $user, $ago) => ['id' => $id, 'server_type' => 'jellyfin', 'username' => $user, 'media_title' => 'F', 'started_at' => gmdate('Y-m-d\TH:i:s\Z', $now - $ago)];
+    $streams = [$stream('a', 'mette', 60), $stream('b', 'ole', 30)];
+    $service->product->settings = settings(['max_streams' => '1']);
+    $own = fakeTracearr();
+    same([], ext()->enforceStreamLimits($streams, [$service], $now, $own), 'one each: fine');
+    $service->product->settings = settings(['max_streams' => '1', 'extra_users_share_streams' => '1']);
+    $shared = fakeTracearr();
+    same([99 => 1], ext()->enforceStreamLimits($streams, [$service], $now, $shared), 'shared: one too many');
+    same('b', $shared->stopped[0][0] ?? null, 'the newest stopped');
 });
 
 /* ---------- summary ---------- */

@@ -95,10 +95,14 @@ trait Streams
             ->with(['product.settings', 'product.server', 'properties', 'user'])->get();
         $limited = [];
         foreach ($services as $service) {
-            $max = (int) (ExtensionHelper::settingsToArray($service->product->settings)['max_streams'] ?? 0);
+            $settings = ExtensionHelper::settingsToArray($service->product->settings);
+            $max = (int) ($settings['max_streams'] ?? 0);
             if ($max > 0) {
-                foreach ($this->streamAccounts(ExtensionHelper::getServiceProperties($service)) as $account) {
-                    $limited[$account] = [$service, $max];
+                $accounts = $this->streamAccounts(ExtensionHelper::getServiceProperties($service));
+                // Extra users each have the limit, unless they share it.
+                $share = count($accounts) < 2 || $this->truthy($settings['extra_users_share_streams'] ?? false);
+                foreach ($accounts as $account) {
+                    $limited[$account] = [$service, $max, $share ? (string) $service->id : $service->id . '|' . $account];
                 }
             }
         }
@@ -116,9 +120,9 @@ trait Streams
         foreach ($streams as $stream) {
             $account = strtolower((string) ($stream['server_type'] ?? '')) . '|' . strtolower((string) ($stream['username'] ?? ''));
             if (isset($limited[$account])) {
-                [$service, $max] = $limited[$account];
-                $byService[$service->id] ??= ['service' => $service, 'max' => $max, 'streams' => []];
-                $byService[$service->id]['streams'][] = $stream;
+                [$service, $max, $group] = $limited[$account];
+                $byService[$group] ??= ['service' => $service, 'max' => $max, 'streams' => []];
+                $byService[$group]['streams'][] = $stream;
             }
         }
         $over = [];
@@ -127,7 +131,7 @@ trait Streams
                 continue;
             }
             try {
-                $over[$id] = $this->forServiceServer($group['service'])->handleOverLimit($group['service'], $group['streams'], $group['max'], $now, $tracearr);
+                $over[(int) $group['service']->id] = ($over[(int) $group['service']->id] ?? 0) + $this->forServiceServer($group['service'])->handleOverLimit($group['service'], $group['streams'], $group['max'], $now, $tracearr);
             } catch (Throwable $e) {
                 Log::warning('Wizarr: service ' . $id . ' is over its stream limit, not handled: ' . $e->getMessage());
             }

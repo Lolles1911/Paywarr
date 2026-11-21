@@ -96,6 +96,18 @@ namespace App\Models {
         /** @var array<int, array{key: string, value: string, model_type: string, model_id: int}> */
         public static array $rows = [];
 
+        public static function updateOrCreate(array $match, array $values): void
+        {
+            foreach (self::$rows as $i => $row) {
+                if (!array_diff_assoc(array_map('strval', $match), array_map('strval', array_intersect_key($row, $match)))) {
+                    self::$rows[$i] = $values + $row;
+
+                    return;
+                }
+            }
+            self::$rows[] = $values + $match;
+        }
+
         public static function where($column, $value): object
         {
             return (new class

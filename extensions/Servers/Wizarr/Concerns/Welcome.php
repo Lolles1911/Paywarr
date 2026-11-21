@@ -50,7 +50,8 @@ trait Welcome
             $html .= '<div style="margin:0 0 14px;padding:12px 14px;background:#f4f2f8;border-radius:10px">' . nl2br(e($own)) . '</div>';
         }
         foreach ($invites as $invite) {
-            $html .= $button($invite['server'] !== '' ? self::t('Create your user on :server', ['server' => $invite['server']]) : self::t('Create your user'), $invite['url']);
+            $label = (string) ($invite['label'] ?? $invite['server']);
+            $html .= $button($label !== '' ? self::t('Create your user on :server', ['server' => $label]) : self::t('Create your user'), $invite['url']);
         }
         if (($data['invite_valid_for'] ?? '') !== '') {
             $html .= $p('<span style="color:#6b6680;font-size:13px">' . e(self::t('The link works for :time and only once.', ['time' => $data['invite_valid_for']])) . '</span>');

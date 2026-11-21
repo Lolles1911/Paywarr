@@ -282,6 +282,26 @@ trait ClientArea
         return $this->renewInvitationFor($service, $settings, $properties, 4);
     }
 
+    public function renewInvitation5(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 5);
+    }
+
+    public function renewInvitation6(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 6);
+    }
+
+    public function renewInvitation7(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 7);
+    }
+
+    public function renewInvitation8(Service $service, $settings, $properties): string
+    {
+        return $this->renewInvitationFor($service, $settings, $properties, 8);
+    }
+
     public function resetPassword1(Service $service, $settings, $properties): string
     {
         return $this->resetPasswordFor($service, $properties, 1);
@@ -300,6 +320,26 @@ trait ClientArea
     public function resetPassword4(Service $service, $settings, $properties): string
     {
         return $this->resetPasswordFor($service, $properties, 4);
+    }
+
+    public function resetPassword5(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 5);
+    }
+
+    public function resetPassword6(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 6);
+    }
+
+    public function resetPassword7(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 7);
+    }
+
+    public function resetPassword8(Service $service, $settings, $properties): string
+    {
+        return $this->resetPasswordFor($service, $properties, 8);
     }
 
     private function renewInvitationFor(Service $service, array $settings, array $properties, int $number): string

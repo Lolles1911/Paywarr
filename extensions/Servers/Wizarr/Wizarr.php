@@ -85,6 +85,12 @@ class Wizarr extends Server
     use Concerns\Streams;
     use Concerns\Commands;
     use Concerns\News;
+    use Concerns\Store;
+    use Concerns\Broadcast;
+    use Concerns\Status;
+    use Concerns\Anniversary;
+    use Concerns\MonthlyReport;
+    use Concerns\Cleanup;
 
     /** Wizarr only accepts these lifetimes (in days) for an invitation link. */
     private const LINK_LIFETIMES = [1, 7, 30];
@@ -172,6 +178,9 @@ class Wizarr extends Server
     /** Per-server label ("Emby"), stored when its invitation is made. */
     private const PROP_SERVER_LABEL = 'wizarr_server';
 
+    /** The configurable option for extra users (0-3), as "media_server" and "requests". */
+    public const EXTRA_USERS_OPTION = 'extra_users';
+
     /** Per-server "External URL" from Wizarr ("-" when it has none), stored so page views need no call. */
     private const PROP_SERVER_URL = 'wizarr_server_url';
 
@@ -182,7 +191,7 @@ class Wizarr extends Server
     private const GRANT_PROPS = ['wizarr_invitation_id', 'wizarr_invite_code', 'wizarr_invite_url', 'wizarr_invite_expires', 'wizarr_users', 'wizarr_server', 'wizarr_server_url'];
 
     /** How many servers can have their own buttons in the client area. */
-    private const MAX_GRANT_BUTTONS = 4;
+    private const MAX_GRANT_BUTTONS = 8;
 
     /** On the Paymenter user: Discord roles this extension gave them (and may take back). */
     private const PROP_DISCORD_ROLES = 'discord_roles_granted';
@@ -533,6 +542,49 @@ class Wizarr extends Server
                 'description' => 'For products with "Max streams at once". Checked every minute through Tracearr.',
             ],
             [
+                'name' => 'anniversary_months',
+                'label' => 'Anniversary: every (months)',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:60',
+                'description' => 'Optional. E.g. 12: every year as a paying customer, a thank-you by mail and Discord, with the gift below. Empty: off.',
+            ],
+            [
+                'name' => 'anniversary_reward',
+                'label' => 'Anniversary: gift',
+                'type' => 'select',
+                'default' => 'days',
+                'options' => [
+                    ['value' => 'days', 'label' => 'Free days added to the subscription'],
+                    ['value' => 'coupon', 'label' => 'A discount code (% off a period, valid 60 days)'],
+                    ['value' => 'thanks', 'label' => 'Only a thank-you'],
+                ],
+            ],
+            [
+                'name' => 'anniversary_amount',
+                'label' => 'Anniversary: days, or % off',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:100',
+                'description' => 'E.g. 7 (days) or 20 (%).',
+            ],
+            [
+                'name' => 'cleanup_disable_days',
+                'label' => 'Clean-up: switch off users without a subscription after (days)',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:365',
+                'description' => 'Optional. Users on the media servers that belong to no subscription (left over, made by hand) are switched off after this many days, checked daily. Plex users can\'t be switched off; they are only deleted. Mark users to keep under Paywarr -> Media server users. Empty: off.',
+            ],
+            [
+                'name' => 'cleanup_delete_days',
+                'label' => 'Clean-up: delete them after (more days)',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:365',
+                'description' => 'Optional. Switched-off users are deleted this many days later. Empty: never deleted.',
+            ],
+            [
                 'name' => 'discord_client_id',
                 'label' => 'Discord application: Client ID',
                 'type' => 'text',
@@ -739,6 +791,20 @@ class Wizarr extends Server
                 'description' => 'Optional. More at the same time on one subscription are stopped or warned about (the server\'s "Too many streams at once"). Needs Tracearr on the server. Empty: no limit.',
             ],
             [
+                'name' => 'extra_users_max',
+                'label' => 'Extra users: at most',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:7',
+                'description' => 'Optional. With a configurable option "extra_users" (values 0, 1, 2, …) customers buy extra users (e.g. for family): each gets their own invitation on every media server of the subscription, and follows it (paused, suspended, cancelled). Empty: no extra users.',
+            ],
+            [
+                'name' => 'extra_users_share_streams',
+                'label' => 'Extra users share "Max streams at once"',
+                'type' => 'checkbox',
+                'description' => 'On: all users of a subscription share the limit. Off: each user has the limit.',
+            ],
+            [
                 'name' => 'extra_requests',
                 'label' => 'Extra requests (top-up product)',
                 'type' => 'number',
@@ -823,6 +889,8 @@ class Wizarr extends Server
 
         // "Your access is ready" banner on every page of the client area.
         Event::listen('footer', fn () => $this->renderBanner());
+        // A server down or planned maintenance: a bar on top, for the customers it concerns.
+        Event::listen('footer', fn () => $this->renderStatusBar());
 
         // Deleting a customer in Paymenter removes their services in the
         // database only, without any hook. Remove their access first.
@@ -851,6 +919,15 @@ class Wizarr extends Server
             'icon' => 'ri-gift-2',
             'priority' => 31,
             'condition' => Auth::check() && Cache::remember('wizarr:can-refer:' . Auth::id(), 300, fn () => $this->canRefer(Auth::user())),
+        ]);
+
+        // "Service status": every media server, up or down, and your notices.
+        Event::listen('navigation.dashboard', fn () => [
+            'name' => self::t('Service status'),
+            'route' => 'extensions.wizarr.status-page',
+            'icon' => 'ri-pulse',
+            'priority' => 33,
+            'condition' => Auth::check(),
         ]);
 
         // "Report a problem", for every customer with a subscription to report from.
@@ -905,6 +982,9 @@ class Wizarr extends Server
                 $this->resumePausedServices();
                 $this->sendReminders();
                 $this->sendWinbacks();
+                $this->sendAnniversaries();
+                $this->makeMonthlyReportIfDue();
+                $this->runCleanup();
                 $this->sendNewsIfDue();
                 $this->registerDiscordCommandsIfNeeded();
                 $this->queueHeartbeat();
@@ -916,7 +996,10 @@ class Wizarr extends Server
                 ->name('wizarr-retry-pending')
                 ->withoutOverlapping();
             // Max streams at once (products with a limit, through Tracearr).
-            $schedule->call(fn () => $this->enforceStreamLimits())
+            $schedule->call(function () {
+                $this->enforceStreamLimits();
+                $this->monitorStatus();
+            })
                 ->everyMinute()
                 ->name('wizarr-stream-limits')
                 ->withoutOverlapping();
@@ -985,7 +1068,7 @@ class Wizarr extends Server
                 : $this->mailData($invitation, $grantSettings, alreadyUsed: !empty($invitation['has_user']));
             $first ??= $data;
             $server = $grant === '' ? '' : $this->withGrant((string) $grant, fn () => $this->grantServerName());
-            $invites[] = ['server' => $server, 'url' => $data['invite_url'], 'code' => $data['invite_code']];
+            $invites[] = ['server' => $server, 'label' => $server . ($grant === '' ? '' : $this->withGrant((string) $grant, fn () => $this->seatSuffix())), 'url' => $data['invite_url'], 'code' => $data['invite_code']];
         }
         $first ??= $this->accessMailData($settings);
 

@@ -18,6 +18,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
 use Paymenter\Extensions\Servers\Wizarr\Admin\PaywarrInventory;
+use Paymenter\Extensions\Servers\Wizarr\Wizarr;
 use Throwable;
 
 /**
@@ -68,6 +69,10 @@ class PaywarrUsers extends Page implements HasTable
                 TextColumn::make('state')->label('Status')
                     ->state(fn (array $record) => $record['disabled'] === null ? '' : ($record['disabled'] ? 'Disabled' : 'Enabled'))
                     ->badge()->color(fn (string $state) => $state === 'Disabled' ? 'gray' : 'success')->placeholder('—'),
+                TextColumn::make('cleanup')->label('Clean-up')
+                    ->state(fn (array $record) => $this->cleanupText($record))
+                    ->badge()->color(fn (string $state) => str_starts_with($state, 'Kept') ? 'success' : (str_contains($state, 'deleted') ? 'danger' : 'warning'))
+                    ->placeholder('—'),
                 TextColumn::make('created')->label('Created')->formatStateUsing(fn (?string $state) => $state && ($ts = strtotime($state)) ? date('M j, Y', $ts) : '')->placeholder('—'),
             ])
             ->filters([
@@ -89,6 +94,15 @@ class PaywarrUsers extends Page implements HasTable
 
                         return 'Linked: ' . PaywarrInventory::wizarrFor($backend)->forService($service)->adminLinkUser($service, (int) $record['id'], PaywarrInventory::services());
                     })),
+                Action::make('keep')->label(fn (array $record) => isset(Wizarr::cleanupKeep()[$record['backend_key'] . '|' . $record['id']]) ? 'Don\'t keep' : 'Keep')
+                    ->icon('ri-shield-user-line')
+                    ->visible(fn (array $record) => !$record['owner'] && self::canChange())
+                    ->tooltip('Kept users are never switched off or deleted by the clean-up')
+                    ->action(function (array $record) {
+                        $key = $record['backend_key'] . '|' . $record['id'];
+                        Wizarr::setCleanupKeep($key, !isset(Wizarr::cleanupKeep()[$key]));
+                        $this->resetTable();
+                    }),
                 Action::make('disable')->label('Disable')->icon('ri-forbid-line')->requiresConfirmation()
                     ->visible(fn (array $record) => $record['disabled'] !== true && self::canChange())
                     ->action(fn (array $record) => $this->run(fn () => PaywarrInventory::wizarrFor($this->backend($record))->adminUserAction((int) $record['id'], 'disable'))),
@@ -103,6 +117,42 @@ class PaywarrUsers extends Page implements HasTable
             ])
             ->emptyStateHeading('No users here')
             ->emptyStateDescription('With the filter "Without a subscription", every user on your media servers belongs to a subscription.');
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('cleanupLog')->label('Clean-up log')->icon('ri-history-line')->color('gray')
+                ->modalHeading('What the clean-up did')
+                ->modalDescription('Users without a subscription are switched off after "Clean-up: switch off after (days)" and deleted after "Clean-up: delete after (days)" more, set on the Wizarr server. Expired invitations that belong to nobody are removed a week after they expired.')
+                ->modalSubmitAction(false)->modalCancelActionLabel('Close')
+                ->schema(fn () => [\Filament\Infolists\Components\TextEntry::make('log')->hiddenLabel()
+                    ->state(array_map(fn ($e) => date('M j, Y H:i', (int) $e['at']) . ' · ' . $e['what'], array_slice(Wizarr::cleanupLog(), 0, 50)) ?: ['Nothing yet'])->listWithLineBreaks()]),
+        ];
+    }
+
+    /** "Switched off Nov 3, deleted Nov 17" and the like, for a user without a subscription. */
+    private function cleanupText(array $record): string
+    {
+        if ($record['owner']) {
+            return '';
+        }
+        $key = $record['backend_key'] . '|' . $record['id'];
+        if (isset(Wizarr::cleanupKeep()[$key])) {
+            return 'Kept';
+        }
+        $row = Wizarr::cleanupState()[$key] ?? null;
+        if ($row === null) {
+            return '';
+        }
+        $settings = \App\Helpers\ExtensionHelper::settingsToArray(\App\Models\Server::with('settings')->find($this->backend($record)['server_id'])?->settings ?? []);
+        $off = (int) ($settings['cleanup_disable_days'] ?? 0);
+        $delete = (int) ($settings['cleanup_delete_days'] ?? 0);
+        if ($row['disabled_at'] !== null) {
+            return 'Switched off ' . date('M j', (int) $row['disabled_at']) . ($delete > 0 ? ', deleted ' . date('M j', (int) $row['disabled_at'] + $delete * 86400) : '');
+        }
+
+        return $off > 0 ? 'Switched off ' . date('M j', (int) $row['first_seen'] + $off * 86400) : '';
     }
 
     private static function canChange(): bool
