@@ -98,11 +98,12 @@ class PaywarrFree extends Page implements HasTable
                     TextInput::make('grace_days')->label('New users are left alone for (days)')->numeric()->minValue(0)->required(),
                     TextInput::make('delete_days')->label('Switched-off users (Jellyfin, Emby, Silo) deleted after (days)')->numeric()->minValue(1)->required(),
                 ])
+                ->modalSubmitActionLabel('Save')
                 ->action(function (array $data) {
                     Wizarr::setFreeRules($data);
                     Notification::make()->title('Saved')->success()->send();
                 }),
-            Action::make('give')->label('Give free access')->icon('ri-gift-2-line')->visible(fn () => self::canChange())
+            Action::make('give')->label('Give free access')->icon('ri-gift-2-line')->visible(fn () => self::canChange())->modalSubmitActionLabel('Give')
                 ->modalDescription('A free subscription for an existing customer, on a product with "Free access" (or a price of 0). They get the invitation by mail, as with any order.')
                 ->schema([
                     Select::make('user')->label('Customer')->required()->searchable()
@@ -174,7 +175,7 @@ class PaywarrFree extends Page implements HasTable
                 TextColumn::make('last')->label('Last watched')
                     ->formatStateUsing(fn ($state) => $state ? date('M j, Y', (int) $state) : '')
                     ->placeholder('Not in the last ' . max(90, Wizarr::freeRules()['days'] + Wizarr::freeRules()['warn_days'] + 7) . ' days')
-                    ->description(fn (array $record) => $record['idle_days'] . ' days without watching'),
+                    ->description(fn (array $record) => $record['idle_days'] === 1 ? '1 day without watching' : $record['idle_days'] . ' days without watching'),
                 TextColumn::make('status')->label('Status')->badge()
                     ->formatStateUsing(fn (string $state) => match ($state) {
                         'active' => 'Watching', 'new' => 'New', 'exempt' => 'Exempt', 'idle' => 'To be warned', 'warned' => 'Warned', 'removed' => 'Switched off', default => $state,
@@ -200,7 +201,7 @@ class PaywarrFree extends Page implements HasTable
                         $this->rows = null;
                         $this->resetTable();
                     }),
-                Action::make('remove')->label('Remove now')->icon('ri-user-unfollow-line')->color('danger')->requiresConfirmation()
+                Action::make('remove')->label('Remove')->icon('ri-user-unfollow-line')->color('danger')->requiresConfirmation()
                     ->visible(fn (array $record) => self::canChange() && $record['status'] !== 'removed')
                     ->modalDescription(fn (array $record) => $record['kind'] === 'subscription' ? 'Cancels the free subscription and removes its users.' : 'Plex: removes the share. Jellyfin, Emby, Silo: switches the user off.')
                     ->action(function (array $record) {
