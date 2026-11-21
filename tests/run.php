@@ -3945,8 +3945,17 @@ test('status: a media server down twice in a row gets a notice by itself, ended 
     $notice = ext()->addNotice('Maintenance Sunday', 'From 2 to 4 at night.', 'maintenance', [], $now + 3600, $now + 7200);
     same([], array_column(\Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now), 'title'), 'planned: not yet');
     same(['Maintenance Sunday'], array_column(\Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now + 4000), 'title'), 'while it lasts');
+    $viewer = new \App\Models\User('viewer@example.com');
+    \Illuminate\Support\Facades\Auth::$user = $viewer;
+    \Illuminate\Support\Facades\Cache::$store = [];
+    same([], ext()->renderStatusBar(), 'the footer hook: nothing while nothing is on');
+    ext()->addNotice('Something for everyone', 'Hello.', 'info', [], $now - 10, null);
+    \Illuminate\Support\Facades\Cache::$store = [];
+    $bar = ext()->renderStatusBar();
+    ok(isset($bar['view']) && str_contains((string) $bar['view'], 'Something for everyone'), 'the footer hook wants ["view" => …], as Paymenter merges it');
+    \Illuminate\Support\Facades\Auth::$user = null;
     ext()->endNotice($notice['id'], $now + 4100);
-    same([], \Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now + 4200), 'ended early');
+    same(['Something for everyone'], array_column(\Paymenter\Extensions\Servers\Wizarr\Wizarr::activeNotices($now + 4200), 'title'), 'the maintenance ended early');
     \App\Models\Property::$rows = [];
 });
 

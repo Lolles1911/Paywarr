@@ -179,6 +179,15 @@ trait Status
         if (!$active || !$user) {
             return [];
         }
+        [$servers, $types] = Cache::remember('paywarr:status:who:' . $user->id, 300, fn () => $this->statusTargetsOf($user));
+
+        return array_values(array_filter($active, fn ($n) => (!$n['servers'] && !$n['types'])
+            || array_intersect($n['servers'], $servers) || array_intersect($n['types'], $types)));
+    }
+
+    /** The customer's Paymenter servers and media server types (also before their user is made). */
+    private function statusTargetsOf($user): array
+    {
         $servers = [];
         $types = [];
         foreach (Service::where('user_id', $user->id)->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr'))->with(['product.server', 'properties'])->get() as $service) {
@@ -192,35 +201,45 @@ trait Status
             if ((ExtensionHelper::settingsToArray($service->product->server->settings ?? [])['backend'] ?? '') === 'silo') {
                 $types[] = 'silo';
             }
+            // Invited, user not made yet: the type of each server it is invited to.
+            try {
+                $ext = $this->forServiceServer($service);
+                foreach ($ext->grantKeys(ExtensionHelper::getServiceProperties($service)) as $grant) {
+                    if ($grant !== '' && ($type = $ext->serverInfo()[(int) $grant]['type'] ?? '') !== '') {
+                        $types[] = $type;
+                    }
+                }
+            } catch (Throwable $e) {
+                // Wizarr away: the users' types are enough.
+            }
         }
 
-        return array_values(array_filter($active, fn ($n) => (!$n['servers'] && !$n['types'])
-            || array_intersect($n['servers'], $servers) || array_intersect($n['types'], $types)));
+        return [array_values(array_unique($servers)), array_values(array_unique($types))];
     }
 
-    /** The bar on top of the client area (footer hook; moved to the top by a line of script). */
-    public function renderStatusBar()
+    /** The bar on top of the client area (footer hook, as ['view' => …]; moved to the top by a line of script). */
+    public function renderStatusBar(): array
     {
         if (!Auth::check()) {
-            return '';
+            return [];
         }
         try {
             $notices = $this->noticesFor(Auth::user());
         } catch (Throwable $e) {
-            return '';
+            return [];
         }
         if (!$notices) {
-            return '';
+            return [];
         }
         $n = $notices[0];
         $colour = $n['kind'] === 'outage' ? '#b91c1c' : ($n['kind'] === 'maintenance' ? '#b45309' : '#6d28d9');
         $id = 'paywarr-status-' . $n['id'];
 
-        return new HtmlString('<div id="' . e($id) . '" style="background:' . $colour . ';color:#fff;padding:.6rem 1rem;font-size:.95rem;display:flex;gap:.8rem;align-items:center;justify-content:center;flex-wrap:wrap;position:relative;z-index:60">'
+        return ['view' => new HtmlString('<div id="' . e($id) . '" style="background:' . $colour . ';color:#fff;padding:.7rem 2.6rem .7rem 1rem;margin:1rem auto;border-radius:.8rem;max-width:72rem;font-size:.95rem;display:flex;gap:.8rem;align-items:center;justify-content:center;flex-wrap:wrap;position:relative">'
             . '<strong>' . e($n['title']) . '</strong><span style="opacity:.9">' . e(mb_substr($n['text'], 0, 200)) . '</span>'
             . '<a href="' . e($this->statusPageUrl()) . '" style="color:#fff;text-decoration:underline">' . e(self::t('Status')) . '</a>'
             . '<button type="button" aria-label="' . e(self::t('Close')) . '" style="position:absolute;right:.8rem;background:none;border:0;color:#fff;font-size:1.2rem;cursor:pointer" onclick="try{sessionStorage.setItem(\'' . e($id) . '\',1)}catch(e){};this.parentNode.remove()">×</button></div>'
-            . '<script>(function(){var b=document.getElementById(' . json_encode($id) . ');if(!b)return;try{if(sessionStorage.getItem(' . json_encode($id) . ')){b.remove();return;}}catch(e){}document.body.insertBefore(b,document.body.firstChild);})();</script>');
+            . '<script>(function(){var b=document.getElementById(' . json_encode($id) . ');if(!b)return;try{if(sessionStorage.getItem(' . json_encode($id) . ')){b.remove();return;}}catch(e){}var t=document.querySelector("main")||document.body;t.insertBefore(b,t.firstChild);})();</script>')];
     }
 
     /** GET /status: every media server, up or down, and the notices; for everyone. */

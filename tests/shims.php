@@ -948,3 +948,23 @@ namespace Illuminate\Http {
     /** Only so ShopGate.php can be loaded; the middleware glue itself is not run here. */
     class Request {}
 }
+
+namespace Illuminate\Support {
+    if (!class_exists(HtmlString::class)) {
+        /** Laravel's HtmlString: HTML that is not escaped again. */
+        class HtmlString
+        {
+            public function __construct(private string $html = '') {}
+
+            public function toHtml(): string
+            {
+                return $this->html;
+            }
+
+            public function __toString(): string
+            {
+                return $this->html;
+            }
+        }
+    }
+}
