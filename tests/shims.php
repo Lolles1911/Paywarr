@@ -968,3 +968,23 @@ namespace Illuminate\Support {
         }
     }
 }
+
+namespace Illuminate\Support\Facades {
+    if (!class_exists(URL::class)) {
+        /** URL::signedRoute(), as Paywarr's signed links use it. */
+        class URL
+        {
+            public static function signedRoute($name, array $parameters = []): string
+            {
+                $path = match ($name) {
+                    'extensions.wizarr.nps' => 'wizarr/nps/' . $parameters['user'] . '/' . $parameters['score'],
+                    'extensions.wizarr.why' => 'wizarr/why/' . $parameters['cancellation'] . '/' . $parameters['reason'],
+                    'extensions.wizarr.news.off' => 'wizarr/news/off/' . $parameters['user'],
+                    default => $name,
+                };
+
+                return 'https://pay.example.com/' . $path . '?signature=test';
+            }
+        }
+    }
+}

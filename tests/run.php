@@ -1021,6 +1021,9 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/invite extensions.wizarr.invite', 'POST wizarr/invite extensions.wizarr.invite',
         'POST wizarr/discord/interactions extensions.wizarr.discord.interactions', 'GET wizarr/news/off/{user} extensions.wizarr.news.off',
         'GET status extensions.wizarr.status-page',
+        'GET wizarr/help extensions.wizarr.help', 'POST wizarr/checklist/close extensions.wizarr.checklist.close',
+        'GET wizarr/switch/{service} extensions.wizarr.switch', 'POST wizarr/switch/{service} extensions.wizarr.switch',
+        'GET wizarr/nps/{user}/{score} extensions.wizarr.nps', 'POST wizarr/nps/{user}/{score} extensions.wizarr.nps', 'GET wizarr/why/{cancellation}/{reason} extensions.wizarr.why',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -4105,6 +4108,91 @@ test('free access: who is free, the rules, warned, then removed; watching again 
     \Paymenter\Extensions\Servers\Wizarr\Wizarr::setFreeRules(['enabled' => false]);
     same([], ext()->runFreeAccess($members, $plays, $now, fn () => throw new RuntimeException('off')), 'off: nothing');
     \App\Models\Property::$rows = [];
+});
+
+/* ---------- help, checklist, switching, unpaid orders, uptime, satisfaction, CSV ---------- */
+
+test('help: Paywarr\'s guides and questions until edited; the edit wins', function () {
+    \App\Models\Property::$rows = [];
+    $help = \Paymenter\Extensions\Servers\Wizarr\Wizarr::helpContent();
+    ok(count($help['guides']) >= 5 && count($help['faq']) >= 5, 'built-in guides and questions');
+    ok((bool) array_filter($help['guides'], fn ($g) => in_array('plex', $g['types'], true)), 'a guide for Plex');
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::storePut('help', ['intro' => 'Hej', 'guides' => [['title' => 'Mit TV', 'types' => ['jellyfin'], 'text' => 'Trin 1']], 'faq' => []]);
+    same(['Mit TV', [], 'Hej'], [\Paymenter\Extensions\Servers\Wizarr\Wizarr::helpContent()['guides'][0]['title'], \Paymenter\Extensions\Servers\Wizarr\Wizarr::helpContent()['faq'], \Paymenter\Extensions\Servers\Wizarr\Wizarr::helpContent()['intro']], 'your own texts');
+    \App\Models\Property::$rows = [];
+});
+
+test('switching: between the product\'s servers once a month, the old user kept until the new one exists', function () {
+    $now = time();
+    $service = chosen('');
+    $product = settings(['server_ids' => ['1', '4']]);
+    $service->product->settings = $product;
+    $service->properties()->updateOrCreate(['key' => 'wizarr_servers'], ['name' => 'x', 'value' => '1']);
+    ext()->createServer($service, $product, props($service));
+    same(['1'], ext()->grantKeys($service->propertyArray()), 'on Jellyfin only');
+    ok(ext()->canSwitch($service, $product, props($service)), 'the button shows (without asking Wizarr)');
+    same(['server:1', 'server:4'], array_keys(ext()->switchChoices($service)), 'Jellyfin and Emby to choose from');
+    tellsCustomer(fn () => ext()->switchServer($service, 'server:1', $now), 'another media server', 'not the one it has');
+    ext()->switchServer($service, 'server:4', $now);
+    same(['1', '4'], ext()->grantKeys($service->propertyArray()), 'both while moving: the old user stays');
+    tellsCustomer(fn () => ext()->switchServer($service, 'server:1', $now + 60), 'moving already', 'one move at a time');
+    same([], ext()->finishSwitches([$service], $now + 86400), 'the new user isn\'t made yet');
+    same([1], ext()->finishSwitches([$service], $now + 8 * 86400), 'a week later the move ends anyway');
+    same(['4'], ext()->grantKeys($service->propertyArray()), 'only Emby now');
+    ok(ext()->switchRefusal($service, $now + 9 * 86400) !== null, 'once a month');
+});
+
+test('unpaid order: reminded after the hours set, once (or twice); old orders left alone', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $now = time();
+    $order = wizarrService(120); $order->status = 'pending'; $order->created_at = date('Y-m-d H:i:s', $now - 25 * 3600);
+    $invoice = fn () => (object) ['id' => 7];
+    same([], ext()->sendCartReminders([$order], $now, $invoice), 'off');
+    same([120], ext(['cart_reminder_hours' => '24'])->sendCartReminders([$order], $now, $invoice), 'after 24 hours');
+    same('Forgot something?', mailsTo('customer120@example.com')[0]['subject'] ?? null, 'mailed');
+    same([], ext(['cart_reminder_hours' => '24'])->sendCartReminders([$order], $now + 3600, $invoice), 'once');
+    same([120], ext(['cart_reminder_hours' => '24', 'cart_reminder_again_hours' => '72'])->sendCartReminders([$order], $now + 48 * 3600, $invoice), 'again at 72 hours');
+    $old = wizarrService(121); $old->status = 'pending'; $old->created_at = date('Y-m-d H:i:s', $now - 9 * 86400);
+    same([], ext(['cart_reminder_hours' => '24'])->sendCartReminders([$old], $now, $invoice), 'older than a week: left alone');
+});
+
+test('uptime: checks per server per day, as percent, and day bars', function () {
+    \App\Models\Property::$rows = [];
+    $now = strtotime('today 12:00');
+    $up = [['server_name' => 'Plex', 'server_type' => 'plex', 'status' => 'up', 'historical' => false]];
+    $down = [['server_name' => 'Plex', 'server_type' => 'plex', 'status' => 'down', 'historical' => false]];
+    for ($i = 0; $i < 9; $i++) { ext()->monitorStatus($now + $i * 60, $up, []); }
+    ext()->monitorStatus($now + 600, $down, []);
+    $u = \Paymenter\Extensions\Servers\Wizarr\Wizarr::uptime(30, $now + 700)['tracearr:Plex'];
+    same([90.0, 90.0], [$u['percent'], end($u['days'])], '9 of 10 checks up');
+    same(30, count($u['days']), '30 days');
+    ok(str_contains(\Paymenter\Extensions\Servers\Wizarr\Wizarr::uptimeBars($u['days']), '#ef4444'), 'a red day (below 95%)');
+    \App\Models\Property::$rows = [];
+});
+
+test('satisfaction: asked after a month and every half year; NPS counted; why they cancelled', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    \App\Models\Property::$rows = [];
+    $now = time();
+    $paying = wizarrService(130); $paying->user->id = $paying->user_id = 130; $paying->price = 9.0; $paying->created_at = date('Y-m-d H:i:s', $now - 40 * 86400);
+    $fresh = wizarrService(131); $fresh->user->id = $fresh->user_id = 131; $fresh->price = 9.0; $fresh->created_at = date('Y-m-d H:i:s', $now - 5 * 86400);
+    $gone = wizarrService(132); $gone->user->id = $gone->user_id = 132;
+    $cancellation = (object) ['id' => 55, 'service' => $gone];
+    same(['nps' => [], 'why' => []], ext()->sendSurveys([$paying], [$cancellation], $now), 'off');
+    same(['nps' => [130], 'why' => [55]], ext(['survey' => '1'])->sendSurveys([$paying, $fresh], [$cancellation], $now), 'a month in; and the cancellation');
+    ok(str_contains(mailsTo('customer130@example.com')[0]['html'] ?? '', 'wizarr/nps/130/10'), 'one-click scores in the mail');
+    ok(str_contains(mailsTo('customer132@example.com')[0]['html'] ?? '', 'wizarr/why/55/price'), 'one-click reasons');
+    same(['nps' => [], 'why' => []], ext(['survey' => '1'])->sendSurveys([$paying], [$cancellation], $now + 86400), 'not again');
+    same(['nps' => [130], 'why' => []], ext(['survey' => '1'])->sendSurveys([$paying], [], $now + 183 * 86400), 'half a year later');
+    $answers = [['score' => 10, 'at' => $now], ['score' => 9, 'at' => $now], ['score' => 7, 'at' => $now], ['score' => 3, 'at' => $now], ['score' => 0, 'at' => $now - 400 * 86400]];
+    same(['score' => 25, 'promoters' => 2, 'passives' => 1, 'detractors' => 1, 'count' => 4], \Paymenter\Extensions\Servers\Wizarr\Wizarr::npsScore($answers, $now - 365 * 86400), 'NPS: 50% - 25%');
+    \App\Models\Property::$rows = [];
+});
+
+test('CSV: a header and rows Excel opens (UTF-8, semicolons, quotes)', function () {
+    require_once __DIR__ . '/../extensions/Servers/Wizarr/Admin/Csv.php';
+    $text = \Paymenter\Extensions\Servers\Wizarr\Admin\Csv::text(['Name', 'Note'], [['Ølgod', 'a; b'], ['x', ['y', 'z']]]);
+    same("\xEF\xBB\xBFName;Note\nØlgod;\"a; b\"\nx;\"y, z\"\n", $text, 'as Excel reads it');
 });
 
 /* ---------- summary ---------- */

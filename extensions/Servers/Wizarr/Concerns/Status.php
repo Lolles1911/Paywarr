@@ -165,11 +165,65 @@ trait Status
             }
         }
         self::storePut('status_servers', $state);
+        $this->recordUptime($seen, $now);
         if ($changed) {
             self::saveNotices($notices);
         }
 
         return $state;
+    }
+
+    /** Counts each check per server per day (90 days kept): [checks, down]. */
+    private function recordUptime(array $seen, int $now): void
+    {
+        if (!$seen) {
+            return;
+        }
+        $uptime = self::storeGet('status_uptime', []);
+        $day = date('Y-m-d', $now);
+        $oldest = date('Y-m-d', $now - 90 * 86400);
+        foreach ($seen as $key => $server) {
+            $uptime[$key]['name'] = $server['name'];
+            $uptime[$key]['days'][$day] = [($uptime[$key]['days'][$day][0] ?? 0) + 1, ($uptime[$key]['days'][$day][1] ?? 0) + ($server['up'] ? 0 : 1)];
+            $uptime[$key]['days'] = array_filter($uptime[$key]['days'], fn ($d) => $d >= $oldest, ARRAY_FILTER_USE_KEY);
+        }
+        self::storePut('status_uptime', $uptime);
+    }
+
+    /**
+     * Uptime per server over $days days: key => name, percent (null: no
+     * checks), and per day (oldest first) the percent or null.
+     */
+    public static function uptime(int $days = 30, ?int $now = null): array
+    {
+        $now ??= time();
+        $result = [];
+        foreach (self::storeGet('status_uptime', []) as $key => $row) {
+            $checks = 0;
+            $down = 0;
+            $perDay = [];
+            for ($i = $days - 1; $i >= 0; $i--) {
+                $d = $row['days'][date('Y-m-d', $now - $i * 86400)] ?? null;
+                $perDay[] = $d ? round(100 * ($d[0] - $d[1]) / max(1, $d[0]), 2) : null;
+                $checks += $d[0] ?? 0;
+                $down += $d[1] ?? 0;
+            }
+            $result[$key] = ['name' => (string) ($row['name'] ?? $key), 'percent' => $checks ? round(100 * ($checks - $down) / $checks, 2) : null, 'days' => $perDay];
+        }
+
+        return $result;
+    }
+
+    /** Small day bars for uptime (green, orange, red; grey without checks). */
+    public static function uptimeBars(array $days): string
+    {
+        $bars = '';
+        foreach ($days as $percent) {
+            $colour = $percent === null ? 'rgba(127,127,127,.25)' : ($percent >= 99.5 ? '#22c55e' : ($percent >= 95 ? '#f59e0b' : '#ef4444'));
+            $bars .= '<span title="' . e($percent === null ? '—' : $percent . '%') . '" style="flex:1;height:1.6rem;border-radius:2px;background:' . $colour . '"></span>';
+        }
+
+        return '<div style="display:flex;gap:2px;margin-top:.4rem">' . $bars . '</div>';
     }
 
     /** The notices that concern this customer now (their servers and media server types), kept a minute. */
@@ -258,10 +312,14 @@ trait Status
             $html .= '<p style="padding:1rem 1.2rem;border-radius:.9rem;background:rgba(34,197,94,.12);margin-bottom:.8rem">' . $e(self::t('Everything is running.')) . '</p>';
         }
         if ($state) {
+            $uptime = self::uptime(30);
             $html .= '<div style="display:grid;gap:.5rem;margin:1.2rem 0">';
-            foreach ($state as $server) {
-                $html .= '<div style="display:flex;justify-content:space-between;padding:.7rem 1rem;border-radius:.7rem" class="bg-background-secondary">'
-                    . '<span>' . $e($server['name']) . '</span><span style="font-weight:600;color:' . ($server['up'] ? '#22c55e' : '#ef4444') . '">' . $e($server['up'] ? self::t('Running') : self::t('Down')) . '</span></div>';
+            foreach ($state as $key => $server) {
+                $u = $uptime[$key] ?? null;
+                $html .= '<div style="padding:.7rem 1rem;border-radius:.7rem" class="bg-background-secondary"><div style="display:flex;justify-content:space-between;gap:1rem">'
+                    . '<span>' . $e($server['name']) . '</span><span><span style="opacity:.7;font-size:.9rem;margin-right:.8rem">' . ($u && $u['percent'] !== null ? $e(self::t(':percent% up, 30 days', ['percent' => $u['percent']])) : '') . '</span>'
+                    . '<span style="font-weight:600;color:' . ($server['up'] ? '#22c55e' : '#ef4444') . '">' . $e($server['up'] ? self::t('Running') : self::t('Down')) . '</span></span></div>'
+                    . ($u ? self::uptimeBars($u['days']) : '') . '</div>';
             }
             $html .= '</div>';
         }

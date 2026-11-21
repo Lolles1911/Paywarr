@@ -106,7 +106,18 @@ class PaywarrNotices extends Page implements HasTable
 
     public function content(Schema $schema): Schema
     {
-        return $schema->components([EmbeddedTable::make()]);
+        $rows = '';
+        $u90 = Wizarr::uptime(90);
+        foreach (Wizarr::uptime(30) as $key => $u) {
+            $rows .= '<div style="margin-bottom:1rem"><div style="display:flex;justify-content:space-between"><strong>' . e($u['name']) . '</strong><span style="opacity:.75">'
+                . e(($u['percent'] ?? '—') . '% (30 days) · ' . ($u90[$key]['percent'] ?? '—') . '% (90 days)') . '</span></div>' . Wizarr::uptimeBars($u['days']) . '</div>';
+        }
+
+        return $schema->components([
+            \Filament\Schemas\Components\Section::make('Uptime')->description('Checked every minute; each bar is a day.')->collapsible()
+                ->schema([\Filament\Schemas\Components\Html::make(new \Illuminate\Support\HtmlString($rows ?: '<p style="opacity:.7">No checks yet: needs Tracearr on the Wizarr server, or a Silo.</p>'))]),
+            EmbeddedTable::make(),
+        ]);
     }
 
     public function table(Table $table): Table

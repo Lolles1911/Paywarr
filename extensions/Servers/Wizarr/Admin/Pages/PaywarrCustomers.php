@@ -105,6 +105,7 @@ class PaywarrCustomers extends Page implements HasTable
         return [
             Action::make('back')->label('All customers')->icon('ri-arrow-left-line')->color('gray')
                 ->visible(fn () => $this->customer !== null)->url(fn () => static::getUrl()),
+            \Paymenter\Extensions\Servers\Wizarr\Admin\Csv::action('paywarr-customers', fn () => self::csvRows())->visible(fn () => $this->customer === null),
             Action::make('message')->label('Send a message')->icon('ri-send-plane-line')->color('gray')
                 ->visible(fn () => $this->customer !== null && self::canChange())
                 ->modalWidth('2xl')->schema(PaywarrMessages::messageFields(false))->modalSubmitActionLabel('Send')
@@ -244,6 +245,29 @@ class PaywarrCustomers extends Page implements HasTable
         krsort($lines, SORT_NATURAL);
 
         return array_values(array_slice($lines, 0, 12));
+    }
+
+    /** Every Paywarr subscription as CSV rows. */
+    public static function csvRows(): array
+    {
+        $rows = [];
+        $wizarr = new Wizarr([]);
+        foreach (PaywarrInventory::services() as $service) {
+            $props = ExtensionHelper::getServiceProperties($service);
+            $users = [];
+            foreach ($props as $key => $value) {
+                if ($key === 'wizarr_users' || str_starts_with((string) $key, 'wizarr_users:')) {
+                    foreach (array_filter(explode(',', (string) $value)) as $entry) {
+                        $users[] = rawurldecode(explode(':', $entry . '::')[1]);
+                    }
+                }
+            }
+            $rows[] = [$service->id, trim(($service->user->first_name ?? '') . ' ' . ($service->user->last_name ?? '')), $service->user->email ?? '',
+                (string) ($service->user?->properties()->where('key', 'discord_username')->value('value') ?? ''), $service->product->name ?? '', $service->status,
+                $service->price, $service->currency_code, $users, $props['trial_ends_at'] ?? '', (string) $service->created_at, (string) $service->expires_at];
+        }
+
+        return [['ID', 'Name', 'Email', 'Discord', 'Product', 'Status', 'Price', 'Currency', 'Media server users', 'Trial ends', 'Created', 'Renews'], $rows];
     }
 
     /** Subscriptions with a problem: failed, expired, new_link, discord_left or trial_over. */

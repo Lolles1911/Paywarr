@@ -57,6 +57,14 @@ trait ClientArea
     public function getActions(Service $service, $settings, $properties): array
     {
         $actions = $this->accessActions($service, $settings, $properties);
+        // "Change media server", when there is a choice (SwitchServer).
+        try {
+            if ($this->canSwitch($service, $settings, $properties)) {
+                $actions[] = ['type' => 'button', 'label' => self::t('Change media server'), 'url' => $this->switchPageUrl($service)];
+            }
+        } catch (Throwable $e) {
+            // Without it the rest still shows.
+        }
         // "Pause", when customers may pause (Loyalty).
         try {
             if ($this->pauseRules()['per_year'] > 0 && $this->pauseRefusal($service, $settings, time()) === null) {

@@ -58,6 +58,17 @@ class PaywarrReports extends Page
             $actions[] = Action::make('m' . str_replace('-', '', $month))->label(date('M Y', strtotime($month . '-01')))
                 ->color($this->month === $month ? 'primary' : 'gray')->url(static::getUrl(['month' => $month]));
         }
+        $actions[] = \Paymenter\Extensions\Servers\Wizarr\Admin\Csv::action('paywarr-monthly-reports', function () {
+            $rows = [];
+            foreach (Wizarr::storeGet('monthly_reports', []) as $r) {
+                $rows[] = [$r['month'], implode(' ', array_map(fn ($c, $a) => $a . ' ' . $c, array_keys($r['money']), $r['money'])), $r['subscriptions']['paying'], $r['subscriptions']['new'],
+                    $r['subscriptions']['cancelled'], $r['subscriptions']['trials'], $r['subscriptions']['converted'], $r['subscriptions']['gifts'],
+                    $r['care']['pauses'], $r['care']['winbacks'], $r['care']['referrals'], $r['care']['anniversaries'],
+                    $r['watching']['plays'] ?? '', $r['watching']['hours'] ?? '', $r['watching']['viewers'] ?? '', $r['streams']['over'], $r['streams']['stopped']];
+            }
+
+            return [['Month', 'Paid', 'Paying', 'New', 'Cancelled', 'Trials', 'Trials converted', 'Gift cards', 'Pauses', 'Come-back codes', 'Friends', 'Anniversaries', 'Plays', 'Hours', 'Viewers', 'Over the stream limit', 'Streams stopped'], $rows];
+        });
         $actions[] = Action::make('remake')->label('Make again')->icon('ri-refresh-line')->color('gray')
             ->visible(fn () => $this->month !== '')
             ->action(function () {

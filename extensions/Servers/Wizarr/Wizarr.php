@@ -92,6 +92,11 @@ class Wizarr extends Server
     use Concerns\MonthlyReport;
     use Concerns\Cleanup;
     use Concerns\FreeAccess;
+    use Concerns\Help;
+    use Concerns\Checklist;
+    use Concerns\SwitchServer;
+    use Concerns\CartReminder;
+    use Concerns\Satisfaction;
 
     /** Wizarr only accepts these lifetimes (in days) for an invitation link. */
     private const LINK_LIFETIMES = [1, 7, 30];
@@ -570,6 +575,28 @@ class Wizarr extends Server
                 'description' => 'E.g. 7 (days) or 20 (%).',
             ],
             [
+                'name' => 'cart_reminder_hours',
+                'label' => 'Unpaid order: remind after (hours)',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:1|max:168',
+                'description' => 'Optional. An order whose first invoice is still unpaid gets a mail with the link to pay. Empty: off.',
+            ],
+            [
+                'name' => 'cart_reminder_again_hours',
+                'label' => 'Unpaid order: remind again after (hours)',
+                'type' => 'number',
+                'required' => false,
+                'validation' => 'nullable|integer|min:2|max:168',
+                'description' => 'Optional. A second reminder, counted from the order. Empty: only one.',
+            ],
+            [
+                'name' => 'survey',
+                'label' => 'Satisfaction survey',
+                'type' => 'checkbox',
+                'description' => 'After a month as a paying customer and every half year after: "How likely are you to recommend us?" (0-10, one click) by mail; and customers who cancel are asked why. Answers under Paywarr -> Satisfaction.',
+            ],
+            [
                 'name' => 'cleanup_disable_days',
                 'label' => 'Clean-up: switch off users without a subscription after (days)',
                 'type' => 'number',
@@ -928,6 +955,16 @@ class Wizarr extends Server
             'condition' => Auth::check() && Cache::remember('wizarr:can-refer:' . Auth::id(), 300, fn () => $this->canRefer(Auth::user())),
         ]);
 
+        // "Help": guides per device and questions; and "Getting started" on the dashboard.
+        Event::listen('navigation.dashboard', fn () => [
+            'name' => self::t('Help'),
+            'route' => 'extensions.wizarr.help',
+            'icon' => 'ri-question',
+            'priority' => 32,
+            'condition' => Auth::check(),
+        ]);
+        Event::listen('pages.dashboard', fn () => $this->renderChecklist());
+
         // "Service status": every media server, up or down, and your notices.
         Event::listen('navigation.dashboard', fn () => [
             'name' => self::t('Service status'),
@@ -993,6 +1030,9 @@ class Wizarr extends Server
                 $this->makeMonthlyReportIfDue();
                 $this->runCleanup();
                 $this->runFreeAccess();
+                $this->finishSwitches();
+                $this->sendCartReminders();
+                $this->sendSurveys();
                 $this->sendNewsIfDue();
                 $this->registerDiscordCommandsIfNeeded();
                 $this->queueHeartbeat();

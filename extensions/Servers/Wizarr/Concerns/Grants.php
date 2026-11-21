@@ -343,6 +343,11 @@ trait Grants
             throw new WizarrException('This product has no media server selected. Edit the product and choose one.');
         }
         $this->setProperty($service, self::PROP_SERVERS, 'Wizarr media servers', implode(',', $wanted));
+        // Moving to another server (SwitchServer): the old one stays until the new user exists.
+        $keep = (string) ($properties[self::PROP_SWITCH_KEEP] ?? '');
+        if ($keep !== '') {
+            $wanted = array_values(array_unique(array_merge($wanted, $this->idList(explode('|', $keep)[0]))));
+        }
 
         // Servers no longer chosen.
         foreach ($covered as $id => $grant) {

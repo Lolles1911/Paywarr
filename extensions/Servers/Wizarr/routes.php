@@ -71,3 +71,22 @@ Route::middleware(['web', 'signed'])
 Route::middleware(['web', 'throttle:60,1'])
     ->get('/status', [Wizarr::class, 'statusPage'])
     ->name('extensions.wizarr.status-page');
+
+// Help: guides per device and questions. "Getting started" can be hidden.
+Route::middleware(['web', 'auth'])->get('/wizarr/help', [Wizarr::class, 'helpPage'])->name('extensions.wizarr.help');
+Route::middleware(['web', 'auth'])->post('/wizarr/checklist/close', [Wizarr::class, 'closeChecklist'])->name('extensions.wizarr.checklist.close');
+
+// The customer changes their media server.
+Route::middleware(['web', 'auth', 'throttle:30,1'])->name('extensions.wizarr.switch')->group(function () {
+    Route::get('wizarr/switch/{service}', [Wizarr::class, 'switchPage'])->whereNumber('service');
+    Route::post('wizarr/switch/{service}', [Wizarr::class, 'switchPage'])->whereNumber('service');
+});
+
+// Satisfaction: one click in the mail (signed), then a comment; and why they cancelled.
+Route::middleware(['web', 'signed', 'throttle:30,1'])->name('extensions.wizarr.nps')->group(function () {
+    Route::get('wizarr/nps/{user}/{score}', [Wizarr::class, 'npsAnswer'])->whereNumber('user')->whereNumber('score');
+    Route::post('wizarr/nps/{user}/{score}', [Wizarr::class, 'npsAnswer'])->whereNumber('user')->whereNumber('score');
+});
+Route::middleware(['web', 'signed', 'throttle:30,1'])
+    ->get('wizarr/why/{cancellation}/{reason}', [Wizarr::class, 'whyAnswer'])->whereNumber('cancellation')
+    ->name('extensions.wizarr.why');

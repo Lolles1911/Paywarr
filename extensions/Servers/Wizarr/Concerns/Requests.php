@@ -287,6 +287,12 @@ trait Requests
             return $back()->with('wizarr_requests_error', $e->getMessage());
         }
 
+        try {
+            Auth::user()?->properties()->updateOrCreate(['key' => 'paywarr_first_request'], ['name' => 'Made a request', 'value' => (string) time()]);
+        } catch (Throwable $e) {
+            // Only for "Getting started".
+        }
+
         return $back()->with('wizarr_requests_notice', self::t('Requested. You can follow it under "My requests".'));
     }
 
