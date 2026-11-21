@@ -63,6 +63,27 @@ trait News
         return ['discord' => $this->postNews($lists), 'mails' => $this->truthy($this->config('news_mail') ?? false) ? $this->mailNews($lists, $recipients) : 0];
     }
 
+    /** A post in the announcements channel (e.g. Paywarr Stats' year in review); false when it can't be posted. */
+    public function announce(string $text): bool
+    {
+        if (($ext = $this->anyServer('announce_channel_id')) !== $this) {
+            return $ext->announce($text);
+        }
+        $channel = trim((string) ($this->config('announce_channel_id') ?? ''));
+        if ($channel === '' || !$this->discordConfigured()) {
+            return false;
+        }
+        try {
+            $this->discord()->postMessage($channel, $text);
+
+            return true;
+        } catch (Throwable $e) {
+            Log::warning('Wizarr: announcement not posted in Discord: ' . $e->getMessage());
+
+            return false;
+        }
+    }
+
     /** Titles (with year), movies and shows apart, each once, newest first. */
     public function newsLists(array $items): array
     {
@@ -94,15 +115,7 @@ trait News
                     . (count($lists[$type]) > 25 ? "\n" . self::t('… and :count more', ['count' => count($lists[$type]) - 25]) : '') . "\n";
             }
         }
-        try {
-            $this->discord()->postMessage($channel, $text);
-
-            return true;
-        } catch (Throwable $e) {
-            Log::warning('Wizarr: "New on the server" not posted in Discord: ' . $e->getMessage());
-
-            return false;
-        }
+        return $this->announce($text);
     }
 
     /** Mails active customers; returns how many. */
