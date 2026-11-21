@@ -105,4 +105,33 @@ Settings → Data & API → API), Paywarr knows what is streaming:
 
 Silo is not in Tracearr, so Silo subscriptions have no stream limit.
 
+## Messages, service status and reports
+
+- **Message customers:** a message to all active customers, those on a server
+  or product, a status (paying, on a trial, suspended, cancelled with nothing
+  running), or one customer ("Send a message" on their card). By mail, private
+  Discord message, under the bell and/or as a post in the announcements
+  channel. The messages sent are listed.
+- **Service status:** the notices customers see (see What customers see):
+  outages that came by themselves, and your own, e.g. planned maintenance from
+  and until a time, for everyone or the customers of some servers, optionally
+  mailed and posted. End or delete them here.
+- **Monthly reports:** made on the 1st for the month before and kept two years;
+  "This month so far" at any time. Paid for subscriptions, paying customers,
+  new and cancelled, trials and how many became paying, gift cards, what was
+  done to keep customers (pauses, come-back codes, friends, anniversaries),
+  watching (with Tracearr) and streams and sharing.
+
+## Clean-up
+
+With **Clean-up: switch off users without a subscription after (days)** on the
+Wizarr server, users on the media servers that belong to no subscription
+(left over, made by hand) are switched off after that many days, checked
+daily, and with **delete them after (more days)** deleted that much later.
+Plex users can't be switched off; they are only deleted. Expired invitations
+that belong to nobody are removed a week after they expired. Media server users
+shows when each will be switched off and deleted; **Keep** a user (an old
+friend, your own) and the clean-up never touches it. **Clean-up log** lists
+what was done.
+
 [← Paywarr](../README.md)

@@ -64,9 +64,10 @@ Paymenter decides **when**; the extension translates that into Wizarr:
   when it ends. → [Setting up](docs/setup.md), [Media servers](docs/media-servers.md)
 - **For customers:** a box on every page until the user is made, a welcome mail
   with apps and your Discord, reminders, "Problems? Get a new link", password
-  reset, pausing instead of cancelling, a code to invite friends (free months
-  for them), a come-back code after cancelling, and Requests, "Report a
-  problem" and Open in the top bar. → [What customers see](docs/customers.md)
+  reset, pausing instead of cancelling, extra users for family, a code to invite
+  friends (free months for them), a come-back code after cancelling, an
+  anniversary thank-you, service status with a bar when a server is down, and
+  Requests, "Report a problem" and Open in the top bar. → [What customers see](docs/customers.md)
 - **Trials, gift cards and refunds:** a trial per server that becomes a
   subscription with the same user, gift codes a customer can send a friend.
   → [Trials, gift cards and refunds](docs/subscriptions.md)
@@ -77,8 +78,9 @@ Paymenter decides **when**; the extension translates that into Wizarr:
   and statistics with Paywarr Stats. → [Requests, reports and statistics](docs/requests.md)
 - **Admin:** a Paywarr group in Paymenter's admin with customers (and
   everything you can do for them), server status, media server users,
-  invitations, libraries and checks; with Tracearr, a limit on streams at once
-  and a list of sharing. → [Admin](docs/admin.md)
+  invitations, libraries and checks; messages to customers, service status,
+  monthly reports and a clean-up of users without a subscription; with
+  Tracearr, a limit on streams at once and a list of sharing. → [Admin](docs/admin.md)
 
 ## Installation
 

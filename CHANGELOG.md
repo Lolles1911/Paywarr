@@ -3,6 +3,29 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.27.0 (2026-11-21)
+
+- **New: extra users** (e.g. family): a configurable option `extra_users` and
+  "Extra users: at most" on the product. Each gets their own invitation on
+  every media server of the subscription and follows it; buying fewer removes
+  the last ones. "Max streams at once" per user, or shared.
+- **New: service status.** A media server that goes down gets a notice by
+  itself (a bar on top of the client area for the customers on it, the public
+  page /status, a post in the Discord channel), ended when it is back. Your
+  own notices (e.g. planned maintenance) under Paywarr → Service status,
+  optionally mailed.
+- **New: Paywarr → Message customers.** To all active customers, a server, a
+  product, a status, or one customer from their card; by mail, Discord, the
+  bell and/or the announcements channel.
+- **New: anniversaries.** Every so many months as a paying customer: a
+  thank-you with free days, a discount code, or only the thank-you.
+- **New: Paywarr → Monthly reports**, made on the 1st and kept two years:
+  money, subscriptions, trials, keeping customers, watching, streams.
+- **New: clean-up.** Users on the media servers without a subscription are
+  switched off after a number of days and deleted later (both settings);
+  "Keep" on Media server users, and a log of what was done. Expired
+  invitations that belong to nobody are removed.
+
 ## 1.26.0 (2026-11-21)
 
 - **New: customers pause themselves** ("Pause subscription", instead of

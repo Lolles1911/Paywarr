@@ -112,6 +112,35 @@ paid, the customer gets **free months** (1 by default) added to their
 subscription, and a mail saying so. Each friend can use a code once, and
 nobody can use their own.
 
+## Extra users
+
+A subscription can have extra users, e.g. for family. Make a configurable
+option with environment variable `extra_users` and values `0`, `1`, `2`, …
+(with a price each, as with Requests), attach it to the product, and set
+**Extra users: at most** on the product. Each extra user gets their own
+invitation on every media server of the subscription ("Jellyfin · user 2"),
+in the welcome mail and on the subscription, and follows the subscription:
+paused, suspended, cancelled. Buying fewer later removes the last ones.
+**Max streams at once** applies to each user, or to all together with
+**Extra users share "Max streams at once"**.
+
+## Anniversaries
+
+With **Anniversary: every (months)** set (e.g. 12), a paying customer gets a
+thank-you on that day, by mail and Discord, with **Anniversary: gift**: free
+days added to their subscription, a discount code, or only the thank-you.
+Customers already past an anniversary when it is switched on are not
+rewarded backwards.
+
+## Service status
+
+Customers see a bar on top of the client area while a notice concerns them,
+and **Service status** (`/status`, also for visitors) lists every media server,
+up or down, the notices, and those of the last 14 days. A media server that
+goes down (two checks in a row, every minute: Tracearr's servers, and every
+Silo) gets a notice by itself, posted in the announcements channel, and ended
+when it is back. Your own notices are made in admin (see Admin).
+
 ## In the top bar
 
 Signed-in customers get links next to Home and Shop (in the menu on a phone):
