@@ -3,7 +3,16 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
-## 1.32.1 (2026-11-22)
+## 1.33.0 (2026-11-22)
+
+- **A fuller top bar** for customers with a subscription:
+  - **🟢 Open Jellyfin** (Plex, Emby, Silo), first, with a dot for how the
+    servers are doing (🟠 maintenance, 🔴 down); before their user exists,
+    **✨ Create your user** with their invitation instead.
+  - **My <site name>** as a menu: Overview, and while they are on, Movie
+    night, Challenge, Friend pass, Invite a friend, and Service status.
+  - **Help** (Requests and Report a problem as before, for those who have them).
+- Fixed in this version too (was going to be 1.32.1):
 
 - **Fixed: empty posters** on /catalog, the front page and My <site name>.
   A title Tracearr has no image for (it answers with a placeholder) is left
