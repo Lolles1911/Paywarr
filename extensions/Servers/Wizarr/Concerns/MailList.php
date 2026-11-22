@@ -101,4 +101,39 @@ trait MailList
 
         return response()->json(['on' => $on]);
     }
+
+    /**
+     * Customers who made their account before the mail list existed are asked
+     * once, in the client area: "News and offers by mail?" Yes / No thanks.
+     * Not by mail (asking for consent by mail is marketing in itself).
+     */
+    public function renderMailListAsk(): array
+    {
+        try {
+            $user = Auth::user();
+            if (!$user) {
+                return [];
+            }
+            // From when accounts get the question at sign-up; older ones are asked here.
+            $since = (int) Cache::rememberForever('paywarr:mail-list-since', fn () => self::storeGet('mail_list_since') ?: tap(time(), fn ($t) => self::storePut('mail_list_since', $t)));
+            if (request()->routeIs('cart') || request()->is('admin*')
+                || $this->propertyValue($user, self::PROP_MAIL_LIST) !== null
+                || ($this->timestampOf($user->created_at ?? null) ?? time()) >= $since) {
+                return [];
+            }
+            $url = route('extensions.wizarr.mail-list');
+        } catch (Throwable $e) {
+            return [];
+        }
+        $e = fn ($v) => e((string) $v);
+
+        return ['view' => new HtmlString('<div id="paywarr-ask" class="bg-background-secondary" role="dialog" aria-labelledby="paywarr-ask-title" style="position:fixed;left:1rem;bottom:1rem;z-index:60;max-width:22rem;width:calc(100% - 2rem);box-sizing:border-box;border-radius:1rem;padding:1.1rem 1.2rem;border:1px solid rgba(127,127,127,.3);box-shadow:0 12px 40px rgba(0,0,0,.45)">'
+            . '<div id="paywarr-ask-title" style="font-weight:700;margin-bottom:.3rem">' . $e(self::t('News and offers by mail?')) . '</div>'
+            . '<div style="font-size:.9rem;opacity:.8;margin-bottom:.8rem">' . $e(self::t('Offers, movie nights and what\'s new on the server. You can stop any time under Account.')) . '</div>'
+            . '<div style="display:flex;gap:.5rem;flex-wrap:wrap"><button type="button" data-on="1" class="bg-primary text-white font-semibold rounded-lg px-4 py-2">' . $e(self::t('Yes please')) . '</button>'
+            . '<button type="button" data-on="0" class="border border-neutral rounded-lg px-4 py-2">' . $e(self::t('No thanks')) . '</button></div></div>'
+            . '<script>(function(){var box=document.getElementById("paywarr-ask");if(!box)return;box.querySelectorAll("button[data-on]").forEach(function(b){b.addEventListener("click",function(){'
+            . 'var m=document.querySelector(\'meta[name="csrf-token"]\');fetch(' . json_encode($url) . ',{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","Accept":"application/json","X-CSRF-TOKEN":m?m.content:""},body:JSON.stringify({on:b.dataset.on==="1"})});'
+            . 'box.innerHTML="<div style=\\"font-weight:600\\">"+' . json_encode(self::t('Thank you!')) . '+"</div>";setTimeout(function(){box.remove()},1500);});});})();</script>')];
+    }
 }

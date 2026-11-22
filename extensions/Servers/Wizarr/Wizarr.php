@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.34.1',
+    version: '1.34.2',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -964,6 +964,7 @@ class Wizarr extends Server
         // "Send me news and offers by mail" on sign-up and Account (MailList).
         self::ensureMailListField();
         Event::listen('footer', fn () => $this->renderCheckoutOptIn());
+        Event::listen('footer', fn () => $this->renderMailListAsk());
 
         // The selection for visitors, on the front page (Posters).
         Event::listen('pages.home', fn () => $this->renderShowcase());
