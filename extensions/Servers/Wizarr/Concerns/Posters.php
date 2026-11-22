@@ -194,6 +194,8 @@ trait Posters
             return $found ? ['type' => $found['type'], 'body' => base64_encode($found['body'])] : false;
         });
         if (!$image) {
+            // Tracearr had no image (it answers with a placeholder): left out from now on.
+            Cache::put('paywarr:posters:bad', [(string) $key => true] + Cache::get('paywarr:posters:bad', []), 86400);
             abort(404);
         }
 
@@ -224,7 +226,7 @@ trait Posters
         foreach ($items as $item) {
             $url = $links[$item['server_type'] ?? ''] ?? '';
             $label = $item['type'] === 'episode' && ($item['show'] ?? '') !== '' ? $item['show'] : $item['title'];
-            $card = '<img src="' . $e($this->posterSrc($item['key'])) . '" alt="' . ($titles ? $e($label) : '') . '" loading="lazy" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:.7rem;background:rgba(127,127,127,.18);display:block">'
+            $card = '<img src="' . $e($this->posterSrc($item['key'])) . '" alt="' . ($titles ? $e($label) : '') . '" loading="lazy" onerror="this.parentNode.style.display=\'none\'" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:.7rem;background:rgba(127,127,127,.18);display:block">'
                 . (isset($item['percent']) ? '<div style="height:4px;border-radius:4px;background:rgba(127,127,127,.3);margin-top:.35rem;overflow:hidden"><div style="height:100%;width:' . (int) $item['percent'] . '%;background:#db2777"></div></div>' : '')
                 . ($titles ? '<div style="font-size:.85rem;font-weight:600;margin-top:.35rem;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' . $e($label) . '</div>' : '');
             $html .= '<' . ($url !== '' ? 'a href="' . $e($url) . '" target="_blank"' : 'div') . ' style="flex:0 0 8.5rem;scroll-snap-align:start">' . $card . '</' . ($url !== '' ? 'a' : 'div') . '>';
@@ -254,9 +256,11 @@ trait Posters
             return '';
         }
 
-        return $this->posterRow(self::t('Continue watching'), $continue, true, $links)
-            . $this->posterRow(self::t('New on the server'), array_slice($shelves['new'], 0, 20), true, $links)
-            . $this->posterRow(self::t('Popular now'), array_slice($shelves['popular'], 0, 20), true, $links);
+        $bad = Cache::get('paywarr:posters:bad', []);
+
+        return $this->posterRow(self::t('Continue watching'), self::usablePosters($continue, $bad, 12), true, $links)
+            . $this->posterRow(self::t('New on the server'), self::usablePosters($shelves['new'], $bad, 20), true, $links)
+            . $this->posterRow(self::t('Popular now'), self::usablePosters($shelves['popular'], $bad, 20), true, $links);
     }
 
     public function showcaseOn(): bool
@@ -268,22 +272,35 @@ trait Posters
     private function showcasePosters(int $limit): array
     {
         $shelves = $this->shelves();
+
+        return self::usablePosters(array_merge($shelves['popular'], $shelves['new']), Cache::get('paywarr:posters:bad', []), $limit);
+    }
+
+    /**
+     * Each title once (the same movie on Jellyfin and Emby is one poster),
+     * leaving out posters that had no image; another server's copy of the
+     * title takes its place.
+     */
+    public static function usablePosters(array $items, array $bad, int $limit): array
+    {
         $seen = [];
         $out = [];
-        foreach (array_merge($shelves['popular'], $shelves['new']) as $item) {
-            if (!isset($seen[$item['key']])) {
-                $seen[$item['key']] = true;
-                $out[] = $item;
+        foreach ($items as $item) {
+            $title = strtolower(($item['type'] === 'episode' ? ($item['show'] ?? '') : '') . '|' . $item['title'] . '|' . ($item['year'] ?? ''));
+            if (isset($bad[$item['key']]) || isset($seen[$title])) {
+                continue;
             }
+            $seen[$title] = true;
+            $out[] = $item;
         }
 
         return array_slice($out, 0, $limit);
     }
 
-    private function posterGrid(array $items, string $min = '7.5rem'): string
+    private function posterGrid(array $items, string $min = '6rem'): string
     {
         return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(' . $min . ',1fr));gap:.7rem">'
-            . implode('', array_map(fn ($i) => '<img src="' . e($this->posterSrc($i['key'])) . '" alt="" loading="lazy" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:.7rem;background:rgba(127,127,127,.18)">', $items)) . '</div>';
+            . implode('', array_map(fn ($i) => '<img src="' . e($this->posterSrc($i['key'])) . '" alt="" loading="lazy" onerror="this.remove()" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:.7rem;background:rgba(127,127,127,.18)">', $items)) . '</div>';
     }
 
     private function catalogUrl(): string
@@ -311,7 +328,7 @@ trait Posters
             . '<p style="opacity:.75">' . e(self::t('New movies and shows every week. Here is a taste of what\'s on.')) . '</p></div>'
             . '<a href="' . e($this->catalogUrl()) . '" class="border border-neutral rounded-lg px-4 py-2 font-semibold">' . e(self::t('See the whole selection')) . '</a></div>'
             . '<div style="display:flex;gap:.8rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:.6rem;-webkit-overflow-scrolling:touch">'
-            . implode('', array_map(fn ($i) => '<img src="' . e($this->posterSrc($i['key'])) . '" alt="" loading="lazy" style="flex:0 0 9rem;width:9rem;aspect-ratio:2/3;object-fit:cover;border-radius:.8rem;scroll-snap-align:start;background:rgba(127,127,127,.18)">', $posters))
+            . implode('', array_map(fn ($i) => '<img src="' . e($this->posterSrc($i['key'])) . '" alt="" loading="lazy" onerror="this.remove()" style="flex:0 0 9rem;width:9rem;aspect-ratio:2/3;object-fit:cover;border-radius:.8rem;scroll-snap-align:start;background:rgba(127,127,127,.18)">', $posters))
             . '</div></section>')];
     }
 

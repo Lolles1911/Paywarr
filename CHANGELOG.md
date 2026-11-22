@@ -3,6 +3,15 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.32.1 (2026-11-22)
+
+- **Fixed: empty posters** on /catalog, the front page and My <site name>.
+  A title Tracearr has no image for (it answers with a placeholder) is left
+  out from then on, and a broken image hides itself at once. The same title
+  on two servers (e.g. Jellyfin and Emby) shows once, from the server that
+  has its image.
+- **Smaller posters on phones** on /catalog: three in a row instead of two.
+
 ## 1.32.0 (2026-11-22)
 
 - **Posters on My <site name>:** "Continue watching" (the customer's own

@@ -4233,6 +4233,10 @@ test('posters: a path for each media server, popular by how many watched, contin
         ['title' => 'Up', 'percent' => 95, 'watched' => false, 'path' => 'p2'], ['title' => 'Heat', 'percent' => 1, 'watched' => false, 'path' => 'p3'],
         ['title' => 'Jaws', 'percent' => 50, 'watched' => true, 'path' => 'p4'], ['title' => 'Alien', 'percent' => 30, 'watched' => false, 'path' => 'p5']];
     same(['Dune', 'Alien'], array_column($W::continueTitles($plays), 'title'), 'the latest play per title, 3-90%, not finished');
+    $items = [['key' => 'a', 'type' => 'movie', 'title' => 'Dune', 'year' => 2021], ['key' => 'b', 'type' => 'movie', 'title' => 'Dune', 'year' => 2021],
+        ['key' => 'c', 'type' => 'show', 'title' => 'Lost', 'year' => 2004], ['key' => 'd', 'type' => 'movie', 'title' => 'Up', 'year' => 2009]];
+    same(['a', 'c', 'd'], array_column($W::usablePosters($items, [], 10), 'key'), 'the same movie on two servers: once');
+    same(['b', 'c'], array_column($W::usablePosters($items, ['a' => true], 2), 'key'), 'a poster without an image: the other server\'s copy instead');
 });
 
 /* ---------- help, checklist, switching, unpaid orders, uptime, satisfaction, CSV ---------- */
