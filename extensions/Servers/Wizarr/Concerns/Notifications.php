@@ -23,7 +23,11 @@ trait Notifications
      *
      * @return string[] the channels used: mail, app, discord
      */
-    public function notifyCustomer(Service $service, string $title, string $text, ?array $button = null, ?string $html = null, bool $discord = true): array
+    /**
+     * $marketing: news and offers. The mail goes only to customers on the
+     * mail list (with a link to leave it); the bell and Discord as always.
+     */
+    public function notifyCustomer(Service $service, string $title, string $text, ?array $button = null, ?string $html = null, bool $discord = true, bool $marketing = false): array
     {
         $user = $service->user;
         if (!$user) {
@@ -36,7 +40,8 @@ trait Notifications
         } catch (Throwable $e) {
             Log::warning('Wizarr: notification for user ' . $user->id . ' not created: ' . $e->getMessage());
         }
-        if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html ?? $this->paragraphs($text), $button), (int) $user->id)) {
+        if ((!$marketing || $this->onMailList($user))
+            && $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html ?? $this->paragraphs($text), $button, $marketing ? $this->mailListFooter($user) : ''), (int) $user->id)) {
             $used[] = 'mail';
         }
         if ($discord && $this->sendDiscordMessage($user, $title, $text, $button)) {

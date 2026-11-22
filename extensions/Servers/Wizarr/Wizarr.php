@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.33.0',
+    version: '1.34.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -99,6 +99,7 @@ class Wizarr extends Server
     use Concerns\FriendPass;
     use Concerns\Hub;
     use Concerns\Posters;
+    use Concerns\MailList;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -960,6 +961,9 @@ class Wizarr extends Server
         Event::listen('footer', fn () => $this->renderBanner());
         // A server down or planned maintenance: a bar on top, for the customers it concerns.
         Event::listen('footer', fn () => $this->renderStatusBar());
+        // "Send me news and offers by mail" on sign-up and Account (MailList).
+        self::ensureMailListField();
+
         // The selection for visitors, on the front page (Posters).
         Event::listen('pages.home', fn () => $this->renderShowcase());
         // A campaign's banner with a countdown, also for visitors.

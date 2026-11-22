@@ -273,7 +273,7 @@ trait Loyalty
                 $this->notifyCustomer($last[0], self::t('We\'d love to have you back'),
                     self::t('Your user and everything you have watched are still here. Come back with :percent% off your first month: use the code :code in the cart, until :date.',
                         ['percent' => min(100, $percent), 'code' => $code, 'date' => date(self::t('M j, Y'), $now + $valid * 86400)]),
-                    [self::t('See subscriptions'), $this->shopUrl()]);
+                    [self::t('See subscriptions'), $this->shopUrl()], null, true, true);
                 self::logAdmin($user, (int) $last[0]->id, 'Come-back code ' . $code . ' sent (' . $percent . '% off)', 'Paywarr');
                 $sent[] = $userId;
             } catch (Throwable $e) {

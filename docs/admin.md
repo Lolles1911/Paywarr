@@ -201,8 +201,13 @@ again.
   subscription); **Existing customers** get the percentage off their next
   renewal in the period, once. A banner with a countdown shows on every page
   while it runs, and **Announce** sends it by mail, Discord and the
-  announcements channel when it starts. The list shows new orders with the
-  code, renewals made cheaper and what was given; **End now** stops it.
+  announcements channel when it starts. It starts now unless you set a later
+  time. **Where it shows**: a banner for visitors, a banner for customers,
+  mail and Discord when it starts (mail only to the mail list), and the
+  announcements channel. The list shows when it starts, where it shows, new
+  orders with the code, renewals made cheaper and what was given; **Edit**
+  changes it (the code until someone used it), **Start now** starts a planned
+  one, **End now** stops it.
 - **Movie nights**: **Plan a movie night** with a title, a time, a few words,
   an optional link to the title, and who it is for. **Invite now** sends it by
   mail and Discord and posts it in the announcements channel with a thread for
@@ -217,6 +222,18 @@ again.
   then have **Friend pass** in their menu: a free week for a friend, once a
   month, and once per friend. After the week the friend's user is deleted
   unless they bought a subscription with the same mail address.
+
+## The mail list
+
+News and offers go by mail only to customers on the mail list: they tick
+**Send me news and offers by mail** when they make their account (at
+checkout too) or under Account → Personal details, and leave it with the link
+in every such mail. Everyone starts off the list. Campaigns, movie nights,
+"New on the server", Message customers and "we'd love to have you back" use
+it; mails about the customer's own subscription (invitations, reminders,
+invoices, outages) always go. The field is a Paymenter custom property
+(Admin → Configuration → Custom Properties, key `paywarr_mail_list`) that
+Paywarr makes; rename it there if you like.
 
 ## Satisfaction, Invite a friend board, CSV
 

@@ -123,6 +123,7 @@ trait News
     {
         $recipients ??= User::whereHas('services', fn ($query) => $query->where('status', 'active')->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr')))
             ->whereDoesntHave('properties', fn ($query) => $query->where('key', self::PROP_NEWS_OFF))->get();
+        $recipients = array_filter(is_array($recipients) ? $recipients : iterator_to_array($recipients), fn ($user) => $this->onMailList($user));
         $title = self::t('New on the server this week');
         $section = function (string $heading, array $titles) {
             return $titles ? '<h2 style="font-size:16px;margin:18px 0 8px">' . e($heading) . '</h2><ul style="margin:0 0 12px;padding-left:20px">'
@@ -132,12 +133,7 @@ trait News
             . $section(self::t('Movies'), $lists['movie']) . $section(self::t('Shows'), $lists['show']);
         $sent = 0;
         foreach ($recipients as $user) {
-            try {
-                $off = URL::signedRoute('extensions.wizarr.news.off', ['user' => $user->id]);
-            } catch (Throwable $e) {
-                $off = '';
-            }
-            $footer = $off !== '' ? e(self::t('You get this because you have a subscription with us.')) . ' <a href="' . e($off) . '">' . e(self::t('Stop these mails')) . '</a>' : '';
+            $footer = $this->mailListFooter($user);
             if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body, [self::t('Start watching'), $this->accountUrl()], $footer), (int) $user->id)) {
                 $sent++;
             }
@@ -154,8 +150,8 @@ trait News
         if (!$user) {
             abort(404);
         }
-        $user->properties()->updateOrCreate(['key' => self::PROP_NEWS_OFF], ['name' => 'No "New on the server" mails', 'value' => (string) time()]);
+        $user->properties()->updateOrCreate(['key' => self::PROP_MAIL_LIST], ['name' => self::t('Send me news and offers by mail'), 'value' => '0']);
 
-        return view('layouts.app', ['slot' => new HtmlString($this->pageFrame(self::t('Done'), '<p>' . e(self::t('You won\'t get "New on the server" mails any more.')) . '</p>')), 'title' => self::t('Done')]);
+        return view('layouts.app', ['slot' => new HtmlString($this->pageFrame(self::t('Done'), '<p>' . e(self::t('You are off the mail list: no more news and offers by mail. Mails about your subscription still come. You can join again under Account.')) . '</p>')), 'title' => self::t('Done')]);
     }
 }

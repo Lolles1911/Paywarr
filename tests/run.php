@@ -3793,6 +3793,7 @@ test('come back: a code some days after cancelling, once a year, not while anoth
     $other->product = $still->product;
     $other->status = 'active';
     $on = ['winback_days' => '14', 'winback_percent' => '50', 'winback_valid_days' => '30'];
+    $gone->user->properties()->updateOrCreate(['key' => 'paywarr_mail_list'], ['name' => 'List', 'value' => '1']);
     $made = [];
     $make = function (array $coupon) use (&$made) { $made[] = $coupon; return 900 + count($made); };
     same([], ext()->sendWinbacks([$gone], $now, $make), 'off');
@@ -3915,9 +3916,12 @@ test('new on the server: weekly on the chosen day from 17:00, movies and shows e
         ['media_type' => 'show', 'title' => 'Glass Harbor', 'year' => 2024], ['media_type' => 'episode', 'title' => 'Pilot']];
     $config = ['news_day' => '7', 'news_mail' => '1', 'announce_channel_id' => '555'] + discordSettings();
     $customer = new \App\Models\User('viewer@example.com');
+    $offList = new \App\Models\User('nolist@example.com');
+    $customer->properties()->updateOrCreate(['key' => 'paywarr_mail_list'], ['name' => 'List', 'value' => '1']);
     same(null, ext($config)->sendNewsIfDue($sunday - 86400, $items, [$customer]), 'not the day');
     same(null, ext($config)->sendNewsIfDue($sunday - 3 * 3600, $items, [$customer]), 'before 17:00');
-    same(['discord' => true, 'mails' => 1], ext($config)->sendNewsIfDue($sunday, $items, [$customer]), 'sent');
+    same(['discord' => true, 'mails' => 1], ext($config)->sendNewsIfDue($sunday, $items, [$customer, $offList]), 'sent, only to the one on the mail list');
+    ok(str_contains(mailsTo('viewer@example.com')[0]['html'] ?? '', 'Leave the mail list'), 'with a link to leave the list');
     same(null, ext($config)->sendNewsIfDue($sunday + 3600, $items, [$customer]), 'once that day');
     $html = mailsTo('viewer@example.com')[0]['html'] ?? '';
     ok(substr_count($html, 'Arrival (2016)') === 1 && str_contains($html, 'Glass Harbor (2024)') && !str_contains($html, 'Pilot'), 'each once, no single episodes');
@@ -3939,6 +3943,10 @@ test('messages: to everyone active, a status, or one customer; by mail and the b
     same([92], array_keys(ext()->broadcastRecipients('status:cancelled', $all)), 'cancelled with nothing running');
     same([90], array_keys(ext()->broadcastRecipients('product:5', $all)), 'by product');
     same([91], array_keys(ext()->broadcastRecipients('user:91', $all)), 'one customer');
+    $result = ext()->broadcast('all', 'Black Friday', "Half price this weekend.\n\nOnly until Monday.", ['See subscriptions', 'https://pay.example.com'], ['mail'], 'admin@example.com', $all);
+    same([1, 0, 1], [$result['recipients'], $result['mail'], $result['not_on_list']], 'not on the mail list: no mail');
+    $a->user->properties()->updateOrCreate(['key' => 'paywarr_mail_list'], ['name' => 'List', 'value' => '1']);
+    \Illuminate\Support\Facades\Mail::$sent = [];
     $result = ext()->broadcast('all', 'Black Friday', "Half price this weekend.\n\nOnly until Monday.", ['See subscriptions', 'https://pay.example.com'], ['mail'], 'admin@example.com', $all);
     same([1, 1, 0], [$result['recipients'], $result['mail'], $result['discord']], 'one mail');
     ok(str_contains(mailsTo('customer90@example.com')[0]['html'] ?? '', 'Only until Monday.'), 'the message in the mail');
@@ -4196,6 +4204,9 @@ test('events: campaigns run and end; movie nights are for the right products and
     same('a', $W::activeCampaign($now, [$c])['id'] ?? null, 'the running one');
     same(null, $W::activeCampaign($now + 200, [$c]), 'none after');
     same('BLACKFRIDAY25', $W::campaignCode('Black Friday!', 25), 'a code from the title');
+    same(['show_visitors' => true, 'show_customers' => true, 'announce_mail' => true, 'announce_channel' => true], array_intersect_key($W::campaignWith(['announce' => true]), $W::campaignPlaces([])), 'an older campaign: everywhere');
+    same(['show_visitors' => false, 'show_customers' => true, 'announce_mail' => false, 'announce_channel' => true], $W::campaignPlaces(['show_customers' => '1', 'announce_channel' => true]), 'where it shows, as chosen');
+    same([true, true, false, false], [$W::mailListValue('1'), $W::mailListValue('true'), $W::mailListValue('0'), $W::mailListValue(null)], 'on the mail list');
     same('JULETILBUD30', $W::campaignCode('Juletilbud', 30), 'Danish');
 
     $parties = ['p1' => ['id' => 'p1', 'at' => $now + 1800, 'products' => [], 'reminded' => null], 'p2' => ['id' => 'p2', 'at' => $now + 86400, 'products' => [7], 'reminded' => null],

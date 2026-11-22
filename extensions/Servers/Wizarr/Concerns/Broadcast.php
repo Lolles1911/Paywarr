@@ -67,9 +67,10 @@ trait Broadcast
      *
      * @return array{recipients: int, mail: int, discord: int, app: int, channel: bool}
      */
-    public function broadcast(string $to, string $subject, string $text, ?array $button, array $channels, string $by = '', ?iterable $services = null): array
+    /** Mail goes only to customers on the mail list (news and offers); "not on the list" counts the others. */
+    public function broadcast(string $to, string $subject, string $text, ?array $button, array $channels, string $by = '', ?iterable $services = null, bool $marketing = true): array
     {
-        $result = ['recipients' => 0, 'mail' => 0, 'discord' => 0, 'app' => 0, 'channel' => false];
+        $result = ['recipients' => 0, 'mail' => 0, 'discord' => 0, 'app' => 0, 'channel' => false, 'not_on_list' => 0];
         $recipients = $to === 'channel' ? [] : $this->broadcastRecipients($to, $services);
         $result['recipients'] = count($recipients);
         $html = $this->mailLayout($subject, $this->paragraphs($text), $button);
@@ -83,8 +84,12 @@ trait Broadcast
                     // The others still go.
                 }
             }
-            if (in_array('mail', $channels, true) && $this->sendMail((string) $user->email, $subject, $html, (int) $user->id)) {
-                $result['mail']++;
+            if (in_array('mail', $channels, true)) {
+                if ($marketing && !$this->onMailList($user)) {
+                    $result['not_on_list']++;
+                } elseif ($this->sendMail((string) $user->email, $subject, $marketing ? $this->mailLayout($subject, $this->paragraphs($text), $button, $this->mailListFooter($user)) : $html, (int) $user->id)) {
+                    $result['mail']++;
+                }
             }
             if (in_array('discord', $channels, true) && $this->forServiceServer($service)->sendDiscordMessage($user, $subject, $text, $button)) {
                 $result['discord']++;
