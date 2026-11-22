@@ -23,7 +23,7 @@ trait FreeAccess
 {
     public static function freeRules(): array
     {
-        return self::storeGet('free_rules', []) + ['enabled' => false, 'days' => 30, 'warn_days' => 7, 'grace_days' => 14, 'delete_days' => 30, 'paid_product' => null, 'pay_days' => 7];
+        return self::storeGet('free_rules', []) + ['enabled' => false, 'days' => 30, 'warn_days' => 7, 'grace_days' => 14, 'delete_days' => 30, 'paid_product' => null, 'pay_days' => 7, 'paid_discount' => 0, 'pay_remind_days' => 2];
     }
 
     public static function setFreeRules(array $rules): void
@@ -36,6 +36,8 @@ trait FreeAccess
             'delete_days' => max(1, (int) ($rules['delete_days'] ?? 30)),
             'paid_product' => !empty($rules['paid_product']) ? (int) $rules['paid_product'] : null,
             'pay_days' => max(1, (int) ($rules['pay_days'] ?? 7)),
+            'paid_discount' => max(0, min(100, (int) ($rules['paid_discount'] ?? 0))),
+            'pay_remind_days' => max(0, (int) ($rules['pay_remind_days'] ?? 2)),
         ]);
     }
 
@@ -71,11 +73,17 @@ trait FreeAccess
         }
     }
 
-    private static function logFree(string $what): void
+    public static function logFree(string $what): void
     {
         $log = self::freeLog();
         array_unshift($log, ['at' => time(), 'what' => $what]);
         self::storePut('free_log', array_slice($log, 0, 200));
+    }
+
+    /** Not a trial, gift card or top-up product. */
+    public function plainProduct(array $settings): bool
+    {
+        return !$this->isTrial($settings) && !$this->isGift($settings) && !$this->isTopUp($settings);
     }
 
     /** A free subscription: price 0 (not a trial, gift card or top-up), or a product with "Free access". */

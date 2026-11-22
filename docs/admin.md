@@ -1,8 +1,14 @@
 # Admin: the Paywarr pages
 
-Paymenter's admin gets a **Paywarr** group with six pages. Staff who may view
-services see them; the buttons need the right to edit services (products for
-the libraries). The pages ask Wizarr and Silo at most once a minute.
+Paymenter's admin gets three Paywarr groups: **Paywarr: Customers**
+(Customers, Media server users, Invitations, Free access, Moved to paid,
+Streams and sharing), **Paywarr: Events** (Campaigns, Movie nights,
+Challenges, Message customers, Invite a friend, Satisfaction) and **Paywarr:
+Operations** (Server status, Service status, Checks, Libraries per product,
+Help page, Monthly reports, and Paywarr Stats' pages). Below, "Paywarr → X"
+is the page X in one of them. Staff who may view services see them; the
+buttons need the right to edit services (products for the libraries). The
+pages ask Wizarr and Silo at most once a minute.
 
 ![Paywarr customers](../screenshots/admin-customers.png)
 
@@ -158,7 +164,9 @@ access** can also be in the shop for anyone to order.
 
 **Move to paid** turns free users into paying ones. Choose who with a filter
 (free subscriptions and/or users without a subscription, their status, what
-they are on now; the dialog counts them), the paid product (or **the same
+they are on now; the dialog counts them), or by name: **Only these users** in
+the dialog, **Move to paid** on a row, or tick several in the list and move
+them together. Then the paid product (or **the same
 media server**: the paid product on the same server with the fewest other
 servers), and the days to pay in. Each keeps their user and history and gets:
 
@@ -171,9 +179,44 @@ servers), and the days to pay in. Each keeps their user and history and gets:
   user by then.
 
 They are told by mail (and Discord), and Paymenter sends its invoice mail.
-Unpaid by the deadline, Paymenter suspends the subscription as any unpaid
-invoice (after its **suspend after** days). The default product and days are
-set under **Rules**.
+The dialog lists who will be moved before you press Move. A **welcome
+discount** takes a percentage off the first invoice (later ones are the full
+price). Those who haven't paid are reminded ("Your access stops soon") a
+number of days before the deadline. Unpaid by the deadline, Paymenter suspends
+the subscription as any unpaid invoice (after its **suspend after** days). The
+default product, days, discount and reminder are set under **Rules**.
+
+**Paywarr → Moved to paid** (shown once someone is moved) follows them: the
+invoice and deadline, **Paid**, **Waiting** or **Not paid**, how many of those
+due paid, and **Export CSV**. **Back to free** undoes a move made by mistake:
+the invoice is cancelled, the subscription gets its old free product and
+renewal back (one made by the move stays, at 0), and a suspended one is opened
+again.
+
+## Campaigns, movie nights, challenges, friend pass
+
+- **Campaigns**: **New campaign** with a title, a percentage, start and end.
+  **A code for new customers** makes a Paymenter coupon (one use per customer,
+  off for the periods you set, on the products you choose or every
+  subscription); **Existing customers** get the percentage off their next
+  renewal in the period, once. A banner with a countdown shows on every page
+  while it runs, and **Announce** sends it by mail, Discord and the
+  announcements channel when it starts. The list shows new orders with the
+  code, renewals made cheaper and what was given; **End now** stops it.
+- **Movie nights**: **Plan a movie night** with a title, a time, a few words,
+  an optional link to the title, and who it is for. **Invite now** sends it by
+  mail and Discord and posts it in the announcements channel with a thread for
+  talking along (the bot needs "Create Public Threads"). Those who press "I'm
+  coming" are reminded an hour before.
+- **Challenges**: **New challenge**: what counts (movies, episodes or hours),
+  the goal, the period, and the prize: a free month (the renewal moves a
+  month), credit (Paymenter uses it on the next invoice) and/or a Discord role.
+  Counted hourly from Tracearr and Silo; a play counts after 2 minutes, a movie
+  or episode once. At the end the prizes are given and the result posted.
+- **Friend pass**: tick **Friend pass** on the Wizarr server. Paying customers
+  then have **Friend pass** in their menu: a free week for a friend, once a
+  month, and once per friend. After the week the friend's user is deleted
+  unless they bought a subscription with the same mail address.
 
 ## Satisfaction, Invite a friend board, CSV
 

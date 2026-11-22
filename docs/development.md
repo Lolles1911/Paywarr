@@ -120,7 +120,7 @@ it*) does. Run it before you take on paying customers.
 | File | Contents |
 |---|---|
 | `extensions/Servers/Wizarr/Wizarr.php` | The extension: settings, boot, Paymenter's hooks, small helpers |
-| `extensions/Servers/Wizarr/Concerns/` | The rest, one file per topic: client area, trials, gift cards, Seerr, requests, reports, Discord, grants, admin, mails, reminders, pausing and codes (Loyalty), stream limits (Streams), Discord commands, "New on the server", messages (Broadcast), service status, anniversaries, monthly reports, clean-up, free access, moving free users to paid (MoveToPaid), help and getting started, changing media server, unpaid orders, satisfaction, and a small lasting store (Store) |
+| `extensions/Servers/Wizarr/Concerns/` | The rest, one file per topic: client area, trials, gift cards, Seerr, requests, reports, Discord, grants, admin, mails, reminders, pausing and codes (Loyalty), stream limits (Streams), Discord commands, "New on the server", messages (Broadcast), service status, anniversaries, monthly reports, clean-up, free access, moving free users to paid (MoveToPaid), campaigns, movie nights (WatchParty), challenges, friend passes (FriendPass), help and getting started, changing media server, unpaid orders, satisfaction, and a small lasting store (Store) |
 | `extensions/Servers/Wizarr/Jobs/QueueHeartbeat.php` | The hourly test job that shows the queue moves |
 | `extensions/Servers/Wizarr/WizarrClient.php` | The calls to Wizarr's API |
 | `extensions/Servers/Wizarr/WizarrException.php` | Error type |

@@ -29,9 +29,9 @@ class PaywarrSharing extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-share-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Customers';
 
-    protected static ?int $navigationSort = 7;
+    protected static ?int $navigationSort = 106;
 
     protected static ?string $navigationLabel = 'Streams and sharing';
 

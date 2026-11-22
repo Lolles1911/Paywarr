@@ -3,6 +3,62 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.31.0 (2026-11-22)
+
+- **New: My <site name>** ("My" and the site name from Settings, e.g. My WaffleHub): one page with everything
+  for the customer, as cards: Open buttons, their subscriptions, the service
+  status, the movie night, the challenge, the friend pass, Invite a friend,
+  and shortcuts to Requests, My stats, Help, Report a problem and Discord.
+  It sits under Dashboard in the menu.
+- **A shorter customer menu:** Movie night, Challenge, Friend pass, Invite a
+  friend and Service status moved into that page; Requests, My stats, Help
+  and Report a problem stay. The dashboard is as before.
+- **Admin in three groups:** Paywarr: Customers (customers, media server
+  users, invitations, free access, moved to paid, streams), Paywarr: Events
+  (campaigns, movie nights, challenges, messages, Invite a friend,
+  satisfaction) and Paywarr: Operations (server status, service status,
+  checks, libraries, help page, monthly reports, and Paywarr Stats' pages).
+- **Phones:** every customer page checked on a phone; the banners keep a
+  margin at the screen's edges.
+- **New: Campaigns** (Paywarr → Campaigns), e.g. Black Friday: a percentage
+  off for a while. New customers get a code (a Paymenter coupon, for the
+  periods you choose); existing customers get it off their next renewal in
+  the period, once. A banner with a countdown on every page (also for
+  visitors), an announcement by mail, Discord and the announcements channel
+  when it starts, and the results (new orders, renewals, what was given).
+- **New: Movie nights** (Paywarr → Movie nights): plan a title at a time, for
+  everyone or some products. Customers are invited by mail and Discord, a post
+  with a thread is made in the announcements channel, they press "I'm coming"
+  on Movie night (in the menu and on the dashboard, with a countdown and their
+  Open links), and are reminded an hour before.
+- **New: Challenges** (Paywarr → Challenges), e.g. "Watch 10 movies in
+  December": movies, episodes or hours, counted hourly from Tracearr and Silo.
+  Customers see their progress and the leaderboard (Challenge in the menu, and
+  the dashboard); the start and the result are posted in Discord. Everyone who
+  makes it gets the prize: a free month, credit and/or a Discord role.
+- **New: Friend pass** (with **Friend pass** on the Wizarr server): paying
+  customers give a friend a free week, once a month. The friend gets an
+  invitation to the customer's media server; the week starts when they create
+  their user, they are told the day before it ends, and then the user goes
+  with a link to the shop (and a running campaign's code) unless they bought:
+  then the user moves onto their new subscription.
+- **Move to paid, one by one:** besides the filter, choose who yourself:
+  **Move to paid** on each row, tick several in the list (also after
+  searching or filtering it) and move them together, or pick names under
+  **Only these users** in the dialog.
+- **The dialog shows who will be moved**, by name, before you press Move.
+- **Welcome discount:** a percentage off the first invoice (later ones are the
+  full price); the default is under Rules.
+- **Reminder before the deadline:** those who haven't paid get "Your access
+  stops soon" by mail (and Discord) 2 days before (set under Rules; 0: none).
+- **New page: Paywarr → Moved to paid** (once someone is moved): who was
+  moved, their invoice and deadline, Paid / Waiting / Not paid, how many paid,
+  Export CSV, and **Back to free** for a move made by mistake (cancels the
+  invoice, gives back the old free product and renewal, opens a suspended one
+  again).
+- **Fixed:** "Give free access" offered trial products when no product had
+  "Free access"; a subscription given there did not show as free.
+
 ## 1.30.0 (2026-11-22)
 
 - **New: Move to paid** on Paywarr → Free access. Choose who with a filter

@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.30.0',
+    version: '1.31.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -93,6 +93,11 @@ class Wizarr extends Server
     use Concerns\Cleanup;
     use Concerns\FreeAccess;
     use Concerns\MoveToPaid;
+    use Concerns\Campaigns;
+    use Concerns\WatchParty;
+    use Concerns\Challenges;
+    use Concerns\FriendPass;
+    use Concerns\Hub;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -592,6 +597,12 @@ class Wizarr extends Server
                 'description' => 'Optional. A second reminder, counted from the order. Empty: only one.',
             ],
             [
+                'name' => 'friend_pass',
+                'label' => 'Friend pass',
+                'type' => 'checkbox',
+                'description' => 'Paying customers give a friend a free week, once a month (Friend pass in the menu): the friend gets an invitation to the customer\'s media server; the user goes after the week unless the friend buys.',
+            ],
+            [
                 'name' => 'survey',
                 'label' => 'Satisfaction survey',
                 'type' => 'checkbox',
@@ -919,6 +930,14 @@ class Wizarr extends Server
         if (!self::$seerrGuardListener) {
             self::$seerrGuardListener = true;
             Event::listen(InvoiceItemCreating::class, fn (InvoiceItemCreating $event) => $this->guardSeerrForItem($event->invoiceItem));
+            // A campaign: an existing customer's renewal is cheaper (Campaigns).
+            Event::listen(InvoiceItemCreating::class, function (InvoiceItemCreating $event) {
+                try {
+                    $this->campaignForItem($event->invoiceItem);
+                } catch (Throwable $e) {
+                    Log::warning('Wizarr: campaign discount not given: ' . $e->getMessage());
+                }
+            });
             Event::listen(ServiceUpgradeUpdated::class, fn (ServiceUpgradeUpdated $event) => $this->guardSeerrForUpgrade($event->serviceUpgrade));
         }
 
@@ -926,6 +945,8 @@ class Wizarr extends Server
         Event::listen('footer', fn () => $this->renderBanner());
         // A server down or planned maintenance: a bar on top, for the customers it concerns.
         Event::listen('footer', fn () => $this->renderStatusBar());
+        // A campaign's banner with a countdown, also for visitors.
+        Event::listen('footer', fn () => $this->renderCampaignBanner());
 
         // Deleting a customer in Paymenter removes their services in the
         // database only, without any hook. Remove their access first.
@@ -947,13 +968,13 @@ class Wizarr extends Server
             'condition' => Auth::check() && Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== []),
         ]);
 
-        // "Invite a friend", when on and the customer has a paid subscription.
+        // "My <site name>": everything Paywarr offers the customer, as cards (Hub).
         Event::listen('navigation.dashboard', fn () => [
-            'name' => self::t('Invite a friend'),
-            'route' => 'extensions.wizarr.invite',
-            'icon' => 'ri-gift-2',
-            'priority' => 31,
-            'condition' => Auth::check() && Cache::remember('wizarr:can-refer:' . Auth::id(), 300, fn () => $this->canRefer(Auth::user())),
+            'name' => self::t('My :name', ['name' => $this->siteName()]),
+            'route' => 'extensions.wizarr.hub',
+            'icon' => 'ri-apps-2',
+            'priority' => 15, // right under Dashboard
+            'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
         ]);
 
         // "Help": guides per device and questions; and "Getting started" on the dashboard.
@@ -965,15 +986,6 @@ class Wizarr extends Server
             'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
         ]);
         Event::listen('pages.dashboard', fn () => $this->renderChecklist());
-
-        // "Service status": every media server, up or down, and your notices.
-        Event::listen('navigation.dashboard', fn () => [
-            'name' => self::t('Service status'),
-            'route' => 'extensions.wizarr.status-page',
-            'icon' => 'ri-pulse',
-            'priority' => 33,
-            'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
-        ]);
 
         // "Report a problem", for every customer with a subscription to report from.
         Event::listen('navigation.dashboard', fn () => [
@@ -1032,6 +1044,10 @@ class Wizarr extends Server
                 $this->runCleanup();
                 $this->runFreeAccess();
                 $this->runPaidOffers();
+                $this->sendPaidReminders();
+                $this->runCampaigns();
+                $this->runChallenges();
+                $this->runFriendPasses();
                 $this->finishSwitches();
                 $this->sendCartReminders();
                 $this->sendSurveys();
@@ -1049,6 +1065,7 @@ class Wizarr extends Server
             $schedule->call(function () {
                 $this->enforceStreamLimits();
                 $this->monitorStatus();
+                $this->remindWatchParties();
             })
                 ->everyMinute()
                 ->name('wizarr-stream-limits')

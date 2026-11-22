@@ -125,10 +125,11 @@ trait MoveToPaid
      *
      * @return string what was done, for the log
      */
-    public function moveToPaid(array $row, ?int $productId, int $days, ?int $now = null): string
+    public function moveToPaid(array $row, ?int $productId, int $days, ?int $now = null, int $discount = 0): string
     {
         $now ??= time();
         $days = max(1, $days);
+        $discount = max(0, min(100, $discount));
         $due = date('Y-m-d H:i:s', $now + $days * 86400);
         if ($row['kind'] === 'subscription') {
             $service = $row['service'];
@@ -141,6 +142,8 @@ trait MoveToPaid
             $current = $service->plan ? ['period' => (int) $service->plan->billing_period, 'unit' => (string) $service->plan->billing_unit] : null;
             [$planId, $price, $currency] = self::paidPlanChoice(self::planArrays($product), $current, (string) $service->currency_code)
                 ?? throw new DisplayException($product->name . ' has no price');
+            $from = ['product_id' => (int) $service->product_id, 'plan_id' => $service->plan_id, 'price' => (float) $service->price,
+                'currency_code' => (string) $service->currency_code, 'expires_at' => $service->expires_at ? date('Y-m-d H:i:s', $this->timestampOf($service->expires_at)) : null];
             $service->update(['product_id' => $product->id, 'plan_id' => $planId, 'price' => $price, 'currency_code' => $currency, 'expires_at' => $due]);
             $service = $service->fresh(['product.settings', 'product.server', 'properties', 'user', 'plan']);
             $newSettings = ExtensionHelper::settingsToArray($service->product->settings);
@@ -164,6 +167,7 @@ trait MoveToPaid
             $product->loadMissing(['settings', 'plans.prices']);
             [$planId, $price, $currency] = self::paidPlanChoice(self::planArrays($product), null, (string) config('settings.default_currency', ''))
                 ?? throw new DisplayException($product->name . ' has no price');
+            $from = ['new' => true];
             $service = Service::create(['user_id' => $user->id, 'product_id' => $product->id, 'plan_id' => $planId, 'price' => $price, 'quantity' => 1,
                 'currency_code' => $currency, 'status' => 'active', 'expires_at' => $due]);
             $service = $service->fresh(['product.settings', 'product.server', 'properties', 'user', 'plan']);
@@ -179,10 +183,11 @@ trait MoveToPaid
                 throw $e;
             }
         }
-        $invoice = $this->paidInvoice($service);
+        $invoice = $this->paidInvoice($service, $discount);
         $title = self::t('Your free access becomes a subscription');
         $text = self::t('Your access continues as :product at :price a period. Pay the invoice by :date to keep your user and everything you have watched; unpaid, the access stops then.', [
-            'product' => (string) $service->product->name, 'price' => number_format((float) $service->price, 2) . ' ' . $service->currency_code, 'date' => date(self::t('M j, Y'), $now + $days * 86400)]);
+            'product' => (string) $service->product->name, 'price' => number_format((float) $service->price, 2) . ' ' . $service->currency_code, 'date' => date(self::t('M j, Y'), $now + $days * 86400)])
+            . ($discount > 0 ? ' ' . self::t('As a welcome, your first invoice is :percent% off.', ['percent' => $discount]) : '');
         try {
             $url = route('invoices.show', $invoice);
         } catch (Throwable $e) {
@@ -193,6 +198,9 @@ trait MoveToPaid
         } catch (Throwable $e) {
             Log::warning('Wizarr: customer of service ' . $service->id . ' not told about the move to paid: ' . $e->getMessage());
         }
+        $moves = self::storeGet('paid_moves', []);
+        $moves[(int) $service->id] = ['at' => $now, 'due' => $now + $days * 86400, 'invoice' => (int) $invoice->id, 'name' => (string) $row['name'], 'discount' => $discount, 'from' => $from, 'reminded' => null];
+        self::storePut('paid_moves', $moves);
         self::logAdmin($service->user, (int) $service->id, 'Moved from free to paid: ' . $service->product->name . ', invoice #' . $invoice->id . ' due ' . date('M j, Y', $now + $days * 86400), 'Paywarr');
         $this->forgetCustomerCaches($service);
 
@@ -200,11 +208,13 @@ trait MoveToPaid
     }
 
     /** The first invoice, as Paymenter's own renewal makes it (its mail goes out too). */
-    private function paidInvoice(Service $service)
+    private function paidInvoice(Service $service, int $discount = 0)
     {
+        $price = round((float) $service->price * (100 - $discount) / 100, 2);
         $invoice = $service->invoices()->make(['user_id' => $service->user_id, 'status' => 'pending', 'due_at' => $service->expires_at, 'currency_code' => $service->currency_code]);
         $invoice->save();
-        $invoice->items()->create(['reference_id' => $service->id, 'reference_type' => Service::class, 'price' => $service->price, 'quantity' => $service->quantity, 'description' => $service->description]);
+        $invoice->items()->create(['reference_id' => $service->id, 'reference_type' => Service::class, 'price' => $price, 'quantity' => $service->quantity,
+            'description' => $service->description . ($discount > 0 ? ' (' . self::t('welcome discount :percent%', ['percent' => $discount]) . ')' : '')]);
 
         return $invoice->refresh();
     }
@@ -276,5 +286,106 @@ trait MoveToPaid
         }
 
         return $done;
+    }
+
+    /** Paid, waiting (not due yet), unpaid (past the deadline or suspended), or cancelled. */
+    public static function paidMoveStatus(array $move, ?string $invoiceStatus, ?string $serviceStatus, int $now): string
+    {
+        return match (true) {
+            $invoiceStatus === 'paid' => 'paid',
+            $serviceStatus === null || in_array($serviceStatus, ['cancelled', 'terminated'], true) || $invoiceStatus === 'cancelled' || $invoiceStatus === null => 'cancelled',
+            $serviceStatus === 'suspended' || $now >= (int) $move['due'] => 'unpaid',
+            default => 'waiting',
+        };
+    }
+
+    /** The moves to remind now: invoice still open, deadline within $days days, not reminded yet. */
+    public static function paidRemindersDue(array $moves, array $invoiceStatuses, int $now, int $days): array
+    {
+        $due = [];
+        foreach ($moves as $serviceId => $move) {
+            $left = (int) $move['due'] - $now;
+            if (empty($move['reminded']) && ($invoiceStatuses[$move['invoice']] ?? null) === 'pending' && $left > 0 && $left <= $days * 86400) {
+                $due[] = (int) $serviceId;
+            }
+        }
+
+        return $due;
+    }
+
+    /** Hourly: "your access stops in 2 days" to those moved who have not paid yet. */
+    public function sendPaidReminders(?int $now = null): array
+    {
+        $now ??= time();
+        $moves = self::storeGet('paid_moves', []);
+        $days = (int) (self::freeRules()['pay_remind_days'] ?? 2);
+        if (!$moves || $days <= 0) {
+            return [];
+        }
+        $statuses = \App\Models\Invoice::whereIn('id', array_column($moves, 'invoice'))->pluck('status', 'id')->all();
+        $sent = [];
+        foreach (self::paidRemindersDue($moves, $statuses, $now, $days) as $serviceId) {
+            $service = Service::with(['product', 'user'])->find($serviceId);
+            $moves[$serviceId]['reminded'] = $now;
+            if (!$service) {
+                continue;
+            }
+            $left = max(1, (int) ceil(((int) $moves[$serviceId]['due'] - $now) / 86400));
+            try {
+                $url = route('invoices.show', $moves[$serviceId]['invoice']);
+            } catch (Throwable $e) {
+                $url = $this->accountUrl();
+            }
+            try {
+                $this->forServiceServer($service)->notifyCustomer($service, self::t('Your access stops soon'),
+                    $left === 1 ? self::t('Pay the invoice for :product by tomorrow to keep watching.', ['product' => (string) $service->product->name])
+                        : self::t('Pay the invoice for :product within :count days to keep watching.', ['product' => (string) $service->product->name, 'count' => $left]),
+                    [self::t('Pay the invoice'), $url]);
+                $sent[] = $serviceId;
+            } catch (Throwable $e) {
+                Log::warning('Wizarr: reminder to pay for service ' . $serviceId . ' not sent: ' . $e->getMessage());
+            }
+        }
+        self::storePut('paid_moves', $moves);
+
+        return $sent;
+    }
+
+    /**
+     * Undoes a move: the open invoice is cancelled, and the subscription is
+     * free again (its old product, plan and renewal; a new one stays, at 0).
+     */
+    public function backToFree(int $serviceId): void
+    {
+        $moves = self::storeGet('paid_moves', []);
+        $move = $moves[$serviceId] ?? throw new DisplayException('Not a moved subscription');
+        $service = Service::with(['product.settings', 'product.server', 'properties', 'user', 'plan', 'invoices'])->findOrFail($serviceId);
+        foreach ($service->invoices()->where('status', 'pending')->get() as $invoice) {
+            $invoice->update(['status' => 'cancelled']);
+        }
+        $ext = $this->forServiceServer($service);
+        $before = $ext->chosenServerIds(ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service));
+        $from = $move['from'] ?? [];
+        if (!empty($from['product_id'])) {
+            $service->update(['product_id' => $from['product_id'], 'plan_id' => $from['plan_id'], 'price' => $from['price'], 'currency_code' => $from['currency_code'],
+                'expires_at' => $from['expires_at'] ?? now()->addYears(10)]);
+        } else {
+            $service->update(['price' => 0, 'expires_at' => now()->addYears(10)]);
+        }
+        $wasSuspended = $service->status === 'suspended';
+        $service = $service->fresh(['product.settings', 'product.server', 'properties', 'user', 'plan']);
+        if ($wasSuspended) {
+            ExtensionHelper::unsuspendServer($service);
+            $service->update(['status' => 'active']);
+        }
+        $settings = ExtensionHelper::settingsToArray($service->product->settings);
+        if (!$ext->isSilo() && $ext->chosenServerIds($settings, ExtensionHelper::getServiceProperties($service)) !== $before) {
+            $ext->upgradeServer($service, $settings, ExtensionHelper::getServiceProperties($service));
+        }
+        unset($moves[$serviceId]);
+        self::storePut('paid_moves', $moves);
+        self::logAdmin($service->user, (int) $service->id, 'Back to free (the move to paid undone)', 'Paywarr');
+        self::logFree('Back to free: ' . $move['name']);
+        $this->forgetCustomerCaches($service);
     }
 }

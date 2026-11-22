@@ -28,9 +28,9 @@ class PaywarrSatisfaction extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-emotion-happy-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Events';
 
-    protected static ?int $navigationSort = 12;
+    protected static ?int $navigationSort = 206;
 
     protected static ?string $navigationLabel = 'Satisfaction';
 

@@ -289,7 +289,7 @@ trait Status
         $colour = $n['kind'] === 'outage' ? '#b91c1c' : ($n['kind'] === 'maintenance' ? '#b45309' : '#6d28d9');
         $id = 'paywarr-status-' . $n['id'];
 
-        return ['view' => new HtmlString('<div id="' . e($id) . '" style="background:' . $colour . ';color:#fff;padding:.7rem 2.6rem .7rem 1rem;margin:1rem auto;border-radius:.8rem;max-width:72rem;font-size:.95rem;display:flex;gap:.8rem;align-items:center;justify-content:center;flex-wrap:wrap;position:relative">'
+        return ['view' => new HtmlString('<div id="' . e($id) . '" style="background:' . $colour . ';color:#fff;padding:.7rem 2.6rem .7rem 1rem;margin:1rem auto;border-radius:.8rem;max-width:72rem;width:calc(100% - 2rem);box-sizing:border-box;font-size:.95rem;display:flex;gap:.8rem;align-items:center;justify-content:center;flex-wrap:wrap;position:relative">'
             . '<strong>' . e($n['title']) . '</strong><span style="opacity:.9">' . e(mb_substr($n['text'], 0, 200)) . '</span>'
             . '<a href="' . e($this->statusPageUrl()) . '" style="color:#fff;text-decoration:underline">' . e(self::t('Status')) . '</a>'
             . '<button type="button" aria-label="' . e(self::t('Close')) . '" style="position:absolute;right:.8rem;background:none;border:0;color:#fff;font-size:1.2rem;cursor:pointer" onclick="try{sessionStorage.setItem(\'' . e($id) . '\',1)}catch(e){};this.parentNode.remove()">×</button></div>'

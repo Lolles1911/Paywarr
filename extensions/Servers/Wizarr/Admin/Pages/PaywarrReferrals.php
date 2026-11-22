@@ -26,9 +26,9 @@ class PaywarrReferrals extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-trophy-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Events';
 
-    protected static ?int $navigationSort = 13;
+    protected static ?int $navigationSort = 205;
 
     protected static ?string $navigationLabel = 'Invite a friend';
 

@@ -32,9 +32,9 @@ class PaywarrUsers extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-group-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Customers';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 102;
 
     protected static ?string $navigationLabel = 'Media server users';
 

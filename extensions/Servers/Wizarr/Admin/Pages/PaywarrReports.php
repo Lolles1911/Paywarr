@@ -22,9 +22,9 @@ class PaywarrReports extends Page
 {
     protected static string|\BackedEnum|null $navigationIcon = 'ri-file-chart-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Operations';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 306;
 
     protected static ?string $navigationLabel = 'Monthly reports';
 
