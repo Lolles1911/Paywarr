@@ -5,6 +5,28 @@ release on GitHub (`.github/release-notes.sh` puts it there).
 
 ## 1.31.0 (2026-11-22)
 
+- **New: Campaigns** (Paywarr → Campaigns), e.g. Black Friday: a percentage
+  off for a while. New customers get a code (a Paymenter coupon, for the
+  periods you choose); existing customers get it off their next renewal in
+  the period, once. A banner with a countdown on every page (also for
+  visitors), an announcement by mail, Discord and the announcements channel
+  when it starts, and the results (new orders, renewals, what was given).
+- **New: Movie nights** (Paywarr → Movie nights): plan a title at a time, for
+  everyone or some products. Customers are invited by mail and Discord, a post
+  with a thread is made in the announcements channel, they press "I'm coming"
+  on Movie night (in the menu and on the dashboard, with a countdown and their
+  Open links), and are reminded an hour before.
+- **New: Challenges** (Paywarr → Challenges), e.g. "Watch 10 movies in
+  December": movies, episodes or hours, counted hourly from Tracearr and Silo.
+  Customers see their progress and the leaderboard (Challenge in the menu, and
+  the dashboard); the start and the result are posted in Discord. Everyone who
+  makes it gets the prize: a free month, credit and/or a Discord role.
+- **New: Friend pass** (with **Friend pass** on the Wizarr server): paying
+  customers give a friend a free week, once a month. The friend gets an
+  invitation to the customer's media server; the week starts when they create
+  their user, they are told the day before it ends, and then the user goes
+  with a link to the shop (and a running campaign's code) unless they bought:
+  then the user moves onto their new subscription.
 - **Move to paid, one by one:** besides the filter, choose who yourself:
   **Move to paid** on each row, tick several in the list (also after
   searching or filtering it) and move them together, or pick names under

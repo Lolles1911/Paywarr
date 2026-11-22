@@ -90,3 +90,18 @@ Route::middleware(['web', 'signed', 'throttle:30,1'])->name('extensions.wizarr.n
 Route::middleware(['web', 'signed', 'throttle:30,1'])
     ->get('wizarr/why/{cancellation}/{reason}', [Wizarr::class, 'whyAnswer'])->whereNumber('cancellation')
     ->name('extensions.wizarr.why');
+
+// Movie night: what's planned, "I'm coming", and where to watch.
+Route::middleware(['web', 'auth', 'throttle:30,1'])->name('extensions.wizarr.party')->group(function () {
+    Route::get('wizarr/movie-night', [Wizarr::class, 'partyPage']);
+    Route::post('wizarr/movie-night', [Wizarr::class, 'partyPage']);
+});
+
+// A challenge: the customer's progress and the leaderboard.
+Route::middleware(['web', 'auth'])->get('wizarr/challenge', [Wizarr::class, 'challengePage'])->name('extensions.wizarr.challenge');
+
+// Friend pass: a free week for a friend, once a month.
+Route::middleware(['web', 'auth', 'throttle:20,1'])->name('extensions.wizarr.pass')->group(function () {
+    Route::get('wizarr/friend-pass', [Wizarr::class, 'passPage']);
+    Route::post('wizarr/friend-pass', [Wizarr::class, 'passPage']);
+});

@@ -1024,6 +1024,8 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/help extensions.wizarr.help', 'POST wizarr/checklist/close extensions.wizarr.checklist.close',
         'GET wizarr/switch/{service} extensions.wizarr.switch', 'POST wizarr/switch/{service} extensions.wizarr.switch',
         'GET wizarr/nps/{user}/{score} extensions.wizarr.nps', 'POST wizarr/nps/{user}/{score} extensions.wizarr.nps', 'GET wizarr/why/{cancellation}/{reason} extensions.wizarr.why',
+        'GET wizarr/movie-night extensions.wizarr.party', 'POST wizarr/movie-night extensions.wizarr.party', 'GET wizarr/challenge extensions.wizarr.challenge',
+        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -4176,6 +4178,39 @@ test('move to paid: paid, waiting or not paid; reminded once before the deadline
     ];
     same([10], $W::paidRemindersDue($moves, [1 => 'pending', 2 => 'pending', 3 => 'paid', 4 => 'pending', 6 => 'pending'], $now, 2),
         'within 2 days and unpaid; not too early, not paid, not twice, not past the deadline');
+});
+
+test('events: campaigns run and end; movie nights are for the right products and reminded once; challenges count; friend passes once a month', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $now = time();
+    $c = ['id' => 'a', 'starts' => $now - 10, 'ends' => $now + 100, 'stopped' => null];
+    same(['running', 'planned', 'ended', 'ended'], [$W::campaignStatus($c, $now), $W::campaignStatus($c, $now - 20), $W::campaignStatus($c, $now + 100), $W::campaignStatus(['stopped' => $now] + $c, $now)], 'campaign: running, planned, ended, stopped');
+    same('a', $W::activeCampaign($now, [$c])['id'] ?? null, 'the running one');
+    same(null, $W::activeCampaign($now + 200, [$c]), 'none after');
+    same('BLACKFRIDAY25', $W::campaignCode('Black Friday!', 25), 'a code from the title');
+    same('JULETILBUD30', $W::campaignCode('Juletilbud', 30), 'Danish');
+
+    $parties = ['p1' => ['id' => 'p1', 'at' => $now + 1800, 'products' => [], 'reminded' => null], 'p2' => ['id' => 'p2', 'at' => $now + 86400, 'products' => [7], 'reminded' => null],
+        'p3' => ['id' => 'p3', 'at' => $now - 5 * 3600, 'products' => [], 'reminded' => $now - 9000]];
+    same(['p1', 'p2'], array_keys($W::watchPartiesFor([7], $now, $parties)), 'movie nights: for everyone and for their product; not long over');
+    same(['p1'], array_keys($W::watchPartiesFor([3], $now, $parties)), 'another product: only the one for everyone');
+    same(['p1'], $W::partiesToRemind($parties, $now), 'reminded within the hour, once');
+
+    $ch = ['starts' => $now - 10 * 86400, 'ends' => $now + 86400, 'metric' => 'movies'];
+    $plays = [
+        ['plex|anna', 'movie', 'Dune', 7200000, $now - 86400], ['plex|anna', 'movie', 'Dune', 7200000, $now - 3600], ['plex|anna', 'movie', 'Up', 5400000, $now - 7200],
+        ['jellyfin|bo', 'movie', 'Heat', 60000, $now - 3600], ['jellyfin|bo', 'episode', 'Show|Pilot', 2700000, $now - 3600], ['silo|5', 'movie', 'Alien', 6000000, $now - 3600],
+        ['plex|anna', 'movie', 'Old', 6000000, $now - 20 * 86400], ['plex|nobody', 'movie', 'X', 6000000, $now - 3600],
+    ];
+    $users = ['plex|anna' => 1, 'jellyfin|bo' => 2, 'silo|5' => 3];
+    same([1 => 2.0, 3 => 1.0], $W::challengeProgress($ch, $plays, $users), 'movies: each once, after 2 minutes, in the period, customers only');
+    same([2 => 1.0], $W::challengeProgress(['metric' => 'episodes'] + $ch, $plays, $users), 'episodes');
+    same([1 => 5.5, 3 => 1.7, 2 => 0.8], $W::challengeProgress(['metric' => 'hours'] + $ch, $plays, $users), 'hours, every play');
+
+    $passes = ['x' => ['by' => 4, 'created' => $now - 10 * 86400], 'y' => ['by' => 5, 'created' => $now - 40 * 86400]];
+    same($now + 20 * 86400, $W::nextPassAt(4, $now, $passes), 'a pass 10 days ago: the next in 20 days');
+    same(null, $W::nextPassAt(5, $now, $passes), '40 days ago: now');
+    same(null, $W::nextPassAt(6, $now, $passes), 'never: now');
 });
 
 /* ---------- help, checklist, switching, unpaid orders, uptime, satisfaction, CSV ---------- */

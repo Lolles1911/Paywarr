@@ -106,10 +106,19 @@ class DiscordClient
         $this->call('post', '/channels/' . $this->id((string) ($channel['id'] ?? '')) . '/messages', body: ['content' => mb_substr($content, 0, 2000)]);
     }
 
-    /** A message in a channel of your server (the bot needs "Send Messages" there). */
-    public function postMessage(string $channelId, string $content): void
+    /** A message in a channel of your server (the bot needs "Send Messages" there); returns Discord's message. */
+    public function postMessage(string $channelId, string $content): ?array
     {
-        $this->call('post', '/channels/' . $this->id($channelId) . '/messages', notMember: 'throw', body: ['content' => mb_substr($content, 0, 2000)]);
+        return $this->call('post', '/channels/' . $this->id($channelId) . '/messages', notMember: 'throw', body: ['content' => mb_substr($content, 0, 2000)]);
+    }
+
+    /** A thread on a message (the bot needs "Create Public Threads"); returns its ID. */
+    public function startThread(string $channelId, string $messageId, string $name): string
+    {
+        $thread = $this->call('post', '/channels/' . $this->id($channelId) . '/messages/' . $this->id($messageId) . '/threads', notMember: 'throw',
+            body: ['name' => mb_substr($name, 0, 100), 'auto_archive_duration' => 1440]);
+
+        return (string) ($thread['id'] ?? '');
     }
 
     private function call(string $method, string $path, string $notMember = 'null', array $body = []): ?array

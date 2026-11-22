@@ -168,6 +168,18 @@ With **Unpaid order: remind after (hours)** on the Wizarr server, an order
 whose first invoice is unpaid gets one mail with the link to pay (and a second
 with **remind again after (hours)**). Orders older than a week are left alone.
 
+## Campaigns, movie nights, challenges, friend pass
+
+- While a **campaign** runs, a banner with a countdown shows the code (or, for
+  customers, that their next renewal is cheaper).
+- **Movie night** is in the menu while one is planned for them: when, who is
+  coming, "I'm coming", their Open links and the Discord thread; a card on the
+  dashboard, and a reminder an hour before.
+- **Challenge** is in the menu while one runs: their progress, the
+  leaderboard (first names) and the prize; a progress card on the dashboard.
+- **Friend pass** (paying customers, when switched on): a free week for a
+  friend, once a month, and the passes they gave.
+
 ## In the top bar
 
 The customer menu items (Help, Service status, Invite a friend, Requests,
