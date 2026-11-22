@@ -9,7 +9,7 @@ use Illuminate\Support\HtmlString;
 use Throwable;
 
 /**
- * "My WaffleHub" (/wizarr/me): everything Paywarr offers the customer on one
+ * "My <site name>" (/wizarr/me): everything Paywarr offers the customer on one
  * page, as cards: where to watch, their subscriptions, the service status,
  * the movie night, the challenge, the friend pass, "Invite a friend" and the
  * links to Requests, stats, help and Report a problem. Keeps the menu short.

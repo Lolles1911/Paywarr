@@ -5,13 +5,13 @@ release on GitHub (`.github/release-notes.sh` puts it there).
 
 ## 1.31.0 (2026-11-22)
 
-- **New: My WaffleHub** (named after your site): one page with everything
+- **New: My <site name>** ("My" and the site name from Settings, e.g. My WaffleHub): one page with everything
   for the customer, as cards: Open buttons, their subscriptions, the service
   status, the movie night, the challenge, the friend pass, Invite a friend,
   and shortcuts to Requests, My stats, Help, Report a problem and Discord.
   It sits under Dashboard in the menu.
 - **A shorter customer menu:** Movie night, Challenge, Friend pass, Invite a
-  friend and Service status moved into My WaffleHub; Requests, My stats, Help
+  friend and Service status moved into that page; Requests, My stats, Help
   and Report a problem stay. The dashboard is as before.
 - **Admin in three groups:** Paywarr: Customers (customers, media server
   users, invitations, free access, moved to paid, streams), Paywarr: Events

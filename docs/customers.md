@@ -168,9 +168,9 @@ With **Unpaid order: remind after (hours)** on the Wizarr server, an order
 whose first invoice is unpaid gets one mail with the link to pay (and a second
 with **remind again after (hours)**). Orders older than a week are left alone.
 
-## My WaffleHub
+## My <site name>
 
-**My WaffleHub** (named after your site, `/wizarr/me`, under Dashboard in the
+**My <site name>** ("My" and the site name from Paymenter's settings, `/wizarr/me`, under Dashboard in the
 menu) gathers it all as cards: the Open buttons, their subscriptions, the
 service status, the movie night ("I'm coming"), the challenge's progress, the
 friend pass, Invite a friend with their code, and shortcuts to Requests, My
@@ -182,17 +182,17 @@ on this page.
 
 - While a **campaign** runs, a banner with a countdown shows the code (or, for
   customers, that their next renewal is cheaper).
-- **Movie night** (a card on My WaffleHub while one is planned for them):
+- **Movie night** (a card on My <site name> while one is planned for them):
   when, who is coming, "I'm coming", their Open links and the Discord thread,
   and a reminder an hour before.
-- **Challenge** (a card on My WaffleHub while one runs): their progress, the
+- **Challenge** (a card on My <site name> while one runs): their progress, the
   leaderboard (first names) and the prize.
 - **Friend pass** (paying customers, when switched on; a card on My
-  WaffleHub): a free week for a friend, once a month, and the passes they gave.
+  <site name>): a free week for a friend, once a month, and the passes they gave.
 
 ## In the top bar
 
-The customer menu items (My WaffleHub, Requests, My stats from Paywarr Stats,
+The customer menu items (My <site name>, Requests, My stats from Paywarr Stats,
 Help, Report a problem) show only to customers with a Paywarr subscription
 (active or suspended).
 

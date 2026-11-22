@@ -968,7 +968,7 @@ class Wizarr extends Server
             'condition' => Auth::check() && Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== []),
         ]);
 
-        // "My WaffleHub": everything Paywarr offers the customer, as cards (Hub).
+        // "My <site name>": everything Paywarr offers the customer, as cards (Hub).
         Event::listen('navigation.dashboard', fn () => [
             'name' => self::t('My :name', ['name' => $this->siteName()]),
             'route' => 'extensions.wizarr.hub',
