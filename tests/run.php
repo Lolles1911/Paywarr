@@ -264,9 +264,16 @@ function legacySubscription(array $settings, string $username = 'mette', int $id
     return $service;
 }
 
+/** The actions without the "Overview" tab. */
+function acts(array $actions): array
+{
+    return array_values(array_filter($actions, fn ($a) => $a['type'] !== 'view'));
+}
+
 function labels(array $actions): array
 {
-    return array_map(fn ($a) => $a['type'] . ':' . ($a['label'] ?? '') . (isset($a['text']) ? '=' . $a['text'] : ''), $actions);
+    // The "Overview" tab (a view) is tested on its own.
+    return array_values(array_map(fn ($a) => $a['type'] . ':' . ($a['label'] ?? '') . (isset($a['text']) ? '=' . $a['text'] : ''), array_filter($actions, fn ($a) => $a['type'] !== 'view')));
 }
 
 echo "\nPaymenter Wizarr extension\n\n";
@@ -386,7 +393,7 @@ test('client area shows the sign-up button while the invitation is unused', func
     $actions = ext()->getActions($service, settings(), $service->propertyArray());
 
     same(['text:Status=Waiting for you to create your user', 'button:Create your user', 'button:Problems? Get a new link'], labels($actions), 'actions');
-    same($data['invite_url'], $actions[1]['url'], 'button target');
+    same($data['invite_url'], acts($actions)[1]['url'], 'button target');
 });
 
 test('client area switches to "active" once redeemed, and then stops calling Wizarr', function () {
@@ -406,7 +413,7 @@ test('client area still shows the stored link when Wizarr is down', function () 
     $data = ext()->createServer($service, settings(), []);
     $actions = ext(['host' => 'http://127.0.0.1:1'])->getActions($service, settings(), $service->propertyArray());
 
-    same($data['invite_url'], $actions[1]['url'], 'stored link');
+    same($data['invite_url'], acts($actions)[1]['url'], 'stored link');
 });
 
 test('an expired link can be renewed by the customer', function () {
@@ -416,7 +423,7 @@ test('an expired link can be renewed by the customer', function () {
 
     $actions = ext()->getActions($service, settings(), $service->propertyArray());
     same(['text:Status=Your invitation link has expired', 'button:Get a new invitation link'], labels($actions), 'actions');
-    same('renewInvitation', $actions[1]['function'], 'button calls the extension');
+    same('renewInvitation', acts($actions)[1]['function'], 'button calls the extension');
 
     $url = ext()->renewInvitation($service, settings(), $service->propertyArray());
     $invitations = state()['invitations'];
@@ -1025,7 +1032,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/switch/{service} extensions.wizarr.switch', 'POST wizarr/switch/{service} extensions.wizarr.switch',
         'GET wizarr/nps/{user}/{score} extensions.wizarr.nps', 'POST wizarr/nps/{user}/{score} extensions.wizarr.nps', 'GET wizarr/why/{cancellation}/{reason} extensions.wizarr.why',
         'GET wizarr/movie-night extensions.wizarr.party', 'POST wizarr/movie-night extensions.wizarr.party', 'GET wizarr/challenge extensions.wizarr.challenge',
-        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub',
+        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub', 'GET wizarr/poster/{key} extensions.wizarr.poster', 'GET catalog extensions.wizarr.catalog',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -1837,7 +1844,8 @@ test('media: the client area shows each server\'s link, then a reset button per 
         'text:Status=Active', 'text:Username=mette', 'button:Reset password on Jellyfin', 'button:Reset password on Emby', 'button:Open Jellyfin', 'button:Open Emby',
     ], labels($actions), 'both done');
     same(['https://jellyfin.example.com', 'https://emby.example.com'], array_column(array_filter($actions, fn ($a) => str_starts_with($a['label'] ?? '', 'Open ')), 'url'), 'each to its own server');
-    same(['resetPassword1', 'resetPassword2'], array_values(array_filter(array_column($actions, 'function'))), 'numbered buttons');
+    same(['resetPassword1', 'resetPassword2'], array_values(array_filter(array_column(array_filter($actions, fn ($a) => $a['type'] === 'button'), 'function'))), 'numbered buttons');
+    same(['view', 'overview', 'overviewView'], [$actions[0]['type'], $actions[0]['name'], $actions[0]['function']], 'the Overview tab, first');
     $service->status = 'active';
     $service->product->server->extension = 'Wizarr';
     same([['label' => 'Open Jellyfin', 'url' => 'https://jellyfin.example.com'], ['label' => 'Open Emby', 'url' => 'https://emby.example.com']],
@@ -2660,14 +2668,14 @@ test('Silo: first payment makes one link invitation for an ordinary account, wit
 
     $actions = silo()->getActions($service, siloSettings(), $service->propertyArray());
     same(['text:Status=Waiting for you to create your user', 'button:Create your user', 'button:Problems? Get a new link'], labels($actions), 'waiting');
-    same($data['invite_url'], $actions[1]['url'], 'the button opens the stored link');
+    same($data['invite_url'], acts($actions)[1]['url'], 'the button opens the stored link');
 });
 
 test('Silo: once the account exists the client area shows it, with reset and "Open"', function () {
     [$service, $account] = siloSubscribed();
     $actions = silo()->getActions($service, siloSettings(), $service->propertyArray());
     same(['text:Status=Active', 'text:Username=mette', 'button:Reset password', 'button:Open the media library'], labels($actions), 'active');
-    same('https://watch.example.com', end($actions)['url'], 'Open goes to Silo\'s public address');
+    same('https://watch.example.com', array_slice(acts($actions), -1)[0]['url'], 'Open goes to Silo\'s public address');
     same($account . ':mette:silo', grantProp($service, 'wizarr_users'), 'the account recorded');
 
     $url = silo()->resetPassword($service, siloSettings(), $service->propertyArray());
@@ -2723,7 +2731,7 @@ test('Silo: the watch address is Silo\'s own, also after Wizarr\'s servers were 
     same('https://watch.example.com', silo()->createServer($other, siloSettings(), [])['login_url'], 'Silo\'s server 1 is Silo (the welcome mail\'s "Watch in the browser")');
     [$service] = siloSubscribed();
     $actions = silo()->getActions($service, siloSettings(), $service->propertyArray());
-    same('https://watch.example.com', end($actions)['url'], '"Open" goes to Silo, not to Jellyfin');
+    same('https://watch.example.com', array_slice(acts($actions), -1)[0]['url'], '"Open" goes to Silo, not to Jellyfin');
 });
 
 test('media: with one server on the product the choice is left alone, so it can\'t stop an order', function () {
@@ -4211,6 +4219,20 @@ test('events: campaigns run and end; movie nights are for the right products and
     same($now + 20 * 86400, $W::nextPassAt(4, $now, $passes), 'a pass 10 days ago: the next in 20 days');
     same(null, $W::nextPassAt(5, $now, $passes), '40 days ago: now');
     same(null, $W::nextPassAt(6, $now, $passes), 'never: now');
+});
+
+test('posters: a path for each media server, popular by how many watched, continue watching half-watched ones', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    same('/api/v1/images/proxy?server=s1&url=%2Flibrary%2Fmetadata%2F42%2Fthumb&width=300&height=450&fallback=poster', $W::addedPosterPath(['server_id' => 's1', 'server_type' => 'plex', 'rating_key' => '42']), 'Plex');
+    same('/api/v1/images/proxy?server=s2&url=%2FItems%2Fabc%2FImages%2FPrimary&width=300&height=450&fallback=poster', $W::addedPosterPath(['server_id' => 's2', 'server_type' => 'jellyfin', 'rating_key' => 'abc']), 'Jellyfin');
+    same(null, $W::addedPosterPath(['server_id' => 's2', 'server_type' => 'emby']), 'no ID: none');
+    $p = fn ($user, $type, $title, $show = null) => ['user' => ['username' => $user], 'server_type' => 'plex', 'media_type' => $type, 'media_title' => $title, 'show_title' => $show, 'poster_url' => '/api/v1/images/proxy?x=' . md5($show ?? $title)];
+    $popular = $W::popularTitles([$p('a', 'movie', 'Dune'), $p('b', 'episode', 'Pilot', 'Lost'), $p('c', 'episode', 'Two', 'Lost'), $p('a', 'episode', 'Three', 'Lost'), $p('a', 'movie', 'Dune')]);
+    same([['Lost', 3, 'show'], ['Dune', 1, 'movie']], array_map(fn ($t) => [$t['title'], $t['count'], $t['type']], $popular), 'a show by its episodes, by people, not plays');
+    $plays = [['title' => 'Dune', 'percent' => 45, 'watched' => false, 'path' => 'p1'], ['title' => 'Dune', 'percent' => 10, 'watched' => false, 'path' => 'p1'],
+        ['title' => 'Up', 'percent' => 95, 'watched' => false, 'path' => 'p2'], ['title' => 'Heat', 'percent' => 1, 'watched' => false, 'path' => 'p3'],
+        ['title' => 'Jaws', 'percent' => 50, 'watched' => true, 'path' => 'p4'], ['title' => 'Alien', 'percent' => 30, 'watched' => false, 'path' => 'p5']];
+    same(['Dune', 'Alien'], array_column($W::continueTitles($plays), 'title'), 'the latest play per title, 3-90%, not finished');
 });
 
 /* ---------- help, checklist, switching, unpaid orders, uptime, satisfaction, CSV ---------- */

@@ -647,10 +647,10 @@ trait Admin
         if ($mail && $service->user) {
             $html = '<p>' . e(self::t('Choose a new password with the link below. It works once.')) . '</p>';
             foreach ($links as $server => $url) {
-                $html .= '<p><a href="' . e($url) . '">' . e(self::t('New password for :server', ['server' => $server])) . '</a></p>';
+                $html .= '<p><a href="' . e($url) . '" style="font-weight:600">' . e(self::t('New password for :server', ['server' => $server])) . '</a></p>';
             }
             try {
-                \Illuminate\Support\Facades\Mail::html($html, fn ($m) => $m->to($service->user->email)->subject(self::t('Choose a new password')));
+                $this->sendMail((string) $service->user->email, self::t('Choose a new password'), $this->mailLayout(self::t('Choose a new password'), $html), (int) $service->user_id);
             } catch (Throwable $e) {
                 Log::warning('Wizarr: password link for service ' . $service->id . ' could not be mailed: ' . $e->getMessage());
             }

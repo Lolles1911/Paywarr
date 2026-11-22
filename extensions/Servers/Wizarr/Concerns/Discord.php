@@ -536,8 +536,7 @@ trait Discord
             Log::warning('Wizarr: notification for user ' . $user->id . ' not created: ' . $e->getMessage());
         }
         try {
-            $html = '<p>' . e($body) . '</p>' . ($url ? '<p><a href="' . e($url) . '">' . e(self::t('Open the Discord page')) . '</a></p>' : '');
-            \Illuminate\Support\Facades\Mail::html($html, fn ($mail) => $mail->to($user->email)->subject($title));
+            $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $this->paragraphs($body), $url ? [self::t('Open the Discord page'), $url] : null), (int) $user->id);
         } catch (Throwable $e) {
             Log::warning('Wizarr: mail to user ' . $user->id . ' not sent: ' . $e->getMessage());
         }

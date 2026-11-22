@@ -3,6 +3,25 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.32.0 (2026-11-22)
+
+- **Posters on My <site name>:** "Continue watching" (the customer's own
+  half-watched titles, with a progress bar), "New on the server" and "Popular
+  now" (what most people watched this week), from Tracearr and Silo. A poster
+  opens the customer's media server.
+- **New: the selection for visitors** (with **Show the selection to
+  visitors** on the Wizarr server): a row of posters on the front page and a
+  page, /catalog, with movies and shows apart, without titles, and "See
+  subscriptions". The images go through Paywarr, so Tracearr and the media
+  servers are never shown to visitors.
+- **An Overview tab on a Paywarr subscription:** three steps (your user, the
+  app, watching) with ticks, a card per media server with the user and Open,
+  and shortcuts to the apps, My <site name>, Requests and Report a problem.
+- **Mails in one design:** the logo from Settings (the dark one if there is
+  one) on a dark top, the button in **Mail colour** (Wizarr server, #rrggbb),
+  and links to My <site name>, Help and Status at the bottom. Also the
+  Discord access mails and the admin's password links, which were plain.
+
 ## 1.31.0 (2026-11-22)
 
 - **New: My <site name>** ("My" and the site name from Settings, e.g. My WaffleHub): one page with everything
