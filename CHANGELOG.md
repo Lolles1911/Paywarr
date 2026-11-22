@@ -3,6 +3,25 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.34.0 (2026-11-22)
+
+- **New: the mail list.** News and offers go by mail only to customers who
+  ticked **Send me news and offers by mail**: when they make their account
+  (also at checkout) or under Account → Personal details. Everyone starts off
+  the list. It covers campaigns, movie nights, "New on the server", Message
+  customers and "we'd love to have you back"; every such mail has a link to
+  leave the list. Mails about their own subscription always go, and the bell
+  and Discord are as before. Paywarr makes the field itself (a Paymenter
+  custom property, where you can rename it).
+- **Campaigns:**
+  - start **now** by default (before: the next hour, so the banner waited);
+  - **Edit** (also the code, until someone has used it) and **Start now**
+    for a planned one;
+  - choose **where it shows**: a banner for visitors, a banner for customers,
+    mail and Discord when it starts, and the announcements channel;
+  - the list shows when a planned one starts and where each shows.
+- Message customers says how many were left out for not being on the list.
+
 ## 1.33.0 (2026-11-22)
 
 - **A fuller top bar** for customers with a subscription:

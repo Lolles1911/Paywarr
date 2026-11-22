@@ -92,7 +92,7 @@ class PaywarrMessages extends Page implements HasTable
         $button = trim((string) ($data['button_label'] ?? '')) !== '' && trim((string) ($data['button_url'] ?? '')) !== '' ? [trim($data['button_label']), trim($data['button_url'])] : null;
         $result = (new Wizarr([]))->broadcast($to, trim((string) $data['subject']), trim((string) $data['text']), $button, (array) ($data['channels'] ?? []), (string) (Auth::user()?->email ?? ''));
 
-        return $result['recipients'] . ' customer(s): ' . $result['mail'] . ' mail(s), ' . $result['discord'] . ' Discord message(s), ' . $result['app'] . ' under the bell'
+        return $result['recipients'] . ' customer(s): ' . $result['mail'] . ' mail(s)' . (($result['not_on_list'] ?? 0) ? ' (' . $result['not_on_list'] . ' not on the mail list)' : '') . ', ' . $result['discord'] . ' Discord message(s), ' . $result['app'] . ' under the bell'
             . ($result['channel'] ? ', and posted in the channel' : '') . '.';
     }
 
