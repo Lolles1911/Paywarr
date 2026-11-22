@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.29.1',
+    version: '1.30.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -92,6 +92,7 @@ class Wizarr extends Server
     use Concerns\MonthlyReport;
     use Concerns\Cleanup;
     use Concerns\FreeAccess;
+    use Concerns\MoveToPaid;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -1030,6 +1031,7 @@ class Wizarr extends Server
                 $this->makeMonthlyReportIfDue();
                 $this->runCleanup();
                 $this->runFreeAccess();
+                $this->runPaidOffers();
                 $this->finishSwitches();
                 $this->sendCartReminders();
                 $this->sendSurveys();

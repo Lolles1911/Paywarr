@@ -23,7 +23,7 @@ trait FreeAccess
 {
     public static function freeRules(): array
     {
-        return self::storeGet('free_rules', []) + ['enabled' => false, 'days' => 30, 'warn_days' => 7, 'grace_days' => 14, 'delete_days' => 30];
+        return self::storeGet('free_rules', []) + ['enabled' => false, 'days' => 30, 'warn_days' => 7, 'grace_days' => 14, 'delete_days' => 30, 'paid_product' => null, 'pay_days' => 7];
     }
 
     public static function setFreeRules(array $rules): void
@@ -34,6 +34,8 @@ trait FreeAccess
             'warn_days' => max(0, (int) ($rules['warn_days'] ?? 7)),
             'grace_days' => max(0, (int) ($rules['grace_days'] ?? 14)),
             'delete_days' => max(1, (int) ($rules['delete_days'] ?? 30)),
+            'paid_product' => !empty($rules['paid_product']) ? (int) $rules['paid_product'] : null,
+            'pay_days' => max(1, (int) ($rules['pay_days'] ?? 7)),
         ]);
     }
 
@@ -60,6 +62,13 @@ trait FreeAccess
     public static function freeLog(): array
     {
         return self::storeGet('free_log', []);
+    }
+
+    public static function logFreeAll(array $what): void
+    {
+        foreach ($what as $line) {
+            self::logFree($line);
+        }
     }
 
     private static function logFree(string $what): void
@@ -195,6 +204,7 @@ trait FreeAccess
         $rules = self::freeRules();
         $state = self::storeGet('free_state', []);
         $exempt = self::freeExempt();
+        $offers = self::storeGet('paid_offers', []);
         foreach (array_keys(self::cleanupKeep()) as $kept) {
             $exempt['user:' . $kept] = true;
         }
@@ -206,6 +216,7 @@ trait FreeAccess
             $s = $state[$key] ?? [];
             $status = match (true) {
                 isset($exempt[$key]) => 'exempt',
+                isset($offers[$key]) => 'offered',
                 !empty($s['disabled_at']) => 'removed',
                 $since !== null && $now - $since < $rules['grace_days'] * 86400 => 'new',
                 !empty($s['warned_at']) && (int) $s['warned_at'] > $idleFrom => 'warned',
@@ -219,6 +230,7 @@ trait FreeAccess
                     'warned' => (int) $s['warned_at'] + $rules['warn_days'] * 86400,
                     'active' => $idleFrom + ($rules['days'] + $rules['warn_days']) * 86400,
                     'removed' => (int) $s['disabled_at'] + $rules['delete_days'] * 86400,
+                    'offered' => (int) $offers[$key]['until'],
                     default => null,
                 },
             ];
