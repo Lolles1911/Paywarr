@@ -226,8 +226,8 @@ again.
 ## The mail list
 
 News and offers go by mail only to customers on the mail list: they tick
-**Send me news and offers by mail** when they make their account (at
-checkout too) or under Account → Personal details, and leave it with the link
+**Send me news and offers by mail** when they make their account, in the
+cart above the Checkout button, or under Account → Personal details, and leave it with the link
 in every such mail. Everyone starts off the list. Campaigns, movie nights,
 "New on the server", Message customers and "we'd love to have you back" use
 it; mails about the customer's own subscription (invitations, reminders,

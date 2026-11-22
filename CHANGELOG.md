@@ -3,6 +3,14 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.34.1 (2026-11-22)
+
+- **The mail list at checkout:** "Send me news and offers by mail" above the
+  Checkout button in the cart, for signed-in customers not on the list yet
+  (new customers tick it when they make their account). Ticking it saves it
+  at once; it stays ticked when the cart changes. Paymenter's cart has no
+  place for extensions, so Paywarr puts it there itself, with any theme.
+
 ## 1.34.0 (2026-11-22)
 
 - **New: the mail list.** News and offers go by mail only to customers who

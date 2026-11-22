@@ -114,3 +114,6 @@ Route::middleware(['web', 'throttle:300,1'])->get('wizarr/poster/{key}', [Wizarr
 
 // The selection for visitors (with "Show the selection to visitors").
 Route::middleware(['web', 'throttle:60,1'])->get('catalog', [Wizarr::class, 'catalogPage'])->name('extensions.wizarr.catalog');
+
+// The mail list checkbox at checkout.
+Route::middleware(['web', 'auth', 'throttle:30,1'])->post('wizarr/mail-list', [Wizarr::class, 'mailListToggle'])->name('extensions.wizarr.mail-list');
