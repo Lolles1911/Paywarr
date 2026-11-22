@@ -1032,6 +1032,7 @@ class Wizarr extends Server
                 $this->runCleanup();
                 $this->runFreeAccess();
                 $this->runPaidOffers();
+                $this->sendPaidReminders();
                 $this->finishSwitches();
                 $this->sendCartReminders();
                 $this->sendSurveys();

@@ -4156,6 +4156,28 @@ test('move to paid: the filter, the plan and price, and users without an account
     \App\Models\Property::$rows = [];
 });
 
+test('move to paid: paid, waiting or not paid; reminded once before the deadline', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $now = time();
+    $move = ['due' => $now + 3 * 86400, 'invoice' => 5];
+    same('paid', $W::paidMoveStatus($move, 'paid', 'active', $now), 'paid');
+    same('waiting', $W::paidMoveStatus($move, 'pending', 'active', $now), 'not due yet');
+    same('unpaid', $W::paidMoveStatus($move, 'pending', 'active', $now + 4 * 86400), 'past the deadline');
+    same('unpaid', $W::paidMoveStatus($move, 'pending', 'suspended', $now), 'suspended');
+    same('cancelled', $W::paidMoveStatus($move, 'cancelled', 'active', $now), 'invoice cancelled');
+    same('cancelled', $W::paidMoveStatus($move, 'pending', null, $now), 'subscription gone');
+
+    $moves = [
+        10 => ['due' => $now + 1 * 86400, 'invoice' => 1, 'reminded' => null],
+        11 => ['due' => $now + 5 * 86400, 'invoice' => 2, 'reminded' => null],
+        12 => ['due' => $now + 1 * 86400, 'invoice' => 3, 'reminded' => null],
+        13 => ['due' => $now + 1 * 86400, 'invoice' => 4, 'reminded' => $now - 3600],
+        14 => ['due' => $now - 86400, 'invoice' => 6, 'reminded' => null],
+    ];
+    same([10], $W::paidRemindersDue($moves, [1 => 'pending', 2 => 'pending', 3 => 'paid', 4 => 'pending', 6 => 'pending'], $now, 2),
+        'within 2 days and unpaid; not too early, not paid, not twice, not past the deadline');
+});
+
 /* ---------- help, checklist, switching, unpaid orders, uptime, satisfaction, CSV ---------- */
 
 test('help: Paywarr\'s guides and questions until edited; the edit wins', function () {

@@ -9,6 +9,16 @@ release on GitHub (`.github/release-notes.sh` puts it there).
   **Move to paid** on each row, tick several in the list (also after
   searching or filtering it) and move them together, or pick names under
   **Only these users** in the dialog.
+- **The dialog shows who will be moved**, by name, before you press Move.
+- **Welcome discount:** a percentage off the first invoice (later ones are the
+  full price); the default is under Rules.
+- **Reminder before the deadline:** those who haven't paid get "Your access
+  stops soon" by mail (and Discord) 2 days before (set under Rules; 0: none).
+- **New page: Paywarr → Moved to paid** (once someone is moved): who was
+  moved, their invoice and deadline, Paid / Waiting / Not paid, how many paid,
+  Export CSV, and **Back to free** for a move made by mistake (cancels the
+  invoice, gives back the old free product and renewal, opens a suspended one
+  again).
 - **Fixed:** "Give free access" offered trial products when no product had
   "Free access"; a subscription given there did not show as free.
 

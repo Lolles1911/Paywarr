@@ -173,9 +173,19 @@ servers), and the days to pay in. Each keeps their user and history and gets:
   user by then.
 
 They are told by mail (and Discord), and Paymenter sends its invoice mail.
-Unpaid by the deadline, Paymenter suspends the subscription as any unpaid
-invoice (after its **suspend after** days). The default product and days are
-set under **Rules**.
+The dialog lists who will be moved before you press Move. A **welcome
+discount** takes a percentage off the first invoice (later ones are the full
+price). Those who haven't paid are reminded ("Your access stops soon") a
+number of days before the deadline. Unpaid by the deadline, Paymenter suspends
+the subscription as any unpaid invoice (after its **suspend after** days). The
+default product, days, discount and reminder are set under **Rules**.
+
+**Paywarr → Moved to paid** (shown once someone is moved) follows them: the
+invoice and deadline, **Paid**, **Waiting** or **Not paid**, how many of those
+due paid, and **Export CSV**. **Back to free** undoes a move made by mistake:
+the invoice is cancelled, the subscription gets its old free product and
+renewal back (one made by the move stays, at 0), and a suspended one is opened
+again.
 
 ## Satisfaction, Invite a friend board, CSV
 

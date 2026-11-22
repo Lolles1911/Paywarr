@@ -105,6 +105,8 @@ class PaywarrFree extends Page implements HasTable
                     Select::make('paid_product')->label('Move to paid: product')->placeholder('The same media server (found by itself)')
                         ->options(fn () => (new Wizarr([]))->paidProducts())->helperText('Chosen first under "Move to paid"; you can change it there.'),
                     TextInput::make('pay_days')->label('Move to paid: pay within (days)')->numeric()->minValue(1)->required(),
+                    TextInput::make('paid_discount')->label('Move to paid: welcome discount on the first invoice (%)')->numeric()->minValue(0)->maxValue(100)->required(),
+                    TextInput::make('pay_remind_days')->label('Move to paid: remind those who haven\'t paid (days before the deadline)')->numeric()->minValue(0)->required()->helperText('0: no reminder.'),
                 ])
                 ->modalSubmitActionLabel('Save')
                 ->action(function (array $data) {
@@ -115,7 +117,7 @@ class PaywarrFree extends Page implements HasTable
                 ->modalHeading('Move free users to paid')
                 ->modalDescription(self::PAID_TEXT)
                 ->modalSubmitActionLabel('Move')
-                ->fillForm(fn () => ['kinds' => ['subscription', 'user'], 'statuses' => ['active', 'new'], 'products' => [], 'only' => [], 'product' => Wizarr::freeRules()['paid_product'], 'days' => Wizarr::freeRules()['pay_days']])
+                ->fillForm(fn () => ['kinds' => ['subscription', 'user'], 'statuses' => ['active', 'new'], 'products' => [], 'only' => []] + self::paidDefaults())
                 ->schema(fn () => [
                     Select::make('only')->label('Only these users')->multiple()->searchable()->live()->placeholder('Everyone the filter below takes')
                         ->options(fn () => array_map(fn ($row) => $row['name'] . ($row['email'] !== '' && $row['email'] !== $row['name'] ? ' (' . $row['email'] . ')' : '') . ' · ' . $row['product'], $this->rows())),
@@ -125,8 +127,8 @@ class PaywarrFree extends Page implements HasTable
                         ->options(['active' => 'Watching', 'new' => 'New', 'idle' => 'To be warned', 'warned' => 'Warned', 'exempt' => 'Exempt', 'offered' => 'Offered paid']),
                     Select::make('products')->label('Now on')->multiple()->placeholder('Everything')->live()->hidden(fn (Get $get) => (bool) $get('only'))
                         ->options(fn () => array_combine($p = array_values(array_unique(array_column($this->rows(), 'product'))), $p) ?: []),
-                    TextEntry::make('count')->label('Taken')
-                        ->state(fn (Get $get) => (fn ($n) => $n === 1 ? '1 user' : $n . ' users')(count($this->paidRows($get('only') ?? [], ['kinds' => $get('kinds') ?? [], 'statuses' => $get('statuses') ?? [], 'products' => $get('products') ?? []])))),
+                    TextEntry::make('count')->label('Will be moved')
+                        ->state(fn (Get $get) => self::names($this->paidRows($get('only') ?? [], ['kinds' => $get('kinds') ?? [], 'statuses' => $get('statuses') ?? [], 'products' => $get('products') ?? []]))),
                     ...self::paidFields(),
                 ])
                 ->action(fn (array $data) => $this->movePaid($this->paidRows($data['only'] ?? [], $data), $data)),
@@ -197,15 +199,28 @@ class PaywarrFree extends Page implements HasTable
         return [
             Select::make('product')->label('Paid product')->placeholder('The same media server (found by itself)')->options(fn () => (new Wizarr([]))->paidProducts()),
             TextInput::make('days')->label('Pay within (days)')->numeric()->minValue(1)->required(),
+            TextInput::make('discount')->label('Welcome discount on the first invoice (%)')->numeric()->minValue(0)->maxValue(100)->default(0)
+                ->helperText('0: none. Only the first invoice; later ones are the full price.'),
         ];
     }
 
     private static function paidDefaults(): array
     {
-        return ['product' => Wizarr::freeRules()['paid_product'], 'days' => Wizarr::freeRules()['pay_days']];
+        $rules = Wizarr::freeRules();
+
+        return ['product' => $rules['paid_product'], 'days' => $rules['pay_days'], 'discount' => $rules['paid_discount']];
     }
 
     /** The users chosen by name ($only), or else those the filter takes. */
+    /** "3 users: Anna, Bo, Carl", the first 20 names. */
+    private static function names(array $rows): string
+    {
+        $names = array_column($rows, 'name');
+        $n = count($names);
+
+        return $n === 0 ? 'Nobody' : ($n === 1 ? '1 user: ' : $n . ' users: ') . implode(', ', array_slice($names, 0, 20)) . ($n > 20 ? ' and ' . ($n - 20) . ' more' : '');
+    }
+
     private function paidRows(array $only, array $filter): array
     {
         $rows = $this->rows();
@@ -220,7 +235,7 @@ class PaywarrFree extends Page implements HasTable
         $failed = [];
         foreach ($rows as $row) {
             try {
-                $done[] = $wizarr->moveToPaid($row, !empty($data['product']) ? (int) $data['product'] : null, (int) $data['days']);
+                $done[] = $wizarr->moveToPaid($row, !empty($data['product']) ? (int) $data['product'] : null, (int) $data['days'], null, (int) ($data['discount'] ?? 0));
             } catch (Throwable $e) {
                 report($e);
                 $failed[] = $row['name'] . ': ' . $e->getMessage();
@@ -311,7 +326,8 @@ class PaywarrFree extends Page implements HasTable
             ])
             ->toolbarActions([
                 BulkAction::make('paid')->label('Move to paid')->icon('ri-bank-card-line')->color('warning')->visible(fn () => self::canChange())
-                    ->modalHeading('Move the chosen users to paid')->modalDescription(self::PAID_TEXT)->modalSubmitActionLabel('Move')
+                    ->modalHeading('Move the chosen users to paid')->modalSubmitActionLabel('Move')
+                    ->modalDescription(fn (Collection $records) => 'Will be moved: ' . self::names($records->all()) . "\n\n" . self::PAID_TEXT)
                     ->fillForm(fn () => self::paidDefaults())->schema(fn () => self::paidFields())
                     ->action(fn (Collection $records, array $data) => $this->movePaid($records->all(), $data))
                     ->deselectRecordsAfterCompletion(),

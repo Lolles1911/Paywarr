@@ -396,5 +396,10 @@
     "Your free access becomes a subscription": "Din gratis adgang bliver til et abonnement",
     "Your access continues as :product at :price a period. Pay the invoice by :date to keep your user and everything you have watched; unpaid, the access stops then.": "Din adgang fortsætter som :product til :price pr. periode. Betal fakturaen senest :date for at beholde din bruger og alt, hvad du har set; er den ikke betalt, stopper adgangen da.",
     "Your free access ends on :date. To keep watching, create an account with this mail address and buy a subscription in our shop before then.": "Din gratis adgang slutter :date. Vil du blive ved med at se, så opret en konto med denne mailadresse og køb et abonnement i vores butik inden da.",
-    "Go to the shop": "Gå til butikken"
+    "Go to the shop": "Gå til butikken",
+    "As a welcome, your first invoice is :percent% off.": "Som velkomst er din første faktura :percent % billigere.",
+    "welcome discount :percent%": "velkomstrabat :percent %",
+    "Your access stops soon": "Din adgang stopper snart",
+    "Pay the invoice for :product by tomorrow to keep watching.": "Betal fakturaen for :product senest i morgen for at blive ved med at se.",
+    "Pay the invoice for :product within :count days to keep watching.": "Betal fakturaen for :product inden for :count dage for at blive ved med at se."
 }
