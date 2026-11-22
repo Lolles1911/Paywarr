@@ -3,6 +3,14 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.34.2 (2026-11-22)
+
+- **Customers from before the mail list are asked once:** a small box in the
+  client area, "News and offers by mail?" with Yes please / No thanks, until
+  they answer (or tick it under Account or in the cart). Not by mail: asking
+  for consent by mail counts as marketing itself. Accounts made since get the
+  question when they sign up, so they don't see the box.
+
 ## 1.34.1 (2026-11-22)
 
 - **The mail list at checkout:** "Send me news and offers by mail" above the
