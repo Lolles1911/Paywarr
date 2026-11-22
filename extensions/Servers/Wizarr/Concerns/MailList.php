@@ -2,7 +2,9 @@
 
 namespace Paymenter\Extensions\Servers\Wizarr\Concerns;
 
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\HtmlString;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Throwable;
@@ -60,5 +62,43 @@ trait MailList
         }
 
         return e(self::t('You get this because you are on our mail list.')) . ' <a href="' . e($off) . '" style="color:#8f87a8">' . e(self::t('Leave the mail list')) . '</a>';
+    }
+
+    /**
+     * At checkout: "Send me news and offers by mail" above the Checkout
+     * button, for signed-in customers not on the list (new customers tick
+     * it when they make their account). Paymenter's cart has no place for
+     * it, so a small script puts it there; ticking saves it at once.
+     */
+    public function renderCheckoutOptIn(): array
+    {
+        try {
+            if (!Auth::check() || !request()->routeIs('cart') || $this->onMailList(Auth::user())) {
+                return [];
+            }
+            $url = route('extensions.wizarr.mail-list');
+        } catch (Throwable $e) {
+            return [];
+        }
+        $label = e(self::t('Send me news and offers by mail'));
+        $hint = e(self::t('Offers, movie nights and what\'s new on the server. You can stop any time under Account.'));
+
+        return ['view' => new HtmlString('<template id="paywarr-optin"><label data-paywarr-optin style="display:flex;gap:.6rem;align-items:flex-start;margin:.2rem 0 .8rem;cursor:pointer">'
+            . '<input type="checkbox" class="form-checkbox size-4 text-primary rounded" style="margin-top:.2rem">'
+            . '<span><span style="font-size:.9rem">' . $label . '</span><br><span style="font-size:.8rem;opacity:.65">' . $hint . '</span></span></label></template>'
+            . '<script>(function(){function put(){var b=Array.prototype.find.call(document.querySelectorAll("button"),function(x){return x.getAttribute("wire:click")==="checkout"}),t=document.getElementById("paywarr-optin");'
+            . 'if(!b||!t||document.querySelector("[data-paywarr-optin]"))return;var box=t.content.firstElementChild.cloneNode(true),at=b.closest("div")||b;at.parentNode.insertBefore(box,at);box.querySelector("input").checked=!!window.paywarrOptIn;'
+            . 'box.querySelector("input").addEventListener("change",function(e){window.paywarrOptIn=e.target.checked;var m=document.querySelector(\'meta[name="csrf-token"]\');'
+            . 'fetch(' . json_encode($url) . ',{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","Accept":"application/json","X-CSRF-TOKEN":m?m.content:""},body:JSON.stringify({on:e.target.checked})});});}'
+            . 'put();document.addEventListener("livewire:navigated",put);if(!window.paywarrOptInWatch){window.paywarrOptInWatch=new MutationObserver(function(){put()});window.paywarrOptInWatch.observe(document.body,{childList:true,subtree:true});}})();</script>')];
+    }
+
+    /** POST /wizarr/mail-list: on or off the list (the checkbox at checkout). */
+    public function mailListToggle()
+    {
+        $on = (bool) request()->input('on');
+        Auth::user()->properties()->updateOrCreate(['key' => self::PROP_MAIL_LIST], ['name' => self::t('Send me news and offers by mail'), 'value' => $on ? '1' : '0']);
+
+        return response()->json(['on' => $on]);
     }
 }
