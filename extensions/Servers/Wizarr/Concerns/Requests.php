@@ -147,6 +147,43 @@ trait Requests
         return '';
     }
 
+    /**
+     * "Create your user" links of the customer's active subscriptions whose
+     * user isn't made yet, each once, for the top bar. Kept a minute, so it
+     * turns into "Open" soon after.
+     *
+     * @return array<int, array{label: string, url: string}>
+     */
+    public function navInviteLinks($user): array
+    {
+        if (!$user) {
+            return [];
+        }
+
+        return Cache::remember('wizarr:nav-invite:' . $user->id, 60, function () use ($user) {
+            $links = [];
+            $create = self::t('Create your user');
+            foreach (Service::where('user_id', $user->id)->where('status', 'active')->with(['product.server', 'product.settings', 'properties'])->orderBy('id')->get() as $service) {
+                if ($service->product?->server?->extension !== 'Wizarr') {
+                    continue;
+                }
+                try {
+                    $actions = $this->forServiceServer($service)->getActions($service, ExtensionHelper::settingsToArray($service->product->settings), ExtensionHelper::getServiceProperties($service));
+                } catch (Throwable $e) {
+                    continue;
+                }
+                foreach ($actions as $action) {
+                    $label = (string) ($action['label'] ?? '');
+                    if (($action['type'] ?? '') === 'button' && !empty($action['url']) && str_starts_with($label, $create) && !in_array($action['url'], array_column($links, 'url'), true)) {
+                        $links[] = ['label' => $label, 'url' => (string) $action['url']];
+                    }
+                }
+            }
+
+            return $links;
+        });
+    }
+
     public function requestsSources($user, ?iterable $services = null): array
     {
         $sources = [];

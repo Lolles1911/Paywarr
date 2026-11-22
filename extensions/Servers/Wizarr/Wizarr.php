@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.32.0',
+    version: '1.33.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -1015,19 +1015,45 @@ class Wizarr extends Server
 
         // The same in the top bar, plus a link to where the customer watches.
         Event::listen('navigation', function () {
-            if (!Auth::check()) {
+            if (!Auth::check() || !$this->hasSubscription($user = Auth::user())) {
                 return [];
             }
             $items = [];
-            if (Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== [])) {
+            // Where to watch, with a dot for how the servers are doing; or, before the user exists, "Create your user".
+            $links = $this->navWatchLinks($user);
+            if ($links) {
+                $dot = $this->navStatusDot($user);
+                foreach ($links as $i => $watch) {
+                    $items[] = ['name' => $dot . ' ' . $watch['label'], 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 5 + $i];
+                }
+            } else {
+                foreach ($this->navInviteLinks($user) as $i => $invite) {
+                    $items[] = ['name' => '✨ ' . $invite['label'], 'url' => $invite['url'], 'spa' => false, 'icon' => 'ri-user-add', 'priority' => 5 + $i];
+                }
+            }
+            // "My <site>": the page, and what's on now.
+            $children = [['name' => self::t('Overview'), 'url' => $this->hubUrl(), 'spa' => false]];
+            if (self::watchParties() !== [] && self::watchPartiesFor($this->partyProductIds($user)) !== []) {
+                $children[] = ['name' => self::t('Movie night'), 'url' => $this->partyUrl(), 'spa' => false];
+            }
+            if (self::visibleChallenges() !== []) {
+                $children[] = ['name' => self::t('Challenge'), 'url' => $this->challengeUrl(), 'spa' => false];
+            }
+            if (Cache::remember('wizarr:can-pass:' . $user->id, 300, fn () => $this->passOn() && $this->passService($user) !== null)) {
+                $children[] = ['name' => self::t('Friend pass'), 'url' => $this->passUrl(), 'spa' => false];
+            }
+            if (Cache::remember('wizarr:can-refer:' . $user->id, 300, fn () => $this->canRefer($user))) {
+                $children[] = ['name' => self::t('Invite a friend'), 'url' => $this->routeOr('extensions.wizarr.invite', '/wizarr/invite'), 'spa' => false];
+            }
+            $children[] = ['name' => self::t('Service status'), 'url' => $this->statusPageUrl(), 'spa' => false];
+            $items[] = ['name' => self::t('My :name', ['name' => $this->siteName()]), 'children' => $children, 'spa' => false, 'icon' => 'ri-apps-2', 'priority' => 8];
+            if (Cache::remember('wizarr:can-request:' . $user->id, 300, fn () => $this->librarySources($user, null, true) !== [])) {
                 $items[] = ['name' => self::t('Requests'), 'url' => route('extensions.wizarr.requests'), 'icon' => 'ri-movie-2', 'priority' => 10];
             }
-            if (Cache::remember('wizarr:can-report:' . Auth::id(), 300, fn () => $this->reportSources(Auth::user()) !== [])) {
+            if (Cache::remember('wizarr:can-report:' . $user->id, 300, fn () => $this->reportSources($user) !== [])) {
                 $items[] = ['name' => self::t('Report a problem'), 'url' => route('extensions.wizarr.report'), 'icon' => 'ri-error-warning', 'priority' => 12];
             }
-            foreach ($this->navWatchLinks(Auth::user()) as $i => $watch) {
-                $items[] = ['name' => $watch['label'], 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 13 + $i];
-            }
+            $items[] = ['name' => self::t('Help'), 'url' => $this->routeOr('extensions.wizarr.help', '/wizarr/help'), 'icon' => 'ri-question', 'priority' => 14];
 
             return $items;
         });

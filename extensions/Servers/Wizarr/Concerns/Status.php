@@ -272,6 +272,18 @@ trait Status
     }
 
     /** The bar on top of the client area (footer hook, as ['view' => …]; moved to the top by a line of script). */
+    /** 🟢 all running, 🟠 maintenance, 🔴 a server the customer uses is down (the top bar's Open). */
+    public function navStatusDot($user): string
+    {
+        try {
+            $kinds = array_column($this->noticesFor($user), 'kind');
+        } catch (Throwable $e) {
+            return '🟢';
+        }
+
+        return in_array('outage', $kinds, true) ? '🔴' : (in_array('maintenance', $kinds, true) ? '🟠' : '🟢');
+    }
+
     public function renderStatusBar(): array
     {
         if (!Auth::check() || !$this->hasSubscription(Auth::user())) {

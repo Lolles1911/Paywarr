@@ -217,17 +217,17 @@ Paymenter's own mails (invoices, receipts) are Paymenter's.
 
 ## In the top bar
 
-The customer menu items (My <site name>, Requests, My stats from Paywarr Stats,
-Help, Report a problem) show only to customers with a Paywarr subscription
-(active or suspended).
-
-Signed-in customers get links next to Home and Shop (in the menu on a phone):
+Signed-in customers with a subscription get links next to Home and Shop (in
+the menu on a phone):
 
 | Link | Who sees it |
 |---|---|
+| **🟢 Open Plex**, **Open Jellyfin**, **Open Emby**, **Open Silo** | Customers who have created their user: one per media server, with a dot for the servers they use (🟢 running, 🟠 maintenance, 🔴 down) |
+| **✨ Create your user** | Customers whose user isn't made yet: their invitation; it becomes Open within a minute of creating the user |
+| **My <site name>** (a menu) | Overview (the My page), and while they are on: Movie night, Challenge, Friend pass, Invite a friend; and Service status |
 | **Requests** | Customers with requests (see *The Requests tab*) |
-| **Report a problem** | Every customer with an active subscription |
-| **Open Plex**, **Open Jellyfin**, **Open Emby**, **Open Silo** | Customers who have created their user: one link per media server they have, the same addresses as the "Open" buttons on their subscriptions |
+| **Report a problem** | Customers with something to report from |
+| **Help** | Every customer with a subscription |
 
 [Paywarr Stats](https://github.com/Lolles1911/Paywarr-stats) adds **My stats**
 there too. Paymenter shows them as plain links; how they look is up to the
