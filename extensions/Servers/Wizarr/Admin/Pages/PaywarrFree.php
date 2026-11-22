@@ -7,12 +7,15 @@ use App\Models\Product;
 use App\Models\Server;
 use App\Models\User;
 use Filament\Actions\Action;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\EmbeddedTable;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -97,11 +100,50 @@ class PaywarrFree extends Page implements HasTable
                     TextInput::make('warn_days')->label('Then warned, and removed after (days)')->numeric()->minValue(0)->required()->helperText('0: removed without a warning.'),
                     TextInput::make('grace_days')->label('New users are left alone for (days)')->numeric()->minValue(0)->required(),
                     TextInput::make('delete_days')->label('Switched-off users (Jellyfin, Emby, Silo) deleted after (days)')->numeric()->minValue(1)->required(),
+                    Select::make('paid_product')->label('Move to paid: product')->placeholder('The same media server (found by itself)')
+                        ->options(fn () => (new Wizarr([]))->paidProducts())->helperText('Chosen first under "Move to paid"; you can change it there.'),
+                    TextInput::make('pay_days')->label('Move to paid: pay within (days)')->numeric()->minValue(1)->required(),
                 ])
                 ->modalSubmitActionLabel('Save')
                 ->action(function (array $data) {
                     Wizarr::setFreeRules($data);
                     Notification::make()->title('Saved')->success()->send();
+                }),
+            Action::make('paid')->label('Move to paid')->icon('ri-bank-card-line')->color('warning')->visible(fn () => self::canChange())
+                ->modalHeading('Move free users to paid')
+                ->modalDescription('Each gets a paid subscription and an invoice, and keeps their user. Unpaid by the deadline, the access stops (Paymenter suspends it, as with any unpaid invoice). Users without a subscription are put on one if their mail address has an account; otherwise they get a mail with the shop, and lose the access at the deadline.')
+                ->modalSubmitActionLabel('Move')
+                ->fillForm(fn () => ['kinds' => ['subscription', 'user'], 'statuses' => ['active', 'new'], 'products' => [], 'product' => Wizarr::freeRules()['paid_product'], 'days' => Wizarr::freeRules()['pay_days']])
+                ->schema(fn () => [
+                    CheckboxList::make('kinds')->label('Who')->options(['subscription' => 'Free subscriptions', 'user' => 'Users without a subscription'])->required()->live(),
+                    CheckboxList::make('statuses')->label('Status')->columns(3)->required()->live()
+                        ->options(['active' => 'Watching', 'new' => 'New', 'idle' => 'To be warned', 'warned' => 'Warned', 'exempt' => 'Exempt', 'offered' => 'Offered paid']),
+                    Select::make('products')->label('Now on')->multiple()->placeholder('Everything')->live()
+                        ->options(fn () => array_combine($p = array_values(array_unique(array_column($this->rows(), 'product'))), $p) ?: []),
+                    TextEntry::make('count')->label('Taken by the filter')
+                        ->state(fn (Get $get) => (fn ($n) => $n === 1 ? '1 user' : $n . ' users')(count(Wizarr::paidFilter($this->rows(), ['kinds' => $get('kinds') ?? [], 'statuses' => $get('statuses') ?? [], 'products' => $get('products') ?? []])))),
+                    Select::make('product')->label('Paid product')->placeholder('The same media server (found by itself)')->options(fn () => (new Wizarr([]))->paidProducts()),
+                    TextInput::make('days')->label('Pay within (days)')->numeric()->minValue(1)->required(),
+                ])
+                ->action(function (array $data) {
+                    $wizarr = new Wizarr([]);
+                    $done = [];
+                    $failed = [];
+                    foreach (Wizarr::paidFilter($this->rows(), $data) as $row) {
+                        try {
+                            $done[] = $wizarr->moveToPaid($row, !empty($data['product']) ? (int) $data['product'] : null, (int) $data['days']);
+                        } catch (Throwable $e) {
+                            report($e);
+                            $failed[] = $row['name'] . ': ' . $e->getMessage();
+                        }
+                    }
+                    Wizarr::logFreeAll($done);
+                    Notification::make()->title(count($done) . ' moved' . ($failed ? ', ' . count($failed) . ' not' : ''))
+                        ->body(implode("\n", array_slice(array_merge($failed, $done), 0, 10)) ?: 'Nobody was taken by the filter.')
+                        ->{$failed ? 'warning' : 'success'}()->persistent((bool) $failed)->send();
+                    PaywarrInventory::forget();
+                    $this->rows = null;
+                    $this->resetTable();
                 }),
             Action::make('give')->label('Give free access')->icon('ri-gift-2-line')->visible(fn () => self::canChange())->modalSubmitActionLabel('Give')
                 ->modalDescription('A free subscription for an existing customer, on a product with "Free access" (or a price of 0). They get the invitation by mail, as with any order.')
@@ -180,19 +222,20 @@ class PaywarrFree extends Page implements HasTable
                     ->description(fn (array $record) => $record['idle_days'] === 1 ? '1 day without watching' : $record['idle_days'] . ' days without watching'),
                 TextColumn::make('status')->label('Status')->badge()
                     ->formatStateUsing(fn (string $state) => match ($state) {
-                        'active' => 'Watching', 'new' => 'New', 'exempt' => 'Exempt', 'idle' => 'To be warned', 'warned' => 'Warned', 'removed' => 'Switched off', default => $state,
+                        'active' => 'Watching', 'new' => 'New', 'exempt' => 'Exempt', 'idle' => 'To be warned', 'warned' => 'Warned', 'removed' => 'Switched off', 'offered' => 'Offered paid', default => $state,
                     })
-                    ->color(fn (string $state) => match ($state) { 'active', 'new' => 'success', 'exempt' => 'info', 'idle', 'warned' => 'warning', default => 'danger' })
+                    ->color(fn (string $state) => match ($state) { 'active', 'new' => 'success', 'exempt', 'offered' => 'info', 'idle', 'warned' => 'warning', default => 'danger' })
                     ->description(fn (array $record) => match ($record['status']) {
                         'warned' => 'Warned ' . date('M j', (int) $record['warned_at']) . ', removed ' . date('M j', (int) $record['goes_at']),
                         'removed' => 'Deleted ' . date('M j', (int) $record['goes_at']),
+                        'offered' => 'Goes ' . date('M j', (int) $record['goes_at']) . ' without a subscription',
                         'active' => 'Warned on ' . date('M j', (int) $record['goes_at'] - Wizarr::freeRules()['warn_days'] * 86400) . ' if nothing until then',
                         default => null,
                     }),
             ])
             ->filters([
                 SelectFilter::make('kind')->label('Free as')->options(['subscription' => 'Free subscription', 'user' => 'No subscription']),
-                SelectFilter::make('status')->label('Status')->options(['active' => 'Watching', 'idle' => 'To be warned', 'warned' => 'Warned', 'removed' => 'Switched off', 'new' => 'New', 'exempt' => 'Exempt']),
+                SelectFilter::make('status')->label('Status')->options(['active' => 'Watching', 'idle' => 'To be warned', 'warned' => 'Warned', 'removed' => 'Switched off', 'new' => 'New', 'exempt' => 'Exempt', 'offered' => 'Offered paid']),
             ])
             ->recordActions([
                 Action::make('exempt')->label(fn (array $record) => $record['status'] === 'exempt' ? 'Not exempt' : 'Exempt')->icon('ri-shield-user-line')

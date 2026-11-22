@@ -4116,6 +4116,46 @@ test('free access: who is free, the rules, warned, then removed; watching again 
     \App\Models\Property::$rows = [];
 });
 
+test('move to paid: the filter, the plan and price, and users without an account lose the access at the deadline', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $rows = [
+        'service:1' => ['kind' => 'subscription', 'status' => 'active', 'product' => 'Free Plex', 'name' => 'a'],
+        'service:2' => ['kind' => 'subscription', 'status' => 'idle', 'product' => 'Free Plex', 'name' => 'b'],
+        'user:x|3' => ['kind' => 'user', 'status' => 'new', 'product' => 'Jellyfin', 'name' => 'c'],
+        'user:x|4' => ['kind' => 'user', 'status' => 'exempt', 'product' => 'Jellyfin', 'name' => 'd'],
+    ];
+    same(['service:1', 'user:x|3'], array_keys($W::paidFilter($rows, [])), 'by default: those watching and new, not idle or exempt');
+    same(['user:x|3'], array_keys($W::paidFilter($rows, ['kinds' => ['user']])), 'only users without a subscription');
+    same(['service:1', 'service:2'], array_keys($W::paidFilter($rows, ['statuses' => ['active', 'idle', 'new'], 'products' => ['Free Plex']])), 'only those now on Free Plex');
+    same([], array_keys($W::paidFilter($rows, ['statuses' => []])), 'nothing ticked: nobody');
+
+    $plans = [
+        ['id' => 1, 'type' => 'free', 'period' => 1, 'unit' => 'month', 'prices' => []],
+        ['id' => 2, 'type' => 'recurring', 'period' => 1, 'unit' => 'month', 'prices' => ['DKK' => 49.0, 'EUR' => 7.0]],
+        ['id' => 3, 'type' => 'recurring', 'period' => 1, 'unit' => 'year', 'prices' => ['DKK' => 490.0]],
+    ];
+    same([2, 49.0, 'DKK'], $W::paidPlanChoice($plans, null, 'DKK'), 'the first paid plan, in the currency');
+    same([2, 7.0, 'EUR'], $W::paidPlanChoice($plans, null, 'EUR'), 'another currency it has');
+    same([3, 490.0, 'DKK'], $W::paidPlanChoice($plans, ['period' => 1, 'unit' => 'year'], 'DKK'), 'the same period as now');
+    same([3, 490.0, 'DKK'], $W::paidPlanChoice($plans, ['period' => 1, 'unit' => 'year'], 'EUR'), 'a currency the plan lacks: its own');
+    same(null, $W::paidPlanChoice([$plans[0]], null, 'DKK'), 'no paid plan: nothing');
+
+    \App\Models\Property::$rows = [];
+    $now = time();
+    $W::storePut('paid_offers', ['user:x|3' => ['until' => $now + 86400, 'at' => $now], 'user:x|9' => ['until' => $now - 1, 'at' => $now]]);
+    $members = ['user:x|3' => ['kind' => 'user', 'name' => 'c', 'accounts' => [], 'since' => $now - 400 * 86400], 'user:x|4' => ['kind' => 'user', 'name' => 'd', 'accounts' => [], 'since' => null]];
+    $free = ext()->freeRows($members, [], $now);
+    same(['offered', $now + 86400], [$free['user:x|3']['status'], $free['user:x|3']['goes_at']], 'on the page: offered, and when the access goes');
+    $did = [];
+    $act = function ($action, $row) use (&$did) { $did[] = $action . ' ' . $row['name']; return true; };
+    same([], ext()->runPaidOffers($members, $now, $act), 'before the deadline: nothing');
+    same(['user:x|3'], array_keys($W::storeGet('paid_offers')), 'one that bought (no longer free) is forgotten');
+    ext()->runPaidOffers($members, $now + 2 * 86400, $act);
+    same(['remove c'], $did, 'after the deadline: removed');
+    same([], $W::storeGet('paid_offers'), 'and forgotten');
+    \App\Models\Property::$rows = [];
+});
+
 /* ---------- help, checklist, switching, unpaid orders, uptime, satisfaction, CSV ---------- */
 
 test('help: Paywarr\'s guides and questions until edited; the edit wins', function () {

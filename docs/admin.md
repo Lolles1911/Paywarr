@@ -156,6 +156,25 @@ existing customer a free subscription from here, with the invitation by mail.
 **Log** lists who was warned and removed, and when. A product with **Free
 access** can also be in the shop for anyone to order.
 
+**Move to paid** turns free users into paying ones. Choose who with a filter
+(free subscriptions and/or users without a subscription, their status, what
+they are on now; the dialog counts them), the paid product (or **the same
+media server**: the paid product on the same server with the fewest other
+servers), and the days to pay in. Each keeps their user and history and gets:
+
+- a free subscription: changed to the paid product and price, with an invoice
+  due on the deadline;
+- a user without a subscription whose mail address has an account: a new
+  subscription with their user on it, and the invoice;
+- a user without an account: a mail with the shop. They show as **Offered
+  paid** and lose the access at the deadline unless a subscription has their
+  user by then.
+
+They are told by mail (and Discord), and Paymenter sends its invoice mail.
+Unpaid by the deadline, Paymenter suspends the subscription as any unpaid
+invoice (after its **suspend after** days). The default product and days are
+set under **Rules**.
+
 ## Satisfaction, Invite a friend board, CSV
 
 - **Satisfaction** (with **Satisfaction survey** on the Wizarr server): after a

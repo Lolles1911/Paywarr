@@ -3,6 +3,19 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.30.0 (2026-11-22)
+
+- **New: Move to paid** on Paywarr → Free access. Choose who with a filter
+  (free subscriptions and/or users without a subscription, their status,
+  what they are on now), the paid product (or "the same media server", found
+  by itself) and the days to pay in. Each gets the paid subscription and an
+  invoice, keeps their user and history, and is told by mail (and Discord).
+  Unpaid by the deadline, Paymenter suspends it as any unpaid invoice. A user
+  without a subscription is put on one when their mail address has an
+  account; otherwise they get a mail with the shop, show as "Offered paid",
+  and lose the access at the deadline unless they have a subscription by then.
+- The default product and days for it are set under Rules.
+
 ## 1.29.1 (2026-11-21)
 
 - **Customer menus only for subscribers:** Help, Service status and the

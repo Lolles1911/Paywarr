@@ -392,5 +392,9 @@
     "Same price": "Samme pris",
     "Costs more: use Upgrade": "Koster mere: brug Opgrader",
     "Change": "Skift",
-    "Upgrade to another product": "Opgrader til et andet produkt"
+    "Upgrade to another product": "Opgrader til et andet produkt",
+    "Your free access becomes a subscription": "Din gratis adgang bliver til et abonnement",
+    "Your access continues as :product at :price a period. Pay the invoice by :date to keep your user and everything you have watched; unpaid, the access stops then.": "Din adgang fortsætter som :product til :price pr. periode. Betal fakturaen senest :date for at beholde din bruger og alt, hvad du har set; er den ikke betalt, stopper adgangen da.",
+    "Your free access ends on :date. To keep watching, create an account with this mail address and buy a subscription in our shop before then.": "Din gratis adgang slutter :date. Vil du blive ved med at se, så opret en konto med denne mailadresse og køb et abonnement i vores butik inden da.",
+    "Go to the shop": "Gå til butikken"
 }
