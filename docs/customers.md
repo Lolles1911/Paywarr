@@ -178,6 +178,31 @@ stats, Help, Report a problem and Discord (each only when the customer has
 it). The menu keeps Requests, My stats, Help and Report a problem; the rest is
 on this page.
 
+Above the cards: **Continue watching** (their own half-watched titles, with a
+progress bar), **New on the server** and **Popular now**, as posters from
+Tracearr (Plex, Jellyfin, Emby) and Silo; a poster opens their media server.
+
+## A subscription's Overview
+
+A Paywarr subscription's page has an **Overview** under the buttons: three
+steps (create your user, get the app, watch something), a card per media
+server with their user and **Open** (or **Create your user**), and shortcuts.
+
+## The selection for visitors
+
+With **Show the selection to visitors** on the Wizarr server, the front page
+gets a row of posters ("Something for everyone") and **See the whole
+selection** opens `/catalog`: movies and shows apart, posters only (no titles
+or search), and **See subscriptions**. The posters are what's new and popular
+in Tracearr; Paywarr serves the images itself.
+
+## Mails
+
+Paywarr's mails share one design: the logo from Paymenter's settings on a
+dark top (the site's name without one), the button in **Mail colour** from the
+Wizarr server, and links to My <site name>, Help and Status at the bottom.
+Paymenter's own mails (invoices, receipts) are Paymenter's.
+
 ## Campaigns, movie nights, challenges, friend pass
 
 - While a **campaign** runs, a banner with a countdown shows the code (or, for

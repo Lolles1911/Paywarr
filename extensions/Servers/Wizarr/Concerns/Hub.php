@@ -59,6 +59,7 @@ trait Hub
         $watch = $links ? '<div style="display:flex;gap:.6rem;flex-wrap:wrap">' . implode('', array_map(fn ($l) => '<a href="' . $e($l['url']) . '" target="_blank" class="bg-primary text-white font-semibold rounded-lg px-4 py-3" style="flex:1 1 10rem;text-align:center">▶ ' . $e($l['label']) . '</a>', $links)) . '</div>'
             : '<p>' . $e(self::t('Your access is being prepared, or your user isn\'t created yet. Open your subscription to see how far it is.')) . '</p>';
         $cards .= $this->hubCard('🎬', self::t('Watch'), $watch, $links ? null : [self::t('Your subscriptions'), $this->routeOr('services', '/services')], 2);
+        $cards .= $this->hubPosterRows($user, $links);
 
         // Subscriptions.
         $rows = '';
@@ -151,5 +152,68 @@ trait Hub
             . '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr));gap:1rem;margin-bottom:2rem">' . $cards . '</div></div>';
 
         return view('layouts.app', ['slot' => new HtmlString($html), 'title' => self::t('My :name', ['name' => $this->siteName()])]);
+    }
+
+    /**
+     * The "Overview" tab on a Paywarr subscription's page: three steps (your
+     * user, the app, watching), a card per media server with the user and
+     * "Open", and shortcuts. Paymenter shows it under the buttons.
+     */
+    public function overviewView(Service $service, $settings, $properties, $view = null): string
+    {
+        $e = fn ($v) => e((string) $v);
+        $user = $service->user;
+        $cards = '';
+        $hasUser = false;
+        $links = [];
+        try {
+            $links = $this->navWatchLinks($user, [$service]);
+        } catch (Throwable $ex) {
+            // Without Open buttons.
+        }
+        foreach ($this->grantKeys($properties) ?: [''] as $grant) {
+            [$label, $users, $invite] = $this->withGrant($grant, fn () => [
+                $this->isSilo() ? 'Silo' : (trim(preg_replace('/^server \\d+$/', '', $this->grantLabel($properties))) ?: (string) ($service->product->name ?? '')),
+                $this->parseUsers((string) ($this->grantView($properties)[self::PROP_USERS] ?? '')),
+                (string) ($this->grantView($properties)[self::PROP_INVITE_URL] ?? ''),
+            ]);
+            $hasUser = $hasUser || $users;
+            $open = array_values(array_filter($links, fn ($l) => stripos($l['label'], $label) !== false))[0] ?? (count($links) === 1 ? $links[0] : null);
+            $cards .= '<div class="bg-background-secondary" style="border-radius:1rem;padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.5rem">'
+                . '<div style="font-weight:700;font-size:1.05rem">' . $e($label) . '</div>'
+                . ($users ? '<div style="opacity:.85">' . $e(self::t('Your user: :name', ['name' => implode(', ', array_column($users, 'username'))])) . '</div>'
+                    : '<div style="opacity:.85">' . $e(self::t('Waiting for you to create your user')) . '</div>')
+                . ($users && $open ? '<a href="' . $e($open['url']) . '" target="_blank" class="bg-primary text-white font-semibold rounded-lg px-4 py-2" style="text-align:center">▶ ' . $e($open['label']) . '</a>'
+                    : (!$users && $invite !== '' ? '<a href="' . $e($invite) . '" target="_blank" class="bg-primary text-white font-semibold rounded-lg px-4 py-2" style="text-align:center">' . $e(self::t('Create your user')) . '</a>' : ''))
+                . '</div>';
+        }
+        $helpSeen = $user && $this->propertyValue($user, 'paywarr_help_seen') !== null;
+        $watched = false;
+        if ($hasUser && $user) {
+            try {
+                $watched = Cache::remember('paywarr:checklist:watched:' . $user->id, 900, fn () => $this->hasWatched($user, $this->streamAccounts($properties), [$service]));
+            } catch (Throwable $ex) {
+                $watched = false;
+            }
+        }
+        $steps = [[self::t('Create your user'), $hasUser], [self::t('Get the app'), $helpSeen], [self::t('Watch something'), $watched]];
+        $stepper = '<ol style="display:flex;gap:.5rem;list-style:none;padding:0;margin:0 0 1rem;flex-wrap:wrap">';
+        foreach ($steps as $i => [$label, $done]) {
+            $stepper .= '<li style="flex:1 1 9rem;display:flex;gap:.6rem;align-items:center;padding:.6rem .8rem;border-radius:.8rem;background:' . ($done ? 'rgba(34,197,94,.14)' : 'rgba(127,127,127,.12)') . '">'
+                . '<span style="width:1.6rem;height:1.6rem;border-radius:2rem;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;flex:none;'
+                . ($done ? 'background:#22c55e;color:#fff">✓' : 'border:2px solid rgba(127,127,127,.6)">' . ($i + 1)) . '</span><span style="font-weight:600">' . $e($label) . '</span></li>';
+        }
+        $stepper .= '</ol>';
+        $shortcuts = [['📱', self::t('Apps and guides'), $this->routeOr('extensions.wizarr.help', '/wizarr/help')], ['🧭', self::t('My :name', ['name' => $this->siteName()]), $this->hubUrl()]];
+        if ($user && Cache::remember('wizarr:can-request:' . $user->id, 300, fn () => $this->librarySources($user, null, true) !== [])) {
+            $shortcuts[] = ['🔎', self::t('Requests'), $this->routeOr('extensions.wizarr.requests', '/wizarr/requests')];
+        }
+        if ($user && Cache::remember('wizarr:can-report:' . $user->id, 300, fn () => $this->reportSources($user) !== [])) {
+            $shortcuts[] = ['🛠️', self::t('Report a problem'), $this->routeOr('extensions.wizarr.report', '/wizarr/report')];
+        }
+
+        return '<div style="padding:1rem">' . $stepper
+            . '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:.8rem;margin-bottom:1rem">' . $cards . '</div>'
+            . '<div style="display:flex;gap:.6rem;flex-wrap:wrap">' . implode('', array_map(fn ($s) => '<a href="' . $e($s[2]) . '" class="border border-neutral rounded-lg px-3 py-2" style="display:inline-flex;gap:.4rem;align-items:center;font-weight:600"><span aria-hidden="true">' . $s[0] . '</span>' . $e($s[1]) . '</a>', $shortcuts)) . '</div></div>';
     }
 }

@@ -883,6 +883,13 @@ namespace Illuminate\Support\Facades {
         /** @var array<string, string> parameter => pattern, as Route::where*() set them */
         public array $wheres = [];
 
+        public function where($parameter, $pattern): static
+        {
+            $this->wheres[$parameter] = $pattern;
+
+            return $this;
+        }
+
         public function whereNumber($parameter): static
         {
             $this->wheres[$parameter] = '[0-9]+';

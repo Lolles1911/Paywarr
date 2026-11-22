@@ -2,6 +2,7 @@
 
 namespace Paymenter\Extensions\Servers\Wizarr\Concerns;
 
+use App\Helpers\ExtensionHelper;
 use App\Models\Service;
 use Illuminate\Support\Facades\Log;
 use Paymenter\Extensions\Servers\Wizarr\DiscordException;
@@ -92,17 +93,60 @@ trait Notifications
     public function mailLayout(string $title, string $body, ?array $button = null, string $footer = ''): string
     {
         $site = e((string) ((function_exists('config') ? (config('settings.company_name') ?: config('app.name')) : '') ?: 'Paywarr'));
+        $accent = self::mailAccent();
+        $logo = '';
+        try {
+            $file = (string) (config('settings.logo_dark') ?: config('settings.logo') ?: '');
+            if ($file !== '') {
+                $logo = '<img src="' . e(url(\Illuminate\Support\Facades\Storage::url($file))) . '" alt="' . $site . '" height="32" style="height:32px;width:auto;border:0;display:block">';
+            }
+        } catch (Throwable $e) {
+            // The name then.
+        }
         $buttonHtml = $button
-            ? '<p style="margin:28px 0"><a href="' . e($button[1]) . '" style="display:inline-block;background:#7c3aed;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:10px">' . e($button[0]) . '</a></p>'
+            ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:26px 0 6px"><tr><td style="border-radius:12px;background:' . $accent . '">'
+                . '<a href="' . e($button[1]) . '" style="display:inline-block;padding:13px 24px;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;border-radius:12px">' . e($button[0]) . '</a></td></tr></table>'
             : '';
+        $links = [];
+        foreach ([['extensions.wizarr.hub', '/wizarr/me', self::t('My :name', ['name' => html_entity_decode($site)])], ['extensions.wizarr.help', '/wizarr/help', self::t('Help')], ['extensions.wizarr.status-page', '/status', self::t('Status')]] as [$route, $path, $label]) {
+            try {
+                $href = function_exists('route') ? route($route) : $path;
+            } catch (Throwable $e) {
+                $href = function_exists('url') ? url($path) : $path;
+            }
+            $links[] = '<a href="' . e($href) . '" style="color:#8f87a8;text-decoration:underline">' . e($label) . '</a>';
+        }
 
-        return '<!doctype html><html><body style="margin:0;background:#f4f2f8;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f1a2e">'
-            . '<div style="max-width:560px;margin:0 auto;padding:32px 20px">'
-            . '<div style="font-weight:800;font-size:18px;color:#7c3aed;margin-bottom:18px">' . $site . '</div>'
-            . '<div style="background:#ffffff;border-radius:16px;padding:28px 26px;line-height:1.55;font-size:15px">'
-            . '<h1 style="font-size:21px;margin:0 0 14px">' . e($title) . '</h1>' . $body . $buttonHtml . '</div>'
-            . ($footer !== '' ? '<div style="color:#6b6680;font-size:12px;margin-top:16px;line-height:1.5">' . $footer . '</div>' : '')
-            . '</div></body></html>';
+        return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"></head>'
+            . '<body style="margin:0;padding:0;background:#efedf5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f1a2e">'
+            . '<div style="display:none;max-height:0;overflow:hidden;opacity:0">' . e($title) . '</div>'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#efedf5"><tr><td align="center" style="padding:28px 14px">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">'
+            . '<tr><td style="background:#14101f;border-radius:18px 18px 0 0;padding:20px 26px;border-bottom:3px solid ' . $accent . '">'
+            . ($logo !== '' ? $logo : '<span style="font-weight:800;font-size:20px;color:#ffffff">' . $site . '</span>') . '</td></tr>'
+            . '<tr><td style="background:#ffffff;border-radius:0 0 18px 18px;padding:28px 26px 30px;line-height:1.6;font-size:15px">'
+            . '<h1 style="font-size:22px;line-height:1.3;margin:0 0 14px;color:#14101f">' . e($title) . '</h1>' . $body . $buttonHtml . '</td></tr>'
+            . '<tr><td style="padding:18px 8px 0;color:#8f87a8;font-size:12px;line-height:1.6;text-align:center">'
+            . ($footer !== '' ? '<div style="margin-bottom:8px">' . $footer . '</div>' : '')
+            . implode(' &nbsp;·&nbsp; ', $links) . '<br>' . $site . '</td></tr>'
+            . '</table></td></tr></table></body></html>';
+    }
+
+    /** The colour of buttons and the line under the logo in mails: "Mail colour" on the Wizarr server, else violet. */
+    public static function mailAccent(): string
+    {
+        try {
+            foreach (\App\Models\Server::where('extension', 'Wizarr')->with('settings')->get() as $server) {
+                $colour = trim((string) (ExtensionHelper::settingsToArray($server->settings)['mail_colour'] ?? ''));
+                if (preg_match('/^#[0-9a-fA-F]{6}$/', $colour)) {
+                    return $colour;
+                }
+            }
+        } catch (Throwable $e) {
+            // The default.
+        }
+
+        return '#7c3aed';
     }
 
     /** Plain text as mail paragraphs. */

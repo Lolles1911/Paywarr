@@ -57,6 +57,10 @@ trait ClientArea
     public function getActions(Service $service, $settings, $properties): array
     {
         $actions = $this->accessActions($service, $settings, $properties);
+        // "Overview": the steps, a card per media server and shortcuts, under the buttons (Hub).
+        if (!$this->isTopUp($settings) && !$this->isGift($settings)) {
+            array_unshift($actions, ['type' => 'view', 'name' => 'overview', 'label' => self::t('Overview'), 'function' => 'overviewView']);
+        }
         // "Change media server", when there is a choice (SwitchServer).
         try {
             if ($this->canSwitch($service, $settings, $properties)) {

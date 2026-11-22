@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.31.0',
+    version: '1.32.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -98,6 +98,7 @@ class Wizarr extends Server
     use Concerns\Challenges;
     use Concerns\FriendPass;
     use Concerns\Hub;
+    use Concerns\Posters;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -597,6 +598,20 @@ class Wizarr extends Server
                 'description' => 'Optional. A second reminder, counted from the order. Empty: only one.',
             ],
             [
+                'name' => 'mail_colour',
+                'label' => 'Mail colour',
+                'type' => 'text',
+                'required' => false,
+                'placeholder' => '#7c3aed',
+                'description' => 'The colour of buttons in Paywarr\'s mails, as #rrggbb. The logo is the one under Settings (the dark one if there is one).',
+            ],
+            [
+                'name' => 'showcase',
+                'label' => 'Show the selection to visitors',
+                'type' => 'checkbox',
+                'description' => 'A wall of posters (no titles) of what is new and popular, on the front page and on /catalog, so visitors see the selection before they buy. From Tracearr.',
+            ],
+            [
                 'name' => 'friend_pass',
                 'label' => 'Friend pass',
                 'type' => 'checkbox',
@@ -945,6 +960,8 @@ class Wizarr extends Server
         Event::listen('footer', fn () => $this->renderBanner());
         // A server down or planned maintenance: a bar on top, for the customers it concerns.
         Event::listen('footer', fn () => $this->renderStatusBar());
+        // The selection for visitors, on the front page (Posters).
+        Event::listen('pages.home', fn () => $this->renderShowcase());
         // A campaign's banner with a countdown, also for visitors.
         Event::listen('footer', fn () => $this->renderCampaignBanner());
 

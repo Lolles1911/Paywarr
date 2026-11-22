@@ -108,3 +108,9 @@ Route::middleware(['web', 'auth', 'throttle:20,1'])->name('extensions.wizarr.pas
 
 // "My <site name>": everything for the customer's subscription on one page.
 Route::middleware(['web', 'auth'])->get('wizarr/me', [Wizarr::class, 'hubPage'])->name('extensions.wizarr.hub');
+
+// Posters Paywarr has listed (My page, the front page, /catalog). Public: no titles in the address.
+Route::middleware(['web', 'throttle:300,1'])->get('wizarr/poster/{key}', [Wizarr::class, 'posterImage'])->where('key', '[0-9a-f]{16}')->name('extensions.wizarr.poster');
+
+// The selection for visitors (with "Show the selection to visitors").
+Route::middleware(['web', 'throttle:60,1'])->get('catalog', [Wizarr::class, 'catalogPage'])->name('extensions.wizarr.catalog');
