@@ -30,9 +30,9 @@ class PaywarrCampaigns extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-price-tag-3-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Events';
 
-    protected static ?int $navigationSort = 9;
+    protected static ?int $navigationSort = 201;
 
     protected static ?string $navigationLabel = 'Campaigns';
 

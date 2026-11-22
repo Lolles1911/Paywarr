@@ -23,9 +23,9 @@ class PaywarrHelp extends Page
 {
     protected static string|\BackedEnum|null $navigationIcon = 'ri-question-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Operations';
 
-    protected static ?int $navigationSort = 11;
+    protected static ?int $navigationSort = 305;
 
     protected static ?string $navigationLabel = 'Help page';
 

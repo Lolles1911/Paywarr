@@ -105,3 +105,6 @@ Route::middleware(['web', 'auth', 'throttle:20,1'])->name('extensions.wizarr.pas
     Route::get('wizarr/friend-pass', [Wizarr::class, 'passPage']);
     Route::post('wizarr/friend-pass', [Wizarr::class, 'passPage']);
 });
+
+// "My WaffleHub": everything for the customer's subscription on one page.
+Route::middleware(['web', 'auth'])->get('wizarr/me', [Wizarr::class, 'hubPage'])->name('extensions.wizarr.hub');

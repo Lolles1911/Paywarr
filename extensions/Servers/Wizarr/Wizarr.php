@@ -97,6 +97,7 @@ class Wizarr extends Server
     use Concerns\WatchParty;
     use Concerns\Challenges;
     use Concerns\FriendPass;
+    use Concerns\Hub;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -967,13 +968,13 @@ class Wizarr extends Server
             'condition' => Auth::check() && Cache::remember('wizarr:can-request:' . Auth::id(), 300, fn () => $this->librarySources(Auth::user(), null, true) !== []),
         ]);
 
-        // "Invite a friend", when on and the customer has a paid subscription.
+        // "My WaffleHub": everything Paywarr offers the customer, as cards (Hub).
         Event::listen('navigation.dashboard', fn () => [
-            'name' => self::t('Invite a friend'),
-            'route' => 'extensions.wizarr.invite',
-            'icon' => 'ri-gift-2',
-            'priority' => 31,
-            'condition' => Auth::check() && Cache::remember('wizarr:can-refer:' . Auth::id(), 300, fn () => $this->canRefer(Auth::user())),
+            'name' => self::t('My :name', ['name' => $this->siteName()]),
+            'route' => 'extensions.wizarr.hub',
+            'icon' => 'ri-apps-2',
+            'priority' => 15, // right under Dashboard
+            'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
         ]);
 
         // "Help": guides per device and questions; and "Getting started" on the dashboard.
@@ -985,44 +986,6 @@ class Wizarr extends Server
             'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
         ]);
         Event::listen('pages.dashboard', fn () => $this->renderChecklist());
-
-        // "Movie night": in the menu while one is planned for the customer, and on the dashboard.
-        Event::listen('navigation.dashboard', fn () => [
-            'name' => self::t('Movie night'),
-            'route' => 'extensions.wizarr.party',
-            'icon' => 'ri-movie-2',
-            'priority' => 31,
-            'condition' => Auth::check() && self::watchParties() !== [] && $this->hasSubscription(Auth::user()) && self::watchPartiesFor($this->partyProductIds(Auth::user())) !== [],
-        ]);
-        Event::listen('pages.dashboard', fn () => $this->renderPartyCard());
-
-        // A challenge: in the menu while one runs (or just ended), and the progress on the dashboard.
-        Event::listen('navigation.dashboard', fn () => [
-            'name' => self::t('Challenge'),
-            'route' => 'extensions.wizarr.challenge',
-            'icon' => 'ri-trophy',
-            'priority' => 31,
-            'condition' => Auth::check() && self::visibleChallenges() !== [] && $this->hasSubscription(Auth::user()),
-        ]);
-        Event::listen('pages.dashboard', fn () => $this->renderChallengeCard());
-
-        // "Friend pass": a free week for a friend, once a month, for paying customers.
-        Event::listen('navigation.dashboard', fn () => [
-            'name' => self::t('Friend pass'),
-            'route' => 'extensions.wizarr.pass',
-            'icon' => 'ri-coupon-3',
-            'priority' => 29,
-            'condition' => Auth::check() && Cache::remember('wizarr:can-pass:' . Auth::id(), 300, fn () => $this->passOn() && $this->passService(Auth::user()) !== null),
-        ]);
-
-        // "Service status": every media server, up or down, and your notices.
-        Event::listen('navigation.dashboard', fn () => [
-            'name' => self::t('Service status'),
-            'route' => 'extensions.wizarr.status-page',
-            'icon' => 'ri-pulse',
-            'priority' => 33,
-            'condition' => Auth::check() && $this->hasSubscription(Auth::user()),
-        ]);
 
         // "Report a problem", for every customer with a subscription to report from.
         Event::listen('navigation.dashboard', fn () => [

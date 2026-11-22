@@ -26,9 +26,9 @@ class PaywarrChecks extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-shield-check-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Operations';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 303;
 
     protected static ?string $navigationLabel = 'Checks';
 

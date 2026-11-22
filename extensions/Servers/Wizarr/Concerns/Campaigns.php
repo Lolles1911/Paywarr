@@ -222,7 +222,7 @@ trait Campaigns
         }
         $id = 'paywarr-campaign-' . $campaign['id'];
 
-        return ['view' => new HtmlString('<div id="' . e($id) . '" style="background:linear-gradient(90deg,#7c3aed,#db2777);color:#fff;padding:.7rem 2.6rem .7rem 1rem;margin:1rem auto;border-radius:.8rem;max-width:72rem;font-size:.95rem;display:flex;gap:.8rem;align-items:center;justify-content:center;flex-wrap:wrap;position:relative">'
+        return ['view' => new HtmlString('<div id="' . e($id) . '" style="background:linear-gradient(90deg,#7c3aed,#db2777);color:#fff;padding:.7rem 2.6rem .7rem 1rem;margin:1rem auto;border-radius:.8rem;max-width:72rem;width:calc(100% - 2rem);box-sizing:border-box;font-size:.95rem;display:flex;gap:.8rem;align-items:center;justify-content:center;flex-wrap:wrap;position:relative">'
             . '<strong>' . e($campaign['title']) . '</strong><span>' . e($text) . '</span>'
             . '<span style="font-variant-numeric:tabular-nums;background:rgba(0,0,0,.2);padding:.15rem .5rem;border-radius:.4rem" data-ends="' . (int) $campaign['ends'] . '"></span>'
             . (!$customer ? '<a href="' . e($this->shopUrl()) . '" style="color:#fff;text-decoration:underline;font-weight:600">' . e(self::t('See subscriptions')) . '</a>' : '')

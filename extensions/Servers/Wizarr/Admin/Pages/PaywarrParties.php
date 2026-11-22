@@ -31,9 +31,9 @@ class PaywarrParties extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-movie-2-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Events';
 
-    protected static ?int $navigationSort = 9;
+    protected static ?int $navigationSort = 202;
 
     protected static ?string $navigationLabel = 'Movie nights';
 

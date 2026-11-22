@@ -25,9 +25,9 @@ class PaywarrStatus extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-pulse-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Operations';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 301;
 
     protected static ?string $navigationLabel = 'Server status';
 

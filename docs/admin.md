@@ -1,8 +1,14 @@
 # Admin: the Paywarr pages
 
-Paymenter's admin gets a **Paywarr** group with six pages. Staff who may view
-services see them; the buttons need the right to edit services (products for
-the libraries). The pages ask Wizarr and Silo at most once a minute.
+Paymenter's admin gets three Paywarr groups: **Paywarr: Customers**
+(Customers, Media server users, Invitations, Free access, Moved to paid,
+Streams and sharing), **Paywarr: Events** (Campaigns, Movie nights,
+Challenges, Message customers, Invite a friend, Satisfaction) and **Paywarr:
+Operations** (Server status, Service status, Checks, Libraries per product,
+Help page, Monthly reports, and Paywarr Stats' pages). Below, "Paywarr → X"
+is the page X in one of them. Staff who may view services see them; the
+buttons need the right to edit services (products for the libraries). The
+pages ask Wizarr and Silo at most once a minute.
 
 ![Paywarr customers](../screenshots/admin-customers.png)
 

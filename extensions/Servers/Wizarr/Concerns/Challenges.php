@@ -331,22 +331,4 @@ trait Challenges
 
         return view('layouts.app', ['slot' => new HtmlString($this->pageFrame(self::t('Challenge'), $html)), 'title' => self::t('Challenge')]);
     }
-
-    /** On the dashboard: the running challenge and the customer's progress. */
-    public function renderChallengeCard(): array
-    {
-        if (!Auth::check()) {
-            return [];
-        }
-        $c = array_values(array_filter(self::visibleChallenges(), fn ($c) => self::challengeStatus($c) === 'running'))[0] ?? null;
-        if (!$c || !$this->hasSubscription(Auth::user())) {
-            return [];
-        }
-        $mine = (float) ($c['progress'][Auth::id()] ?? 0);
-        $pct = min(100, (int) round($mine / max(1, $c['goal']) * 100));
-
-        return ['view' => new HtmlString('<a href="' . e($this->challengeUrl()) . '" class="bg-background-secondary" style="display:block;border-radius:1rem;padding:1rem 1.2rem;margin:1rem 0;border:1px solid rgba(124,58,237,.4)">'
-            . '<div style="display:flex;justify-content:space-between;font-weight:700"><span>🏆 ' . e($c['title']) . '</span><span>' . e($mine . ' / ' . $c['goal']) . '</span></div>'
-            . '<div style="height:.5rem;border-radius:1rem;background:rgba(127,127,127,.25);margin-top:.5rem;overflow:hidden"><div style="height:100%;width:' . $pct . '%;background:linear-gradient(90deg,#7c3aed,#db2777)"></div></div></a>')];
-    }
 }

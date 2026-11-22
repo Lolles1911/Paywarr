@@ -29,9 +29,9 @@ class PaywarrInvitations extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-mail-send-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Customers';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 103;
 
     protected static ?string $navigationLabel = 'Invitations';
 

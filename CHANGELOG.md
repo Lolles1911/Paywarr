@@ -5,6 +5,21 @@ release on GitHub (`.github/release-notes.sh` puts it there).
 
 ## 1.31.0 (2026-11-22)
 
+- **New: My WaffleHub** (named after your site): one page with everything
+  for the customer, as cards: Open buttons, their subscriptions, the service
+  status, the movie night, the challenge, the friend pass, Invite a friend,
+  and shortcuts to Requests, My stats, Help, Report a problem and Discord.
+  It sits under Dashboard in the menu.
+- **A shorter customer menu:** Movie night, Challenge, Friend pass, Invite a
+  friend and Service status moved into My WaffleHub; Requests, My stats, Help
+  and Report a problem stay. The dashboard is as before.
+- **Admin in three groups:** Paywarr: Customers (customers, media server
+  users, invitations, free access, moved to paid, streams), Paywarr: Events
+  (campaigns, movie nights, challenges, messages, Invite a friend,
+  satisfaction) and Paywarr: Operations (server status, service status,
+  checks, libraries, help page, monthly reports, and Paywarr Stats' pages).
+- **Phones:** every customer page checked on a phone; the banners keep a
+  margin at the screen's edges.
 - **New: Campaigns** (Paywarr → Campaigns), e.g. Black Friday: a percentage
   off for a while. New customers get a code (a Paymenter coupon, for the
   periods you choose); existing customers get it off their next renewal in

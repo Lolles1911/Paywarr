@@ -231,25 +231,4 @@ trait WatchParty
 
         return view('layouts.app', ['slot' => new HtmlString($this->pageFrame(self::t('Movie night'), $html)), 'title' => self::t('Movie night')]);
     }
-
-    /** On the dashboard: the next movie night within a week. */
-    public function renderPartyCard(): array
-    {
-        if (!Auth::check()) {
-            return [];
-        }
-        try {
-            $next = array_values(array_filter(self::watchPartiesFor($this->partyProductIds(Auth::user())), fn ($p) => $p['at'] - time() < 7 * 86400))[0] ?? null;
-        } catch (Throwable $e) {
-            return [];
-        }
-        if (!$next) {
-            return [];
-        }
-        $going = isset($next['going'][Auth::id()]);
-
-        return ['view' => new HtmlString('<a href="' . e($this->partyUrl()) . '" class="bg-background-secondary" style="display:flex;gap:1rem;align-items:center;border-radius:1rem;padding:1rem 1.2rem;margin:1rem 0;border:1px solid rgba(219,39,119,.4)">'
-            . '<span style="font-size:1.8rem">🍿</span><span style="flex:1"><span style="display:block;font-weight:700">' . e(self::t('Movie night: :title', ['title' => $next['title']])) . '</span>'
-            . '<span style="opacity:.8">' . e(date(self::t('M j, H:i'), $next['at'])) . ' · ' . e($going ? self::t('You\'re coming') : self::t('Join us')) . '</span></span><span aria-hidden="true">→</span></a>')];
-    }
 }

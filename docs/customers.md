@@ -168,23 +168,33 @@ With **Unpaid order: remind after (hours)** on the Wizarr server, an order
 whose first invoice is unpaid gets one mail with the link to pay (and a second
 with **remind again after (hours)**). Orders older than a week are left alone.
 
+## My WaffleHub
+
+**My WaffleHub** (named after your site, `/wizarr/me`, under Dashboard in the
+menu) gathers it all as cards: the Open buttons, their subscriptions, the
+service status, the movie night ("I'm coming"), the challenge's progress, the
+friend pass, Invite a friend with their code, and shortcuts to Requests, My
+stats, Help, Report a problem and Discord (each only when the customer has
+it). The menu keeps Requests, My stats, Help and Report a problem; the rest is
+on this page.
+
 ## Campaigns, movie nights, challenges, friend pass
 
 - While a **campaign** runs, a banner with a countdown shows the code (or, for
   customers, that their next renewal is cheaper).
-- **Movie night** is in the menu while one is planned for them: when, who is
-  coming, "I'm coming", their Open links and the Discord thread; a card on the
-  dashboard, and a reminder an hour before.
-- **Challenge** is in the menu while one runs: their progress, the
-  leaderboard (first names) and the prize; a progress card on the dashboard.
-- **Friend pass** (paying customers, when switched on): a free week for a
-  friend, once a month, and the passes they gave.
+- **Movie night** (a card on My WaffleHub while one is planned for them):
+  when, who is coming, "I'm coming", their Open links and the Discord thread,
+  and a reminder an hour before.
+- **Challenge** (a card on My WaffleHub while one runs): their progress, the
+  leaderboard (first names) and the prize.
+- **Friend pass** (paying customers, when switched on; a card on My
+  WaffleHub): a free week for a friend, once a month, and the passes they gave.
 
 ## In the top bar
 
-The customer menu items (Help, Service status, Invite a friend, Requests,
-Report a problem, and My stats from Paywarr Stats) show only to customers with
-a Paywarr subscription (active or suspended).
+The customer menu items (My WaffleHub, Requests, My stats from Paywarr Stats,
+Help, Report a problem) show only to customers with a Paywarr subscription
+(active or suspended).
 
 Signed-in customers get links next to Home and Shop (in the menu on a phone):
 

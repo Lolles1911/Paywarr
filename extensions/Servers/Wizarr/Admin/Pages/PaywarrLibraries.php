@@ -28,9 +28,9 @@ class PaywarrLibraries extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-film-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Operations';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 304;
 
     protected static ?string $navigationLabel = 'Libraries per product';
 

@@ -30,9 +30,9 @@ class PaywarrChallenges extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-trophy-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Events';
 
-    protected static ?int $navigationSort = 9;
+    protected static ?int $navigationSort = 203;
 
     protected static ?string $navigationLabel = 'Challenges';
 

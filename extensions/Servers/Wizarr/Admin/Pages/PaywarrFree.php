@@ -41,9 +41,9 @@ class PaywarrFree extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-gift-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Customers';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 104;
 
     protected static ?string $navigationLabel = 'Free access';
 

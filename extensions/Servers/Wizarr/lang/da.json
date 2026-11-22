@@ -469,5 +469,14 @@
     "in :d d :h h :m min": "om :d d :h t :m min",
     "Now!": "Nu!",
     "You're coming": "Du kommer",
-    "Join us": "Vær med"
+    "My :name": "Mit :name",
+    "Your access is being prepared, or your user isn't created yet. Open your subscription to see how far it is.": "Din adgang bliver gjort klar, eller din bruger er ikke oprettet endnu. Åbn dit abonnement for at se, hvor langt det er.",
+    "Your subscriptions": "Dine abonnementer",
+    "Paused or suspended": "På pause eller suspenderet",
+    "Renews :date": "Fornyes :date",
+    "No subscription yet.": "Intet abonnement endnu.",
+    "See all": "Se alle",
+    "Give a friend a free week on our media server, once a month.": "Giv en ven en gratis uge på vores medieserver, én gang om måneden.",
+    "My stats": "Min statistik",
+    "Hi :name! Everything for your subscription in one place.": "Hej :name! Alt om dit abonnement samlet ét sted."
 }
