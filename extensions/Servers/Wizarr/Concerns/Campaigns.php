@@ -80,12 +80,66 @@ trait Campaigns
         }
         $campaign = ['id' => bin2hex(random_bytes(4)), 'title' => trim((string) $data['title']), 'text' => trim((string) ($data['text'] ?? '')), 'percent' => $percent,
             'starts' => $starts, 'ends' => $ends, 'code' => $coupon ? $code : '', 'coupon' => $coupon?->id, 'periods' => max(1, (int) ($data['periods'] ?? 1)),
-            'products' => $products, 'existing' => !empty($data['existing']), 'announce' => !empty($data['announce']), 'announced' => null, 'stopped' => null, 'renewals' => []];
+            'products' => $products, 'existing' => !empty($data['existing']), 'announced' => null, 'stopped' => null, 'renewals' => []] + self::campaignPlaces($data);
         $all = self::campaigns();
         $all[] = $campaign;
         self::storePut('campaigns', $all);
 
         return $campaign;
+    }
+
+    /** Where a campaign shows: banner for visitors, banner for customers, mail and Discord, the announcements channel. */
+    public static function campaignPlaces(array $data): array
+    {
+        return ['show_visitors' => !empty($data['show_visitors']), 'show_customers' => !empty($data['show_customers']),
+            'announce_mail' => !empty($data['announce_mail']), 'announce_channel' => !empty($data['announce_channel'])];
+    }
+
+    /** A campaign's settings as saved (older campaigns: everywhere, announced if "announce" was on). */
+    public static function campaignWith(array $c): array
+    {
+        return $c + ['show_visitors' => true, 'show_customers' => true, 'announce_mail' => !empty($c['announce']), 'announce_channel' => !empty($c['announce'])];
+    }
+
+    /** Changes a campaign (and its coupon); the code only while nobody has used it. */
+    public function updateCampaign(string $id, array $data): array
+    {
+        $all = self::campaigns();
+        foreach ($all as &$c) {
+            if ($c['id'] !== $id) {
+                continue;
+            }
+            $percent = max(1, min(100, (int) ($data['percent'] ?? $c['percent'])));
+            $starts = (int) ($data['starts'] ?? $c['starts']);
+            $ends = (int) ($data['ends'] ?? $c['ends']);
+            if ($ends <= $starts) {
+                throw new DisplayException('It has to end after it starts.');
+            }
+            $products = array_values(array_filter(array_map('intval', (array) ($data['products'] ?? []))));
+            if ($c['coupon'] && ($coupon = \App\Models\Coupon::find($c['coupon']))) {
+                $code = strtoupper(trim((string) ($data['code'] ?? ''))) ?: $c['code'];
+                if ($code !== $c['code']) {
+                    if (self::campaignResults($c)['orders'] > 0) {
+                        throw new DisplayException('The code has been used; it can\'t be changed now.');
+                    }
+                    if (\App\Models\Coupon::where('code', $code)->whereKeyNot($coupon->id)->exists()) {
+                        throw new DisplayException('The code ' . $code . ' is used already.');
+                    }
+                    $c['code'] = $code;
+                }
+                $c['periods'] = max(1, (int) ($data['periods'] ?? $c['periods']));
+                $coupon->update(['code' => $c['code'], 'value' => $percent, 'recurring' => $c['periods'],
+                    'starts_at' => date('Y-m-d H:i:s', $starts), 'expires_at' => date('Y-m-d H:i:s', $ends)]);
+                $coupon->products()->sync($products ?: array_keys($this->campaignProducts()));
+            }
+            $c = array_merge($c, ['title' => trim((string) ($data['title'] ?? $c['title'])), 'text' => trim((string) ($data['text'] ?? '')), 'percent' => $percent,
+                'starts' => $starts, 'ends' => $ends, 'products' => $products, 'existing' => !empty($data['existing']), 'stopped' => null], self::campaignPlaces($data));
+            self::storePut('campaigns', $all);
+
+            return $c;
+        }
+
+        throw new DisplayException('That campaign no longer exists.');
     }
 
     /** Wizarr products a campaign can be on (not gift cards or top-ups). */
@@ -171,12 +225,14 @@ trait Campaigns
         $all = self::campaigns();
         $done = [];
         foreach ($all as &$campaign) {
-            if (!$campaign['announce'] || $campaign['announced'] || self::campaignStatus($campaign, $now) !== 'running') {
+            $with = self::campaignWith($campaign);
+            $channels = array_merge($with['announce_mail'] ? ['mail', 'discord'] : [], $with['announce_channel'] ? ['channel'] : []);
+            if (!$channels || $campaign['announced'] || self::campaignStatus($campaign, $now) !== 'running') {
                 continue;
             }
             $campaign['announced'] = $now;
             try {
-                $this->broadcast('all', $campaign['title'], $this->campaignText($campaign), [self::t('See subscriptions'), $this->shopUrl()], ['mail', 'discord', 'channel'], 'Campaign');
+                $this->broadcast('all', $campaign['title'], $this->campaignText($campaign), [self::t('See subscriptions'), $this->shopUrl()], $channels, 'Campaign', null, true);
                 $done[] = $campaign['id'];
             } catch (Throwable $e) {
                 Log::warning('Wizarr: campaign "' . $campaign['title'] . '" not announced: ' . $e->getMessage());
@@ -214,7 +270,11 @@ trait Campaigns
         if (!$campaign) {
             return [];
         }
+        $campaign = self::campaignWith($campaign);
         $customer = Auth::check() && $this->hasSubscription(Auth::user());
+        if (!($customer ? $campaign['show_customers'] : $campaign['show_visitors'])) {
+            return [];
+        }
         $text = $customer && $campaign['existing'] ? self::t('Your next renewal is :percent% off.', ['percent' => $campaign['percent']])
             : ($campaign['code'] !== '' ? self::t(':percent% off with the code :code', ['percent' => $campaign['percent'], 'code' => $campaign['code']]) : '');
         if ($text === '') {

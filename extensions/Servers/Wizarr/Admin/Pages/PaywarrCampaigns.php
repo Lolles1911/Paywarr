@@ -59,32 +59,56 @@ class PaywarrCampaigns extends Page implements HasTable
     {
         return [
             Action::make('new')->label('New campaign')->icon('ri-add-line')->visible(fn () => self::canChange())
-                ->fillForm(fn () => ['percent' => 25, 'starts' => now()->startOfHour()->addHour()->format('Y-m-d H:i'), 'ends' => now()->startOfHour()->addDays(4)->format('Y-m-d H:i'),
-                    'periods' => 1, 'new' => true, 'existing' => true, 'announce' => true])
-                ->schema([
-                    TextInput::make('title')->label('Title')->required()->placeholder('Black Friday'),
-                    Textarea::make('text')->label('Text in the announcement')->rows(2)->placeholder('Optional: a few words before the offer.'),
-                    TextInput::make('percent')->label('Discount (%)')->numeric()->minValue(1)->maxValue(100)->required(),
-                    DateTimePicker::make('starts')->label('Starts')->seconds(false)->required(),
-                    DateTimePicker::make('ends')->label('Ends')->seconds(false)->required()->after('starts'),
-                    Toggle::make('new')->label('A code for new customers')->live(),
-                    TextInput::make('code')->label('Code')->placeholder('Made from the title, e.g. BLACKFRIDAY25')->visible(fn ($get) => (bool) $get('new')),
-                    TextInput::make('periods')->label('Periods the code is off for')->numeric()->minValue(1)->helperText('1: only the first period.')->visible(fn ($get) => (bool) $get('new')),
-                    Toggle::make('existing')->label('Existing customers: their next renewal in the period is cheaper'),
-                    Select::make('products')->label('Products')->multiple()->placeholder('Every subscription')->options(fn () => (new Wizarr([]))->campaignProducts()),
-                    Toggle::make('announce')->label('Announce it when it starts (mail, Discord, announcements channel)'),
-                ])
+                ->fillForm(fn () => ['percent' => 25, 'starts' => now()->format('Y-m-d H:i'), 'ends' => now()->addDays(4)->format('Y-m-d H:i'),
+                    'periods' => 1, 'new' => true, 'existing' => true, 'show_visitors' => true, 'show_customers' => true, 'announce_mail' => true, 'announce_channel' => true])
+                ->schema(fn () => self::fields(true))
                 ->modalSubmitActionLabel('Create')
                 ->action(function (array $data) {
                     try {
-                        $c = (new Wizarr([]))->createCampaign(['starts' => strtotime((string) $data['starts']), 'ends' => strtotime((string) $data['ends'])] + $data);
-                        Notification::make()->title('Created')->body($c['code'] !== '' ? 'Code: ' . $c['code'] : null)->success()->send();
+                        $c = (new Wizarr([]))->createCampaign(self::times($data) + $data);
+                        Notification::make()->title(Wizarr::campaignStatus($c) === 'running' ? 'Running now' : 'Planned: starts ' . date('M j, H:i', $c['starts']))
+                            ->body($c['code'] !== '' ? 'Code: ' . $c['code'] : null)->success()->send();
                     } catch (Throwable $e) {
                         Notification::make()->title('Not created')->body($e->getMessage())->danger()->send();
                     }
                     $this->resetTable();
                 }),
         ];
+    }
+
+    /** The form: what, when, and where it shows. */
+    private static function fields(bool $new): array
+    {
+        return [
+            TextInput::make('title')->label('Title')->required()->placeholder('Black Friday'),
+            Textarea::make('text')->label('Text in the announcement')->rows(2)->placeholder('Optional: a few words before the offer.'),
+            TextInput::make('percent')->label('Discount (%)')->numeric()->minValue(1)->maxValue(100)->required(),
+            DateTimePicker::make('starts')->label('Starts')->seconds(false)->required()->helperText('Now, or later: it starts by itself.'),
+            DateTimePicker::make('ends')->label('Ends')->seconds(false)->required()->after('starts'),
+            $new ? Toggle::make('new')->label('A code for new customers')->live() : Toggle::make('new')->hidden(),
+            TextInput::make('code')->label('Code')->placeholder('Made from the title, e.g. BLACKFRIDAY25')->visible(fn ($get) => (bool) $get('new')),
+            TextInput::make('periods')->label('Periods the code is off for')->numeric()->minValue(1)->helperText('1: only the first period.')->visible(fn ($get) => (bool) $get('new')),
+            Toggle::make('existing')->label('Existing customers: their next renewal in the period is cheaper'),
+            Select::make('products')->label('Products')->multiple()->placeholder('Every subscription')->options(fn () => (new Wizarr([]))->campaignProducts()),
+            \Filament\Schemas\Components\Fieldset::make('Where it shows')->columns(1)->schema([
+                Toggle::make('show_visitors')->label('Banner for visitors (the front page, the shop and every page)'),
+                Toggle::make('show_customers')->label('Banner for customers (signed in)'),
+                Toggle::make('announce_mail')->label('Mail and Discord when it starts (mail only to those on the mail list)'),
+                Toggle::make('announce_channel')->label('A post in the Discord announcements channel when it starts'),
+            ]),
+        ];
+    }
+
+    private static function times(array $data): array
+    {
+        return ['starts' => strtotime((string) $data['starts']), 'ends' => strtotime((string) $data['ends'])];
+    }
+
+    private static function places(array $record): string
+    {
+        $c = Wizarr::campaignWith($record);
+
+        return implode(', ', array_keys(array_filter(['visitors' => $c['show_visitors'], 'customers' => $c['show_customers'], 'mail + Discord' => $c['announce_mail'], 'channel' => $c['announce_channel']]))) ?: 'nowhere';
     }
 
     public function content(Schema $schema): Schema
@@ -108,11 +132,34 @@ class PaywarrCampaigns extends Page implements HasTable
                 TextColumn::make('title')->label('Campaign')->description(fn (array $record) => $record['percent'] . '% off' . ($record['code'] !== '' ? ' · code ' . $record['code'] : '') . ($record['existing'] ? ' · renewals too' : '')),
                 TextColumn::make('starts')->label('When')->formatStateUsing(fn ($state, array $record) => date('M j, H:i', (int) $state) . ' – ' . date('M j, H:i', (int) $record['ends'])),
                 TextColumn::make('orders')->label('New orders')->description(fn (array $record) => $record['renewed'] . ' renewals, ' . number_format($record['given'], 2) . ' off'),
+                TextColumn::make('show_visitors')->label('Shows')->state(fn (array $record) => self::places($record)),
                 TextColumn::make('status')->label('Status')->badge()
                     ->formatStateUsing(fn (string $state) => match ($state) { 'running' => 'Running', 'planned' => 'Planned', default => 'Ended' })
-                    ->color(fn (string $state) => match ($state) { 'running' => 'success', 'planned' => 'info', default => 'gray' }),
+                    ->color(fn (string $state) => match ($state) { 'running' => 'success', 'planned' => 'info', default => 'gray' })
+                    ->description(fn (array $record) => $record['status'] === 'planned' ? 'Starts ' . date('M j, H:i', $record['starts']) : ($record['status'] === 'running' ? 'Ends ' . date('M j, H:i', $record['ends']) : null)),
             ])
             ->recordActions([
+                Action::make('edit')->label('Edit')->icon('ri-pencil-line')->visible(fn (array $record) => self::canChange() && $record['status'] !== 'ended')
+                    ->fillForm(fn (array $record) => Wizarr::campaignWith($record) + ['new' => $record['code'] !== '', 'starts' => date('Y-m-d H:i', $record['starts']), 'ends' => date('Y-m-d H:i', $record['ends'])])
+                    ->schema(fn () => self::fields(false))
+                    ->modalSubmitActionLabel('Save')
+                    ->action(function (array $record, array $data) {
+                        try {
+                            (new Wizarr([]))->updateCampaign($record['id'], self::times($data) + $data);
+                            Notification::make()->title('Saved')->success()->send();
+                        } catch (Throwable $e) {
+                            Notification::make()->title('Not saved')->body($e->getMessage())->danger()->send();
+                        }
+                        $this->resetTable();
+                    }),
+                Action::make('start')->label('Start now')->icon('ri-play-circle-line')->color('success')->requiresConfirmation()
+                    ->visible(fn (array $record) => self::canChange() && $record['status'] === 'planned')
+                    ->action(function (array $record) {
+                        (new Wizarr([]))->updateCampaign($record['id'], ['starts' => time(), 'ends' => $record['ends']] + Wizarr::campaignWith($record) + ['products' => $record['products']]);
+                        (new Wizarr([]))->runCampaigns();
+                        Notification::make()->title('Running now')->success()->send();
+                        $this->resetTable();
+                    }),
                 Action::make('stop')->label('End now')->icon('ri-stop-circle-line')->color('warning')->requiresConfirmation()
                     ->visible(fn (array $record) => self::canChange() && $record['status'] === 'running')
                     ->action(function (array $record) {
