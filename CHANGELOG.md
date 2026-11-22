@@ -3,6 +3,15 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.31.0 (2026-11-22)
+
+- **Move to paid, one by one:** besides the filter, choose who yourself:
+  **Move to paid** on each row, tick several in the list (also after
+  searching or filtering it) and move them together, or pick names under
+  **Only these users** in the dialog.
+- **Fixed:** "Give free access" offered trial products when no product had
+  "Free access"; a subscription given there did not show as free.
+
 ## 1.30.0 (2026-11-22)
 
 - **New: Move to paid** on Paywarr → Free access. Choose who with a filter

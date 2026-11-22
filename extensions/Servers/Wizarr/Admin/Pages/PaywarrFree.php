@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\Server;
 use App\Models\User;
 use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -22,6 +23,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Paymenter\Extensions\Servers\Wizarr\Admin\PaywarrInventory;
@@ -111,40 +113,23 @@ class PaywarrFree extends Page implements HasTable
                 }),
             Action::make('paid')->label('Move to paid')->icon('ri-bank-card-line')->color('warning')->visible(fn () => self::canChange())
                 ->modalHeading('Move free users to paid')
-                ->modalDescription('Each gets a paid subscription and an invoice, and keeps their user. Unpaid by the deadline, the access stops (Paymenter suspends it, as with any unpaid invoice). Users without a subscription are put on one if their mail address has an account; otherwise they get a mail with the shop, and lose the access at the deadline.')
+                ->modalDescription(self::PAID_TEXT)
                 ->modalSubmitActionLabel('Move')
-                ->fillForm(fn () => ['kinds' => ['subscription', 'user'], 'statuses' => ['active', 'new'], 'products' => [], 'product' => Wizarr::freeRules()['paid_product'], 'days' => Wizarr::freeRules()['pay_days']])
+                ->fillForm(fn () => ['kinds' => ['subscription', 'user'], 'statuses' => ['active', 'new'], 'products' => [], 'only' => [], 'product' => Wizarr::freeRules()['paid_product'], 'days' => Wizarr::freeRules()['pay_days']])
                 ->schema(fn () => [
-                    CheckboxList::make('kinds')->label('Who')->options(['subscription' => 'Free subscriptions', 'user' => 'Users without a subscription'])->required()->live(),
-                    CheckboxList::make('statuses')->label('Status')->columns(3)->required()->live()
+                    Select::make('only')->label('Only these users')->multiple()->searchable()->live()->placeholder('Everyone the filter below takes')
+                        ->options(fn () => array_map(fn ($row) => $row['name'] . ($row['email'] !== '' && $row['email'] !== $row['name'] ? ' (' . $row['email'] . ')' : '') . ' · ' . $row['product'], $this->rows())),
+                    CheckboxList::make('kinds')->label('Who')->options(['subscription' => 'Free subscriptions', 'user' => 'Users without a subscription'])->live()
+                        ->required(fn (Get $get) => !$get('only'))->hidden(fn (Get $get) => (bool) $get('only')),
+                    CheckboxList::make('statuses')->label('Status')->columns(3)->live()->required(fn (Get $get) => !$get('only'))->hidden(fn (Get $get) => (bool) $get('only'))
                         ->options(['active' => 'Watching', 'new' => 'New', 'idle' => 'To be warned', 'warned' => 'Warned', 'exempt' => 'Exempt', 'offered' => 'Offered paid']),
-                    Select::make('products')->label('Now on')->multiple()->placeholder('Everything')->live()
+                    Select::make('products')->label('Now on')->multiple()->placeholder('Everything')->live()->hidden(fn (Get $get) => (bool) $get('only'))
                         ->options(fn () => array_combine($p = array_values(array_unique(array_column($this->rows(), 'product'))), $p) ?: []),
-                    TextEntry::make('count')->label('Taken by the filter')
-                        ->state(fn (Get $get) => (fn ($n) => $n === 1 ? '1 user' : $n . ' users')(count(Wizarr::paidFilter($this->rows(), ['kinds' => $get('kinds') ?? [], 'statuses' => $get('statuses') ?? [], 'products' => $get('products') ?? []])))),
-                    Select::make('product')->label('Paid product')->placeholder('The same media server (found by itself)')->options(fn () => (new Wizarr([]))->paidProducts()),
-                    TextInput::make('days')->label('Pay within (days)')->numeric()->minValue(1)->required(),
+                    TextEntry::make('count')->label('Taken')
+                        ->state(fn (Get $get) => (fn ($n) => $n === 1 ? '1 user' : $n . ' users')(count($this->paidRows($get('only') ?? [], ['kinds' => $get('kinds') ?? [], 'statuses' => $get('statuses') ?? [], 'products' => $get('products') ?? []])))),
+                    ...self::paidFields(),
                 ])
-                ->action(function (array $data) {
-                    $wizarr = new Wizarr([]);
-                    $done = [];
-                    $failed = [];
-                    foreach (Wizarr::paidFilter($this->rows(), $data) as $row) {
-                        try {
-                            $done[] = $wizarr->moveToPaid($row, !empty($data['product']) ? (int) $data['product'] : null, (int) $data['days']);
-                        } catch (Throwable $e) {
-                            report($e);
-                            $failed[] = $row['name'] . ': ' . $e->getMessage();
-                        }
-                    }
-                    Wizarr::logFreeAll($done);
-                    Notification::make()->title(count($done) . ' moved' . ($failed ? ', ' . count($failed) . ' not' : ''))
-                        ->body(implode("\n", array_slice(array_merge($failed, $done), 0, 10)) ?: 'Nobody was taken by the filter.')
-                        ->{$failed ? 'warning' : 'success'}()->persistent((bool) $failed)->send();
-                    PaywarrInventory::forget();
-                    $this->rows = null;
-                    $this->resetTable();
-                }),
+                ->action(fn (array $data) => $this->movePaid($this->paidRows($data['only'] ?? [], $data), $data)),
             Action::make('give')->label('Give free access')->icon('ri-gift-2-line')->visible(fn () => self::canChange())->modalSubmitActionLabel('Give')
                 ->modalDescription('A free subscription for an existing customer, on a product with "Free access" (or a price of 0). They get the invitation by mail, as with any order.')
                 ->schema([
@@ -191,7 +176,63 @@ class PaywarrFree extends Page implements HasTable
             }
         }
 
-        return $options ?: Product::whereHas('server', fn ($q) => $q->where('extension', 'Wizarr'))->pluck('name', 'id')->all();
+        if ($options) {
+            return $options;
+        }
+        $wizarr = new Wizarr([]);
+        foreach (Product::whereHas('server', fn ($q) => $q->where('extension', 'Wizarr'))->with('settings')->get() as $product) {
+            if ($wizarr->plainProduct(ExtensionHelper::settingsToArray($product->settings))) {
+                $options[$product->id] = $product->name; // not a trial, gift card or top-up: those don't count as free
+            }
+        }
+
+        return $options;
+    }
+
+    private const PAID_TEXT = 'Each gets a paid subscription and an invoice, and keeps their user. Unpaid by the deadline, the access stops (Paymenter suspends it, as with any unpaid invoice). Users without a subscription are put on one if their mail address has an account; otherwise they get a mail with the shop, and lose the access at the deadline.';
+
+    /** The product and the days to pay in. */
+    private static function paidFields(): array
+    {
+        return [
+            Select::make('product')->label('Paid product')->placeholder('The same media server (found by itself)')->options(fn () => (new Wizarr([]))->paidProducts()),
+            TextInput::make('days')->label('Pay within (days)')->numeric()->minValue(1)->required(),
+        ];
+    }
+
+    private static function paidDefaults(): array
+    {
+        return ['product' => Wizarr::freeRules()['paid_product'], 'days' => Wizarr::freeRules()['pay_days']];
+    }
+
+    /** The users chosen by name ($only), or else those the filter takes. */
+    private function paidRows(array $only, array $filter): array
+    {
+        $rows = $this->rows();
+
+        return $only ? array_intersect_key($rows, array_flip($only)) : Wizarr::paidFilter($rows, $filter);
+    }
+
+    private function movePaid(iterable $rows, array $data): void
+    {
+        $wizarr = new Wizarr([]);
+        $done = [];
+        $failed = [];
+        foreach ($rows as $row) {
+            try {
+                $done[] = $wizarr->moveToPaid($row, !empty($data['product']) ? (int) $data['product'] : null, (int) $data['days']);
+            } catch (Throwable $e) {
+                report($e);
+                $failed[] = $row['name'] . ': ' . $e->getMessage();
+            }
+        }
+        Wizarr::logFreeAll($done);
+        Notification::make()->title(count($done) . ' moved' . ($failed ? ', ' . count($failed) . ' not' : ''))
+            ->body(implode("\n", array_slice(array_merge($failed, $done), 0, 10)) ?: 'Nobody was chosen.')
+            ->{$failed ? 'warning' : 'success'}()->persistent((bool) $failed)->send();
+        PaywarrInventory::forget();
+        $this->rows = null;
+        $this->resetTable();
     }
 
     public function content(Schema $schema): Schema
@@ -246,6 +287,12 @@ class PaywarrFree extends Page implements HasTable
                         $this->rows = null;
                         $this->resetTable();
                     }),
+                Action::make('paid')->label('Move to paid')->icon('ri-bank-card-line')->color('warning')
+                    ->visible(fn (array $record) => self::canChange() && $record['status'] !== 'removed')
+                    ->modalHeading(fn (array $record) => 'Move ' . $record['name'] . ' to paid')
+                    ->modalDescription(self::PAID_TEXT)->modalSubmitActionLabel('Move')
+                    ->fillForm(fn () => self::paidDefaults())->schema(fn () => self::paidFields())
+                    ->action(fn (array $record, array $data) => $this->movePaid([$record], $data)),
                 Action::make('remove')->label('Remove')->icon('ri-user-unfollow-line')->color('danger')->requiresConfirmation()
                     ->visible(fn (array $record) => self::canChange() && $record['status'] !== 'removed')
                     ->modalDescription(fn (array $record) => $record['kind'] === 'subscription' ? 'Cancels the free subscription and removes its users.' : 'Plex: removes the share. Jellyfin, Emby, Silo: switches the user off.')
@@ -262,6 +309,14 @@ class PaywarrFree extends Page implements HasTable
                         $this->resetTable();
                     }),
             ])
+            ->toolbarActions([
+                BulkAction::make('paid')->label('Move to paid')->icon('ri-bank-card-line')->color('warning')->visible(fn () => self::canChange())
+                    ->modalHeading('Move the chosen users to paid')->modalDescription(self::PAID_TEXT)->modalSubmitActionLabel('Move')
+                    ->fillForm(fn () => self::paidDefaults())->schema(fn () => self::paidFields())
+                    ->action(fn (Collection $records, array $data) => $this->movePaid($records->all(), $data))
+                    ->deselectRecordsAfterCompletion(),
+            ])
+            ->checkIfRecordIsSelectableUsing(fn (array $record) => $record['status'] !== 'removed')
             ->emptyStateHeading('No free access')
             ->emptyStateDescription('Free subscriptions (price 0, or a product with "Free access") and users on the media servers without a subscription show here.');
     }

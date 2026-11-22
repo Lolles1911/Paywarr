@@ -158,7 +158,9 @@ access** can also be in the shop for anyone to order.
 
 **Move to paid** turns free users into paying ones. Choose who with a filter
 (free subscriptions and/or users without a subscription, their status, what
-they are on now; the dialog counts them), the paid product (or **the same
+they are on now; the dialog counts them), or by name: **Only these users** in
+the dialog, **Move to paid** on a row, or tick several in the list and move
+them together. Then the paid product (or **the same
 media server**: the paid product on the same server with the fewest other
 servers), and the days to pay in. Each keeps their user and history and gets:
 

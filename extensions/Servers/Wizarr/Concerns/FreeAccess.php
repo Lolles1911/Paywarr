@@ -78,6 +78,12 @@ trait FreeAccess
         self::storePut('free_log', array_slice($log, 0, 200));
     }
 
+    /** Not a trial, gift card or top-up product. */
+    public function plainProduct(array $settings): bool
+    {
+        return !$this->isTrial($settings) && !$this->isGift($settings) && !$this->isTopUp($settings);
+    }
+
     /** A free subscription: price 0 (not a trial, gift card or top-up), or a product with "Free access". */
     public function isFreeSubscription(Service $service, array $settings): bool
     {
