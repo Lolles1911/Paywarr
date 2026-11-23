@@ -223,10 +223,9 @@ the menu on a phone):
 | Link | Who sees it |
 |---|---|
 | **🟢 Open Plex**, **Open Jellyfin**, **Open Emby**, **Open Silo** | Customers who have created their user: one per media server, with a dot for the servers they use (🟢 running, 🟠 maintenance, 🔴 down) |
-| **✨ Create your user** | Customers whose user isn't made yet: their invitation; it becomes Open within a minute of creating the user |
-| **My <site name>** (a menu) | Overview (the My page), and while they are on: Movie night, Challenge, Friend pass, Invite a friend; and Service status |
+| **✨ Create your user** | Customers whose user isn't made yet: their invitation (a menu, one per server, when several wait); it becomes Open within a minute of creating the user |
+| **My <site name>** (a menu) | Overview (the My page), and while they are on: Movie night, Challenge, Friend pass, Invite a friend, Report a problem; and Service status |
 | **Requests** | Customers with requests (see *The Requests tab*) |
-| **Report a problem** | Customers with something to report from |
 | **Help** | Every customer with a subscription |
 
 [Paywarr Stats](https://github.com/Lolles1911/Paywarr-stats) adds **My stats**
