@@ -300,13 +300,8 @@ trait Loyalty
         }
         $code = (string) ($this->propertyValue($user, self::PROP_REFERRAL_CODE) ?? '');
         if ($code !== '') {
-            // A changed "% off" applies to codes made before too.
-            try {
-                \App\Models\Coupon::whereKey((int) ($this->propertyValue($user, self::PROP_REFERRAL_COUPON) ?? 0))
-                    ->where('value', '!=', min(100, (int) $this->config('referral_percent')))->update(['value' => min(100, (int) $this->config('referral_percent'))]);
-            } catch (Throwable $e) {
-                // The code as it is.
-            }
+            // A changed "% off" or product list applies to codes made before too.
+            $this->syncReferralCoupon($user);
 
             return $code;
         }
@@ -316,11 +311,61 @@ trait Loyalty
             // Once per friend, as many friends as they like, the friend's first period.
             'code' => $code, 'type' => 'percentage', 'value' => min(100, (int) $this->config('referral_percent')), 'applies_to' => 'price', 'recurring' => 1,
             'max_uses' => null, 'max_uses_per_user' => 1, 'starts_at' => date('Y-m-d H:i:s'), 'expires_at' => null,
-        ], $this->giftableProductIds());
+        ], $this->referralProductIds());
         $user->properties()->updateOrCreate(['key' => self::PROP_REFERRAL_CODE], ['name' => 'Code for friends', 'value' => $code]);
         $user->properties()->updateOrCreate(['key' => self::PROP_REFERRAL_COUPON], ['name' => 'Code for friends: coupon ID', 'value' => (string) $id]);
 
         return $code;
+    }
+
+    /** The setting's field: the subscription products to choose from (a list without the database). */
+    private function referralProductField(): array
+    {
+        try {
+            $options = [];
+            foreach (\App\Models\Product::whereIn('id', $this->giftableProductIds() ?: [0])->with('category')->orderBy('name')->get() as $product) {
+                $options[] = ['value' => (string) $product->id, 'label' => $product->name . ' (' . trim(($product->category?->name ?? '') . ' #' . $product->id) . ')'];
+            }
+            if ($options) {
+                return ['type' => 'select', 'multiple' => true, 'database_type' => 'array', 'options' => $options];
+            }
+        } catch (Throwable $e) {
+            // A plain field then.
+        }
+
+        return ['type' => 'text', 'placeholder' => '2,5', 'hint' => 'Product IDs, comma separated.'];
+    }
+
+    /** The products a friend's code is on: the chosen ones that can be (or every subscription). */
+    public function referralProductIds(): array
+    {
+        $all = $this->giftableProductIds();
+        $chosen = $this->idList($this->config('referral_products') ?? null);
+
+        return $chosen ? array_values(array_intersect($chosen, $all)) : $all;
+    }
+
+    /** Keeps a code's percent and products as the settings say (they may have changed since it was made). */
+    private function syncReferralCoupon($user): void
+    {
+        try {
+            $coupon = \App\Models\Coupon::with('products')->find((int) ($this->propertyValue($user, self::PROP_REFERRAL_COUPON) ?? 0));
+            if (!$coupon) {
+                return;
+            }
+            $percent = min(100, (int) $this->config('referral_percent'));
+            if ((int) $coupon->value !== $percent) {
+                $coupon->update(['value' => $percent]);
+            }
+            $want = $this->referralProductIds();
+            $have = $coupon->products->pluck('id')->map(fn ($id) => (int) $id)->sort()->values()->all();
+            sort($want);
+            if ($want !== $have) {
+                $coupon->products()->sync($want);
+            }
+        } catch (Throwable $e) {
+            // The code as it is.
+        }
     }
 
     /** Whom a coupon belongs to as their code for friends: the Paymenter user ID, or null. */
@@ -493,14 +538,35 @@ trait Loyalty
         $code = strtoupper(trim((string) $code));
         try {
             $coupon = \App\Models\Coupon::where('code', $code)->first();
-            if ($coupon && $this->referrerOfCoupon((int) $coupon->id) !== null) {
+            if ($coupon && ($owner = $this->referrerOfCoupon((int) $coupon->id)) !== null) {
                 session(['paywarr_ref' => $code, 'paywarr_ref_percent' => (int) $coupon->value]);
+                if (($url = $this->referrerProductUrl($owner, $coupon->products->pluck('id')->map(fn ($id) => (int) $id)->all())) !== null) {
+                    return redirect()->to($url);
+                }
             }
         } catch (Throwable $e) {
             // The shop anyway.
         }
 
         return redirect()->to($this->shopUrl());
+    }
+
+    /** The page of the product the customer has, when the friend's code is on it and it is in the shop. */
+    private function referrerProductUrl(int $userId, array $products): ?string
+    {
+        foreach (Service::where('user_id', $userId)->where('status', 'active')->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr'))
+            ->with('product.category')->orderBy('id')->get() as $service) {
+            $product = $service->product;
+            if ($product && !$product->hidden && $product->category && (!$products || in_array((int) $product->id, $products, true))) {
+                try {
+                    return route('products.show', ['category' => $product->category, 'product' => $product]);
+                } catch (Throwable $e) {
+                    return null;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

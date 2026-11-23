@@ -495,6 +495,12 @@ class Wizarr extends Server
                 'description' => 'Optional. Every customer gets their own code for friends ("Invite a friend" in the menu). Empty: off.',
             ],
             [
+                'name' => 'referral_products',
+                'label' => 'Invite a friend: products the friend\'s discount is on',
+                'required' => false,
+                'description' => 'Empty: every subscription (not trials, gift cards or top-ups). E.g. leave out yearly plans, so the discount isn\'t on a whole year. Codes made before follow.',
+            ] + $this->referralProductField(),
+            [
                 'name' => 'referral_reward_months',
                 'label' => 'Invite a friend: free months when the friend has paid',
                 'type' => 'number',
