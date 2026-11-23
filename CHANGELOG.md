@@ -3,6 +3,13 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.34.3 (2026-11-23)
+
+- **The top bar on one line:** each link stays on one line; several waiting
+  users are one **✨ Create your user** menu (one entry per server or
+  subscription) instead of a link each; **Report a problem** moved into the
+  My <site name> menu.
+
 ## 1.34.2 (2026-11-22)
 
 - **Customers from before the mail list are asked once:** a small box in the

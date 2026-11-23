@@ -175,7 +175,7 @@ trait Requests
                 foreach ($actions as $action) {
                     $label = (string) ($action['label'] ?? '');
                     if (($action['type'] ?? '') === 'button' && !empty($action['url']) && str_starts_with($label, $create) && !in_array($action['url'], array_column($links, 'url'), true)) {
-                        $links[] = ['label' => $label, 'url' => (string) $action['url']];
+                        $links[] = ['label' => $label, 'url' => (string) $action['url'], 'product' => (string) ($service->product->name ?? '')];
                     }
                 }
             }

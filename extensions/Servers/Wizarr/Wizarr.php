@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.34.2',
+    version: '1.34.3',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -1026,16 +1026,19 @@ class Wizarr extends Server
             }
             $items = [];
             // Where to watch, with a dot for how the servers are doing; or, before the user exists, "Create your user".
+            $nb = fn (string $text) => str_replace(' ', "\u{00A0}", $text); // one line each in the top bar
             $links = $this->navWatchLinks($user);
             if ($links) {
                 $dot = $this->navStatusDot($user);
                 foreach ($links as $i => $watch) {
-                    $items[] = ['name' => $dot . ' ' . $watch['label'], 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 5 + $i];
+                    $items[] = ['name' => $nb($dot . ' ' . $watch['label']), 'url' => $watch['url'], 'spa' => false, 'icon' => 'ri-play-circle', 'priority' => 5 + $i];
                 }
-            } else {
-                foreach ($this->navInviteLinks($user) as $i => $invite) {
-                    $items[] = ['name' => '✨ ' . $invite['label'], 'url' => $invite['url'], 'spa' => false, 'icon' => 'ri-user-add', 'priority' => 5 + $i];
-                }
+            } elseif ($invites = $this->navInviteLinks($user)) {
+                // One item; with several waiting users a menu, one per subscription or server.
+                $items[] = count($invites) === 1
+                    ? ['name' => $nb('✨ ' . self::t('Create your user')), 'url' => $invites[0]['url'], 'spa' => false, 'icon' => 'ri-user-add', 'priority' => 5]
+                    : ['name' => $nb('✨ ' . self::t('Create your user')), 'spa' => false, 'icon' => 'ri-user-add', 'priority' => 5,
+                        'children' => array_map(fn ($l) => ['name' => $l['label'] !== self::t('Create your user') ? trim(str_replace(trim(self::t('Create your user on :server', ['server' => ''])), '', $l['label'])) : (($l['product'] ?? '') ?: $l['label']), 'url' => $l['url'], 'spa' => false], $invites)];
             }
             // "My <site>": the page, and what's on now.
             $children = [['name' => self::t('Overview'), 'url' => $this->hubUrl(), 'spa' => false]];
@@ -1051,13 +1054,13 @@ class Wizarr extends Server
             if (Cache::remember('wizarr:can-refer:' . $user->id, 300, fn () => $this->canRefer($user))) {
                 $children[] = ['name' => self::t('Invite a friend'), 'url' => $this->routeOr('extensions.wizarr.invite', '/wizarr/invite'), 'spa' => false];
             }
+            if (Cache::remember('wizarr:can-report:' . $user->id, 300, fn () => $this->reportSources($user) !== [])) {
+                $children[] = ['name' => self::t('Report a problem'), 'url' => route('extensions.wizarr.report'), 'spa' => false];
+            }
             $children[] = ['name' => self::t('Service status'), 'url' => $this->statusPageUrl(), 'spa' => false];
-            $items[] = ['name' => self::t('My :name', ['name' => $this->siteName()]), 'children' => $children, 'spa' => false, 'icon' => 'ri-apps-2', 'priority' => 8];
+            $items[] = ['name' => $nb(self::t('My :name', ['name' => $this->siteName()])), 'children' => $children, 'spa' => false, 'icon' => 'ri-apps-2', 'priority' => 8];
             if (Cache::remember('wizarr:can-request:' . $user->id, 300, fn () => $this->librarySources($user, null, true) !== [])) {
                 $items[] = ['name' => self::t('Requests'), 'url' => route('extensions.wizarr.requests'), 'icon' => 'ri-movie-2', 'priority' => 10];
-            }
-            if (Cache::remember('wizarr:can-report:' . $user->id, 300, fn () => $this->reportSources($user) !== [])) {
-                $items[] = ['name' => self::t('Report a problem'), 'url' => route('extensions.wizarr.report'), 'icon' => 'ri-error-warning', 'priority' => 12];
             }
             $items[] = ['name' => self::t('Help'), 'url' => $this->routeOr('extensions.wizarr.help', '/wizarr/help'), 'icon' => 'ri-question', 'priority' => 14];
 
