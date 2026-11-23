@@ -105,8 +105,11 @@ trials get their own reminder instead.
 ## Invite a friend
 
 With **Invite a friend: % off the friend's first month** set, customers with a
-paid subscription get **Invite a friend** in the menu: their own code (e.g.
-`PETER-DTH9`, a Paymenter coupon), and a form to email it. A friend who pays
+paid subscription get **Invite a friend** (in the My <site name> menu and on
+its page): their own code (e.g. `PETER-DTH9`, a Paymenter coupon), a link to
+share (`/wizarr/join/<code>`), and a form to email it. A friend who opens the
+link lands in the shop with a note about the discount, and in the cart the
+code is applied by itself; they can also type it under "Coupon". A friend who pays
 with it gets that discount on their first period; once their first invoice is
 paid, the customer gets **free months** (1 by default) added to their
 subscription, and a mail saying so. Each friend can use a code once, and
