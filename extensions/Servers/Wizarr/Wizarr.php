@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.34.3',
+    version: '1.34.4',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -494,6 +494,12 @@ class Wizarr extends Server
                 'validation' => 'nullable|integer|min:1|max:100',
                 'description' => 'Optional. Every customer gets their own code for friends ("Invite a friend" in the menu). Empty: off.',
             ],
+            [
+                'name' => 'referral_products',
+                'label' => 'Invite a friend: products the friend\'s discount is on',
+                'required' => false,
+                'description' => 'Empty: every subscription (not trials, gift cards or top-ups). E.g. leave out yearly plans, so the discount isn\'t on a whole year. Codes made before follow.',
+            ] + $this->referralProductField(),
             [
                 'name' => 'referral_reward_months',
                 'label' => 'Invite a friend: free months when the friend has paid',
@@ -965,6 +971,8 @@ class Wizarr extends Server
         self::ensureMailListField();
         Event::listen('footer', fn () => $this->renderCheckoutOptIn());
         Event::listen('footer', fn () => $this->renderMailListAsk());
+        // A friend's link: the note, and the code put in the cart (Loyalty).
+        Event::listen('footer', fn () => $this->renderReferralNote());
 
         // The selection for visitors, on the front page (Posters).
         Event::listen('pages.home', fn () => $this->renderShowcase());

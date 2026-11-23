@@ -282,13 +282,11 @@
     "Your code": "Din kode",
     "1 friend has joined": "1 ven er kommet med",
     ":count friends have joined": ":count venner er kommet med",
-    "Your friend enters the code under \"Coupon\" in the cart. It works once per friend, on a subscription.": "Din ven skriver koden under \"Rabatkode\" i kurven. Den virker én gang pr. ven, på et abonnement.",
     "Send it by email": "Send den på mail",
     "Send": "Send",
     "That is your own email address.": "Det er din egen mailadresse.",
     ":name invites you": ":name inviterer dig",
     ":from watches with us and thinks you would like it too. With their code you get :percent% off your first month:": ":from ser med hos os og tror, du også vil kunne lide det. Med deres kode får du :percent% rabat på din første måned:",
-    "Choose a subscription, and enter the code under \"Coupon\" in the cart.": "Vælg et abonnement, og skriv koden under \"Rabatkode\" i kurven.",
     "New on the server this week": "Nyt på serveren i denne uge",
     "Shows": "Serier",
     "… and :count more": "… og :count mere",
@@ -497,5 +495,10 @@
     "News and offers by mail?": "Nyheder og tilbud på mail?",
     "Yes please": "Ja tak",
     "No thanks": "Nej tak",
-    "Thank you!": "Tak!"
+    "Thank you!": "Tak!",
+    "Copied!": "Kopieret!",
+    "Copy link": "Kopiér link",
+    "Share the link: your friend's discount is added in the cart by itself. Or they enter the code under \"Coupon\". It works once per friend, on a subscription.": "Del linket: din vens rabat lægges i kurven af sig selv. Eller de skriver koden under \"Coupon\". Den virker én gang pr. ven, på et abonnement.",
+    "Choose a subscription with the button: the code is added in the cart by itself.": "Vælg et abonnement med knappen: koden lægges i kurven af sig selv.",
+    "A friend invited you: :percent% off your first month with the code :code. It is added in the cart by itself.": "En ven har inviteret dig: :percent % rabat på din første måned med koden :code. Den lægges i kurven af sig selv."
 }

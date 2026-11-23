@@ -117,3 +117,6 @@ Route::middleware(['web', 'throttle:60,1'])->get('catalog', [Wizarr::class, 'cat
 
 // The mail list checkbox at checkout.
 Route::middleware(['web', 'auth', 'throttle:30,1'])->post('wizarr/mail-list', [Wizarr::class, 'mailListToggle'])->name('extensions.wizarr.mail-list');
+
+// A friend's link: remembers their code for the cart, then the shop. For visitors too.
+Route::middleware(['web', 'throttle:30,1'])->get('wizarr/join/{code}', [Wizarr::class, 'joinPage'])->where('code', '[A-Za-z0-9-]{3,40}')->name('extensions.wizarr.join');

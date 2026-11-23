@@ -3,6 +3,19 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.34.4 (2026-11-23)
+
+- **Invite a friend with a link:** each customer has a link to share (with a
+  Copy button on Invite a friend), and the mail's button is that link. The
+  friend lands in the shop with a note about their discount, and in the cart
+  the code is put under "Coupon" and applied by itself (before: the mail's
+  button opened the front page, and the friend had to type the code).
+- **Invite a friend: products the friend's discount is on** (Wizarr server):
+  choose them, e.g. leave out yearly plans; empty means every subscription.
+  A changed % off or product list applies to codes made before too.
+- The link goes straight to the product the customer has (when the discount
+  is on it), so the friend sees what their friend watches; else the shop.
+
 ## 1.34.3 (2026-11-23)
 
 - **The top bar on one line:** each link stays on one line; several waiting
