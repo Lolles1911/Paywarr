@@ -300,6 +300,14 @@ trait Loyalty
         }
         $code = (string) ($this->propertyValue($user, self::PROP_REFERRAL_CODE) ?? '');
         if ($code !== '') {
+            // A changed "% off" applies to codes made before too.
+            try {
+                \App\Models\Coupon::whereKey((int) ($this->propertyValue($user, self::PROP_REFERRAL_COUPON) ?? 0))
+                    ->where('value', '!=', min(100, (int) $this->config('referral_percent')))->update(['value' => min(100, (int) $this->config('referral_percent'))]);
+            } catch (Throwable $e) {
+                // The code as it is.
+            }
+
             return $code;
         }
         $name = strtoupper(preg_replace('/[^A-Za-z]/', '', (string) ($user->first_name ?? '')) ?: 'FRIEND');
@@ -457,7 +465,9 @@ trait Loyalty
             . '<div style="padding:1rem 1.2rem;border-radius:.9rem;border:1px dashed currentColor;margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">'
             . '<div><div style="opacity:.7;font-size:.85rem">' . $e(self::t('Your code')) . '</div><div style="font-size:1.6rem;font-weight:800;letter-spacing:.06em">' . $e($code) . '</div></div>'
             . '<div style="opacity:.8">' . $e($joined === 1 ? self::t('1 friend has joined') : self::t(':count friends have joined', ['count' => $joined])) . '</div></div>'
-            . '<p style="opacity:.75;margin-bottom:1.4rem">' . $e(self::t('Your friend enters the code under "Coupon" in the cart. It works once per friend, on a subscription.')) . '</p>'
+            . '<div style="display:flex;gap:.5rem;margin-bottom:.5rem"><input id="paywarr-ref-link" readonly value="' . $e($this->referralUrl($code)) . '" class="bg-background-secondary border border-neutral rounded-lg px-3 py-2" style="flex:1;min-width:0" onclick="this.select()">'
+            . '<button type="button" class="border border-neutral rounded-lg px-3 py-2" onclick="var i=document.getElementById(\'paywarr-ref-link\');i.select();try{navigator.clipboard.writeText(i.value)}catch(e){document.execCommand(\'copy\')}this.textContent=' . $e(json_encode(self::t('Copied!'))) . '">' . $e(self::t('Copy link')) . '</button></div>'
+            . '<p style="opacity:.75;margin-bottom:1.4rem">' . $e(self::t('Share the link: your friend\'s discount is added in the cart by itself. Or they enter the code under "Coupon". It works once per friend, on a subscription.')) . '</p>'
             . '<h2 style="font-size:1.2rem;font-weight:700;margin-bottom:.6rem">' . $e(self::t('Send it by email')) . '</h2>'
             . '<form method="post" style="display:grid;gap:.9rem">' . csrf_field()
             . '<label style="display:grid;gap:.3rem"><span style="font-weight:600">' . $e(self::t('Their email')) . '</span><input type="email" name="email" required maxlength="190" class="bg-background-secondary border border-neutral rounded-lg px-3 py-2"></label>'
@@ -465,6 +475,66 @@ trait Loyalty
             . '<button type="submit" class="bg-primary text-white font-semibold rounded-lg px-4 py-2" style="justify-self:start">' . $e(self::t('Send')) . '</button></form>';
 
         return view('layouts.app', ['slot' => new HtmlString($this->pageFrame(self::t('Invite a friend'), $body, $notice, $error)), 'title' => self::t('Invite a friend')]);
+    }
+
+    /** The link to share: the friend lands in the shop and the code is added in the cart. */
+    public function referralUrl(string $code): string
+    {
+        try {
+            return route('extensions.wizarr.join', ['code' => $code]);
+        } catch (Throwable $e) {
+            return url('/wizarr/join/' . rawurlencode($code));
+        }
+    }
+
+    /** GET /wizarr/join/{code}: remembers a friend's code, then the shop. */
+    public function joinPage($code)
+    {
+        $code = strtoupper(trim((string) $code));
+        try {
+            $coupon = \App\Models\Coupon::where('code', $code)->first();
+            if ($coupon && $this->referrerOfCoupon((int) $coupon->id) !== null) {
+                session(['paywarr_ref' => $code, 'paywarr_ref_percent' => (int) $coupon->value]);
+            }
+        } catch (Throwable $e) {
+            // The shop anyway.
+        }
+
+        return redirect()->to($this->shopUrl());
+    }
+
+    /**
+     * After a friend's link: a note on every page until the code is in the
+     * cart; on the cart page the code is put in "Coupon" and applied (once).
+     */
+    public function renderReferralNote(): array
+    {
+        try {
+            $code = (string) session('paywarr_ref', '');
+            if ($code === '') {
+                return [];
+            }
+            $onCart = request()->routeIs('cart');
+            if ($onCart && (string) (\App\Classes\Cart::get()->coupon?->code ?? '') === $code) {
+                session()->forget(['paywarr_ref', 'paywarr_ref_percent']);
+
+                return [];
+            }
+        } catch (Throwable $e) {
+            return [];
+        }
+        $text = self::t('A friend invited you: :percent% off your first month with the code :code. It is added in the cart by itself.', ['percent' => (int) session('paywarr_ref_percent', 0), 'code' => $code]);
+        $html = '<div id="paywarr-ref" style="background:linear-gradient(90deg,#0f766e,#7c3aed);color:#fff;padding:.7rem 1rem;margin:1rem auto;border-radius:.8rem;max-width:72rem;width:calc(100% - 2rem);box-sizing:border-box;font-size:.95rem;text-align:center">🎁 ' . e($text) . '</div>'
+            . '<script>(function(){var b=document.getElementById("paywarr-ref");if(b){var t=document.querySelector("main")||document.body;t.insertBefore(b,t.firstChild);}})();</script>';
+        if ($onCart) {
+            // Paymenter's cart: fill "Coupon" and press Apply, once per visit.
+            $html .= '<script>(function(){var code=' . json_encode($code) . ';function go(){try{if(sessionStorage.getItem("paywarr-ref-tried")===code)return;}catch(e){}'
+                . 'var i=document.querySelector(\'input[name="coupon"]\'),a=Array.prototype.find.call(document.querySelectorAll("button"),function(x){return x.getAttribute("wire:click")==="applyCoupon"});'
+                . 'if(!i||!a||!window.Livewire)return false;try{sessionStorage.setItem("paywarr-ref-tried",code)}catch(e){}i.value=code;i.dispatchEvent(new Event("input",{bubbles:true}));setTimeout(function(){a.click()},300);return true;}'
+                . 'var n=0;(function wait(){if(go()===false&&++n<20)setTimeout(wait,400);})();document.addEventListener("livewire:navigated",function(){setTimeout(go,600)});})();</script>';
+        }
+
+        return ['view' => new HtmlString($html)];
     }
 
     /** Mails the code to a friend. At most 5 an hour. */
@@ -495,8 +565,8 @@ trait Loyalty
         $body = '<p style="margin:0 0 12px">' . e(trim($name) !== '' ? self::t('Hi :name,', ['name' => trim($name)]) : self::t('Hi,')) . '</p>'
             . '<p style="margin:0 0 12px">' . e(self::t(':from watches with us and thinks you would like it too. With their code you get :percent% off your first month:', ['from' => $from, 'percent' => (int) $this->config('referral_percent')])) . '</p>'
             . '<p style="margin:0 0 16px;font-size:22px;font-weight:800;letter-spacing:.06em">' . e($code) . '</p>'
-            . '<p style="margin:0 0 12px">' . e(self::t('Choose a subscription, and enter the code under "Coupon" in the cart.')) . '</p>';
-        if (!$this->sendMail($email, $title, $this->mailLayout($title, $body, [self::t('Choose a subscription'), $this->shopUrl()]))) {
+            . '<p style="margin:0 0 12px">' . e(self::t('Choose a subscription with the button: the code is added in the cart by itself.')) . '</p>';
+        if (!$this->sendMail($email, $title, $this->mailLayout($title, $body, [self::t('Choose a subscription'), $this->referralUrl($code)]))) {
             throw new DisplayException(self::t('The email couldn\'t be sent right now. Please try again shortly.'));
         }
         Log::info('Wizarr: user ' . $user->id . ' sent their code for friends.');

@@ -965,6 +965,8 @@ class Wizarr extends Server
         self::ensureMailListField();
         Event::listen('footer', fn () => $this->renderCheckoutOptIn());
         Event::listen('footer', fn () => $this->renderMailListAsk());
+        // A friend's link: the note, and the code put in the cart (Loyalty).
+        Event::listen('footer', fn () => $this->renderReferralNote());
 
         // The selection for visitors, on the front page (Posters).
         Event::listen('pages.home', fn () => $this->renderShowcase());
