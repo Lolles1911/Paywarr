@@ -104,7 +104,7 @@ trait Satisfaction
         $title = self::mailSubject('survey', self::t('How are we doing?'));
         $cells = '';
         for ($score = 0; $score <= 10; $score++) {
-            $url = URL::signedRoute('extensions.wizarr.nps', ['user' => $user->id, 'score' => $score, 'at' => $now]);
+            $url = self::signedLink('extensions.wizarr.nps', ['user' => $user->id, 'score' => $score, 'at' => $now]);
             $cells .= '<a href="' . e($url) . '" style="display:inline-block;width:34px;line-height:34px;margin:2px;text-align:center;border-radius:8px;text-decoration:none;font-weight:700;color:#fff;background:'
                 . ($score <= 6 ? '#ef4444' : ($score <= 8 ? '#f59e0b' : '#22c55e')) . '">' . $score . '</a>';
         }
@@ -119,7 +119,7 @@ trait Satisfaction
         $title = self::mailSubject('why', self::t('Sorry to see you go'));
         $buttons = '';
         foreach (self::CANCEL_REASONS as $reason) {
-            $url = URL::signedRoute('extensions.wizarr.why', ['cancellation' => $cancellation->id, 'reason' => $reason]);
+            $url = self::signedLink('extensions.wizarr.why', ['cancellation' => $cancellation->id, 'reason' => $reason]);
             $buttons .= '<a href="' . e($url) . '" style="display:block;margin:6px 0;padding:10px 14px;border-radius:10px;border:1px solid #d9d4e6;text-decoration:none;color:#1f1a2e">' . e(self::cancelReasonLabel($reason)) . '</a>';
         }
         $body = '<p style="margin:0 0 12px">' . e(self::t('Thank you for watching with us. Would you tell us why you stop? One click:')) . '</p>' . $buttons;

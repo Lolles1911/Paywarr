@@ -93,11 +93,32 @@ trait MailList
         };
     }
 
+    /**
+     * A link for a mail, signed over its path only (SignedLink), so a proxy
+     * between https and http or another host name doesn't break it.
+     */
+    public static function signedLink(string $name, array $parameters): string
+    {
+        $relative = URL::signedRoute($name, $parameters, null, false);
+
+        return str_starts_with($relative, 'http') ? $relative : url($relative);
+    }
+
+    /** What a link from a mail that doesn't check out shows (SignedLink). */
+    public static function badLinkPage()
+    {
+        $html = '<div class="container mt-14" style="max-width:40rem"><h1 style="font-size:1.6rem;font-weight:800;margin-bottom:.6rem">' . e(self::t('This link doesn\'t work')) . '</h1>'
+            . '<p style="opacity:.85;margin-bottom:1rem">' . e(self::t('It may have been changed on the way. Log in, and you can choose which mails you get under Account.')) . '</p>'
+            . '<a href="' . e(url('/account')) . '" class="bg-primary text-white font-semibold rounded-lg px-4 py-2">' . e(self::t('Account')) . '</a></div>';
+
+        return view('layouts.app', ['slot' => new HtmlString($html), 'title' => self::t('This link doesn\'t work')]);
+    }
+
     /** One click: no more mails of $kind (signed; no login). $now: for the mail program's own button. */
     public function unsubscribeUrl($user, string $kind, bool $now = false): ?string
     {
         try {
-            return URL::signedRoute($now ? 'extensions.wizarr.mail.off.now' : 'extensions.wizarr.mail.off', ['user' => $user->id, 'kind' => $kind]);
+            return self::signedLink($now ? 'extensions.wizarr.mail.off.now' : 'extensions.wizarr.mail.off', ['user' => $user->id, 'kind' => $kind]);
         } catch (Throwable $e) {
             return null;
         }
@@ -137,7 +158,7 @@ trait MailList
             abort(404);
         }
         $on = request()->isMethod('post') && request()->input('on') === '1';
-        $form = URL::signedRoute('extensions.wizarr.mail.off.web', ['user' => $user->id, 'kind' => $kind]);
+        $form = self::signedLink('extensions.wizarr.mail.off.web', ['user' => $user->id, 'kind' => $kind]);
         $was = $this->wantsMail($user, $kind);
         self::setMailKind($user, $kind, $on);
         if ($was && !$on) {

@@ -562,5 +562,8 @@
     "Switch to yearly": "Skift til årlig",
     "You have no subscription that can switch to yearly right now.": "Du har ikke noget abonnement, der kan skifte til årlig lige nu.",
     "Good news: a seat is free on :product. Order soon: the shop is open to everyone again, and after :hours hours we tell the next on the waiting list.": "Gode nyheder: der er en ledig plads på :product. Bestil snart: butikken er åben for alle igen, og efter :hours timer skriver vi til den næste på ventelisten.",
-    "Join the waiting list and we mail you, in turn, when a seat opens.": "Skriv dig på ventelisten, så skriver vi til dig, når det er din tur og der bliver en plads ledig."
+    "Join the waiting list and we mail you, in turn, when a seat opens.": "Skriv dig på ventelisten, så skriver vi til dig, når det er din tur og der bliver en plads ledig.",
+    "This link doesn't work": "Linket virker ikke",
+    "It may have been changed on the way. Log in, and you can choose which mails you get under Account.": "Det kan være blevet ændret undervejs. Log ind, så kan du vælge, hvilke mails du får, under Konto.",
+    "Account": "Konto"
 }

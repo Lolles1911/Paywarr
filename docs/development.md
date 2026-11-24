@@ -50,6 +50,12 @@ two extra things:
 - **Fails loudly.** If Wizarr can't be reached, the job fails instead of
   pretending the access is closed.
 
+- **Links in mails** (unsubscribe, survey, why they cancelled) are signed over
+  their path only and checked by `SignedLink.php`, which also accepts links
+  signed with the full site address (APP_URL, http or https) and ignores
+  tracking parameters, because a reverse proxy or a mail program can change
+  those parts of the address.
+
 ## Limitations
 
 - **If a suspension fails,** the safety net fixes it within an hour once Wizarr
