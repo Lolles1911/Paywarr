@@ -336,6 +336,16 @@ trait Requests
         $show = request()->query('show');
         $data = $this->requestsData($chosen, (string) request()->query('q', ''), ctype_digit((string) $show) ? (int) $show : null);
         $data['libraries'] = array_map(fn ($s) => ['service' => (int) $s['service']->id, 'label' => $s['label']], $sources);
+        // Most wanted: titles requested and not on the server yet (Seerr only).
+        $available = [];
+        foreach ([...$data['results'], ...array_merge(...array_map(fn ($r) => $r['items'] ?? [], $data['rows'] ?: [[]]))] as $item) {
+            if (($item['state'] ?? '') === 'available') {
+                $available[] = self::wishKey((string) $item['type'], (int) $item['tmdb']);
+            }
+        }
+        self::wishesAvailable($available);
+        $data['me'] = (int) Auth::id();
+        $data['wishes'] = $chosen['kind'] === 'silo' ? [] : self::wishes();
         $data['notice'] = session('wizarr_requests_notice');
         $data['error'] = session('wizarr_requests_error');
 
@@ -355,11 +365,27 @@ trait Requests
         }
         \Illuminate\Support\Facades\RateLimiter::hit($key, 60);
         $seasons = request()->input('seasons', 'all');
+        $type = (string) request()->input('type', '');
+        $tmdb = (int) request()->input('tmdb', 0);
+        $vote = fn () => self::voteWish((int) Auth::id(), $type, $tmdb, (string) request()->input('title', ''),
+            ctype_digit((string) request()->input('year')) ? (int) request()->input('year') : null, (string) request()->input('poster', ''));
+        if (request()->input('vote') === '1') {
+            $count = $vote();
+
+            return $back()->with('wizarr_requests_notice', $count === 1 ? self::t('Noted: you want it.') : self::t('Noted: :count want it now.', ['count' => $count]));
+        }
         try {
-            $this->placeRequest($sources, $library, (string) request()->input('type', ''), (int) request()->input('tmdb', 0), is_array($seasons) ? $seasons : 'all');
+            $this->placeRequest($sources, $library, $type, $tmdb, is_array($seasons) ? $seasons : 'all');
         } catch (DisplayException $e) {
+            if ($e->getMessage() === self::t('That has already been requested.')) {
+                $vote();
+
+                return $back()->with('wizarr_requests_notice', self::t('Someone has already requested it; we noted that you want it too.'));
+            }
+
             return $back()->with('wizarr_requests_error', $e->getMessage());
         }
+        $vote();
 
         try {
             Auth::user()?->properties()->updateOrCreate(['key' => 'paywarr_first_request'], ['name' => 'Made a request', 'value' => (string) time()]);
@@ -437,7 +463,19 @@ trait Requests
             default => '',
         };
         $hidden = '<input type="hidden" name="_token" value="' . $e($csrf) . '"><input type="hidden" name="library" value="' . $e($library) . '"><input type="hidden" name="q" value="' . $e($data['query']) . '">';
-        $card = function (array $item) use ($e, $badge, $hidden, $base, $url, $library, $data): string {
+        $about = fn (array $item) => '<input type="hidden" name="title" value="' . $e($item['title']) . '"><input type="hidden" name="year" value="' . $e($item['year'] ?? '') . '">'
+            . '<input type="hidden" name="poster" value="' . $e($item['poster'] ?? '') . '">';
+        $voteButton = function (array $item) use ($e, $hidden, $base, $data, $about): string {
+            $wish = ($data['wishes'] ?? [])[self::wishKey((string) $item['type'], (int) $item['tmdb'])] ?? null;
+            $votes = $wish ? count($wish['voters']) : 0;
+            if ($wish && isset($wish['voters'][(string) ($data['me'] ?? 0)])) {
+                return '<div class="pr-muted pr-tiny">✓ ' . $e($votes === 1 ? self::t('You want it') : self::t('You and :n more want it', ['n' => $votes - 1])) . '</div>';
+            }
+
+            return '<form method="POST" action="' . $e($base) . '">' . $hidden . $about($item) . '<input type="hidden" name="vote" value="1"><input type="hidden" name="type" value="' . $e($item['type']) . '">'
+                . '<input type="hidden" name="tmdb" value="' . $e($item['tmdb']) . '"><button class="pr-button pr-small-button" type="submit">👍 ' . $e(self::t('I want it too')) . ($votes ? ' · ' . $votes : '') . '</button></form>';
+        };
+        $card = function (array $item) use ($e, $badge, $hidden, $base, $url, $library, $data, $about, $voteButton): string {
             $cover = '<span class="pr-cover"><span class="pr-letter">' . $e(mb_strtoupper(mb_substr($item['title'] ?: '?', 0, 1))) . '</span>'
                 . ($item['poster'] ? '<img loading="lazy" alt="" referrerpolicy="no-referrer" src="' . $e($item['poster']) . '" onerror="this.remove()">' : '') . $badge($item['state']) . '</span>';
             $action = '';
@@ -448,8 +486,10 @@ trait Requests
             } elseif (in_array($item['state'], ['none'], true) || ($item['type'] === 'tv' && $item['state'] === 'partial')) {
                 $action = $item['type'] === 'tv'
                     ? '<a class="pr-button pr-small-button" href="' . $e($url(['library' => $library, 'show' => $item['tmdb'], 'q' => $data['query']])) . '">' . $e(self::t('Request')) . '</a>'
-                    : '<form method="POST" action="' . $e($base) . '">' . $hidden . '<input type="hidden" name="type" value="movie"><input type="hidden" name="tmdb" value="' . $e($item['tmdb']) . '">'
+                    : '<form method="POST" action="' . $e($base) . '">' . $hidden . $about($item) . '<input type="hidden" name="type" value="movie"><input type="hidden" name="tmdb" value="' . $e($item['tmdb']) . '">'
                         . '<button class="pr-button pr-small-button" type="submit">' . $e(self::t('Request')) . '</button></form>';
+            } elseif (in_array($item['state'], ['requested', 'pending', 'approved', 'processing'], true)) {
+                $action = $voteButton($item);
             }
 
             return '<div class="pr-tile">' . $cover . '<div class="pr-title pr-clip" title="' . $e($item['title']) . '">' . $e($item['title']) . '</div>'
@@ -466,7 +506,7 @@ trait Requests
             if (!$data['seasons']) {
                 $html .= '<p class="pr-muted">' . $e(self::t('The seasons can\'t be loaded right now.')) . '</p>';
             } else {
-                $html .= '<form method="POST" action="' . $e($base) . '">' . $hidden . '<input type="hidden" name="type" value="tv"><input type="hidden" name="tmdb" value="' . $e($show['tmdb']) . '"><div class="pr-season-list">';
+                $html .= '<form method="POST" action="' . $e($base) . '">' . $hidden . $about($show) . '<input type="hidden" name="type" value="tv"><input type="hidden" name="tmdb" value="' . $e($show['tmdb']) . '"><div class="pr-season-list">';
                 foreach ($data['seasons'] as $season) {
                     $free = $season['state'] === 'none' || $season['state'] === 'partial';
                     // TMDB's own name only when it is more than "Season 3" (in any language).
@@ -489,6 +529,17 @@ trait Requests
             foreach ($data['rows'] as $row) {
                 $html .= '<h2 class="pr-h">' . $e($names[$row['key']] ?? $row['key']) . '</h2><div class="pr-row-scroll">' . implode('', array_map($card, $row['items'])) . '</div>';
             }
+        }
+
+        // Most wanted: what others asked for, to vote on.
+        $wanted = $data['show'] === null && $data['query'] === '' ? self::mostWanted(12, $data['wishes'] ?? []) : [];
+        if ($wanted) {
+            $html .= '<h2 class="pr-h">' . $e(self::t('Most wanted')) . '</h2><p class="pr-muted pr-tiny">' . $e(self::t('Requested by customers and on the way. The more who want it, the sooner we look at it.')) . '</p><div class="pr-row-scroll">';
+            foreach ($wanted as $wish) {
+                $item = ['type' => $wish['type'], 'tmdb' => $wish['tmdb'], 'title' => $wish['title'] ?: '?', 'year' => $wish['year'], 'poster' => $wish['poster'], 'state' => 'requested'];
+                $html .= $card($item);
+            }
+            $html .= '</div>';
         }
 
         // My requests

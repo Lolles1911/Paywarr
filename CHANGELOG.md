@@ -3,6 +3,33 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.38.0 (2026-11-26)
+
+For customers:
+
+- **"Because you watched …"** on the My page: titles that others who watched
+  the customer's latest title also watched, without what they have seen
+  (Tracearr, 90 days).
+- **Most wanted on Requests:** a title someone requested that isn't on the
+  server yet gets "I want it too"; the most wanted are listed on top. A request
+  counts as a vote, and "already requested" now counts as one instead of an
+  error.
+- **App on the home screen:** the client area can be added to the phone's home
+  screen as an app (manifest, icon, colours). The icon is "App icon" under
+  Settings → Shop, else Paymenter's favicon or logo, else the first letter.
+
+In admin:
+
+- **Price changes** (Customers): a new price for a plan, at once for new
+  customers; those on it get "Price change" by mail and pay it from a date at
+  least 30 days away. Can be cancelled before the date.
+- **Most wanted** (Customers): requested titles by votes.
+- **Updates** (Operations): the installed and newest versions of Paywarr and
+  Paywarr Stats, what's new, and the commands; a badge in the menu when there
+  is one.
+- **Backup** (Operations): download Paywarr's own data as one file (without
+  keys, secrets and tokens), and restore it.
+
 ## 1.37.2 (2026-11-25)
 
 - **Fix: "403 Forbidden" on links in mails** (unsubscribe, the survey, why

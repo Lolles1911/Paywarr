@@ -1035,7 +1035,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/switch/{service} extensions.wizarr.switch', 'POST wizarr/switch/{service} extensions.wizarr.switch',
         'GET wizarr/nps/{user}/{score} extensions.wizarr.nps', 'POST wizarr/nps/{user}/{score} extensions.wizarr.nps', 'GET wizarr/why/{cancellation}/{reason} extensions.wizarr.why',
         'GET wizarr/movie-night extensions.wizarr.party', 'POST wizarr/movie-night extensions.wizarr.party', 'GET wizarr/challenge extensions.wizarr.challenge',
-        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub', 'GET wizarr/poster/{key} extensions.wizarr.poster', 'GET catalog extensions.wizarr.catalog', 'POST wizarr/mail-list extensions.wizarr.mail-list', 'GET wizarr/join/{code} extensions.wizarr.join', 'GET wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off', 'POST wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off.web', 'POST wizarr/mail/off-now/{user}/{kind} extensions.wizarr.mail.off.now', 'POST wizarr/waitlist extensions.wizarr.waitlist', 'GET|POST wizarr/devices extensions.wizarr.devices', 'GET coming-soon extensions.wizarr.coming', 'GET|POST wizarr/yearly extensions.wizarr.yearly',
+        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub', 'GET wizarr/poster/{key} extensions.wizarr.poster', 'GET catalog extensions.wizarr.catalog', 'POST wizarr/mail-list extensions.wizarr.mail-list', 'GET wizarr/join/{code} extensions.wizarr.join', 'GET wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off', 'POST wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off.web', 'POST wizarr/mail/off-now/{user}/{kind} extensions.wizarr.mail.off.now', 'POST wizarr/waitlist extensions.wizarr.waitlist', 'GET|POST wizarr/devices extensions.wizarr.devices', 'GET coming-soon extensions.wizarr.coming', 'GET|POST wizarr/yearly extensions.wizarr.yearly', 'GET wizarr/app.webmanifest extensions.wizarr.manifest', 'GET wizarr/app-icon/{size} extensions.wizarr.app-icon', 'GET paywarr-sw.js extensions.wizarr.sw',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -3841,6 +3841,75 @@ test('settings: the server keeps the connection; the rest is moved once to Paywa
     same(['5', 'secret', null, 'http://w'], [ext(['news_day' => '7', 'host' => 'http://w'])->config('news_day'), ext()->config('discord_bot_token'), ext(['winback_days' => '30'])->config('winback_days'), ext(['host' => 'http://w'])->config('host')],
         'after: from Settings (an empty one stays empty), the connection from the server');
     ok(str_starts_with((string) (\Paymenter\Extensions\Servers\Wizarr\Wizarr::storeGet('settings')['discord_bot_token'] ?? ''), 'enc:'), 'secrets are kept encrypted');
+    \App\Models\Property::$rows = $keep;
+    $W::forgetGlobalSettings();
+});
+
+test('because you watched: what others who watched your latest title also watched, without what you have seen', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $poster = fn ($t) => '/api/v1/images/proxy?server=s&url=' . $t;
+    $play = fn ($user, $title, $at) => ['server_type' => 'jellyfin', 'user' => ['username' => $user], 'media_type' => 'movie', 'media_title' => $title, 'poster_url' => $poster($title), 'started_at' => date('c', $at)];
+    $now = 1_800_000_000;
+    $plays = [
+        $play('anna', 'Dune', $now - 100), $play('anna', 'Arrival', $now - 5000),
+        $play('bo', 'Dune', $now), $play('bo', 'Sicario', $now), $play('bo', 'Arrival', $now),
+        $play('cy', 'Dune', $now), $play('cy', 'Sicario', $now), $play('cy', 'Heat', $now),
+        $play('di', 'Up', $now),
+    ];
+    $recs = $W::recommendFor($plays, ['jellyfin|anna' => true]);
+    same('Dune', $recs['seed'], 'her latest title');
+    same(['Sicario', 'Heat'], array_column($recs['items'], 'title'), 'most shared first; not what she saw; not from people with nothing in common');
+    same(['seed' => null, 'items' => []], $W::recommendFor($plays, ['jellyfin|nobody' => true]), 'nothing watched: nothing');
+});
+
+test('most wanted: a request is a vote, others add theirs once, done when on the server', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $keep = \App\Models\Property::$rows;
+    same(1, $W::voteWish(1, 'movie', 101, 'Dune', 2021, 'https://image.tmdb.org/p.jpg'), 'the request');
+    same(2, $W::voteWish(2, 'movie', 101), 'a second customer');
+    same(2, $W::voteWish(2, 'movie', 101), 'once each');
+    same(1, $W::voteWish(3, 'tv', 202, 'Severance'), 'another title');
+    same(['movie:101', 'tv:202'], array_keys($W::mostWanted()), 'most votes first');
+    same('Dune', $W::wishes()['movie:101']['title'], 'with its title');
+    same(0, $W::voteWish(1, 'movie', 0), 'no title: no vote');
+    $W::wishesAvailable(['movie:101']);
+    same(['tv:202'], array_keys($W::mostWanted()), 'on the server: off the list');
+    \App\Models\Property::$rows = $keep;
+});
+
+test('home-screen app: the manifest, and a square icon', function () {
+    $m = ext()->appManifest();
+    same(['standalone', '192x192', '512x512'], [$m['display'], $m['icons'][0]['sizes'], $m['icons'][1]['sizes']], 'installable as an app');
+    $png = \Paymenter\Extensions\Servers\Wizarr\Wizarr::squareIcon(null, 192, '#0b0a14');
+    ok(str_starts_with($png, "\x89PNG"), 'a PNG even without a logo');
+    if (function_exists('imagecreatetruecolor')) {
+        same([192, 192], array_slice(getimagesizefromstring($png), 0, 2), 'square, the size asked');
+    }
+});
+
+test('updates: the version in a file, and the changelog sections newer than what is installed', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    same('1.38.0', $W::versionIn("#[ExtensionMeta(\n    name: 'Paywarr',\n    version: '1.38.0',\n)]"), 'read from the attribute');
+    $log = "# Changelog\n\n## 1.38.0 (2026-11-26)\n\n- New A\n\n## 1.37.2 (2026-11-25)\n\n- Fix B\n\n## 1.37.1 (2026-11-25)\n\n- C\n";
+    same(['1.38.0' => '- New A', '1.37.2' => '- Fix B'], $W::newerSections($log, '1.37.1'), 'only what is newer');
+});
+
+test('backup: everything Paywarr keeps, without secrets; restoring keeps the keys you have', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $backup = $W::backupData(['campaigns' => '[{"id":"a"}]', 'settings' => json_encode(['news_day' => '5', 'discord_bot_token' => 'enc:x'])], '1.38.0');
+    same([['id' => 'a']], $backup['data']['campaigns'], 'the data');
+    same(['news_day' => '5'], $backup['data']['settings'], 'no token in the file');
+    $keep = \App\Models\Property::$rows;
+    $W::storePut('settings', ['news_day' => '1', 'discord_bot_token' => 'enc:mine']);
+    same(2, $W::restoreBackup($backup), 'two parts back');
+    same(['news_day' => '5', 'discord_bot_token' => 'enc:mine'], $W::storeGet('settings'), 'settings back, the token kept');
+    $threw = false;
+    try {
+        $W::restoreBackup(['data' => []]);
+    } catch (\Throwable $e) {
+        $threw = true;
+    }
+    ok($threw, 'not a backup: refused');
     \App\Models\Property::$rows = $keep;
     $W::forgetGlobalSettings();
 });

@@ -565,5 +565,16 @@
     "Join the waiting list and we mail you, in turn, when a seat opens.": "Skriv dig på ventelisten, så skriver vi til dig, når det er din tur og der bliver en plads ledig.",
     "This link doesn't work": "Linket virker ikke",
     "It may have been changed on the way. Log in, and you can choose which mails you get under Account.": "Det kan være blevet ændret undervejs. Log ind, så kan du vælge, hvilke mails du får, under Konto.",
-    "Account": "Konto"
+    "Account": "Konto",
+    "Because you watched :title": "Fordi du så :title",
+    "Noted: you want it.": "Noteret: du vil gerne se den.",
+    "Noted: :count want it now.": "Noteret: nu vil :count gerne se den.",
+    "Someone has already requested it; we noted that you want it too.": "Den er allerede ønsket af en anden; vi har noteret, at du også gerne vil se den.",
+    "You want it": "Du vil gerne se den",
+    "You and :n more want it": "Du og :n andre vil gerne se den",
+    "I want it too": "Jeg vil også se den",
+    "Most wanted": "Mest ønsket",
+    "Requested by customers and on the way. The more who want it, the sooner we look at it.": "Ønsket af kunder og på vej. Jo flere der vil se den, jo før kigger vi på den.",
+    "New price for :product from :date": "Ny pris på :product fra :date",
+    ":product will cost :new a period from :date (now :old). It applies to your renewals from that date; you don't need to do anything. If you would rather stop or change subscription, you can do that before then.": ":product koster :new pr. periode fra :date (nu :old). Det gælder dine fornyelser fra den dato; du skal ikke gøre noget. Vil du hellere stoppe eller skifte abonnement, kan du gøre det inden da."
 }

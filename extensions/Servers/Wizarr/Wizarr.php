@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.37.2',
+    version: '1.38.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -107,6 +107,11 @@ class Wizarr extends Server
     use Concerns\Yearly;
     use Concerns\AtRisk;
     use Concerns\Settings;
+    use Concerns\Wishes;
+    use Concerns\HomeScreen;
+    use Concerns\PriceChanges;
+    use Concerns\Updates;
+    use Concerns\Backup;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -661,6 +666,14 @@ class Wizarr extends Server
                 'description' => 'Radarr: Settings -> General -> API Key. Only read.',
             ],
             [
+                'name' => 'app_icon',
+                'label' => 'App icon',
+                'type' => 'file',
+                'required' => false,
+                'accept' => ['image/png', 'image/jpeg', 'image/webp'],
+                'description' => 'For the home-screen app: a square PNG, at least 512 x 512. Empty: Paymenter\'s favicon or logo, else the first letter of the site\'s name.',
+            ],
+            [
                 'name' => 'coming_soon',
                 'label' => 'Coming soon for visitors',
                 'type' => 'checkbox',
@@ -1030,6 +1043,8 @@ class Wizarr extends Server
         Event::listen('footer', fn () => $this->renderCampaignBanner());
         // New episodes and movies on their way (ComingSoon), for visitors when on.
         Event::listen('pages.home', fn () => $this->renderComingSoon());
+        // The client area as an app on the home screen (HomeScreen).
+        Event::listen('head', fn () => $this->renderHomeScreenHead());
         // A sold-out product (Capacity): the waiting list.
         Event::listen('footer', fn () => $this->renderWaitlist());
 
@@ -1171,6 +1186,7 @@ class Wizarr extends Server
                 $this->runFriendPasses();
                 $this->finishSwitches();
                 $this->finishYearlySwitches();
+                $this->applyPriceChanges();
                 $this->sendCartReminders();
                 $this->sendSurveys();
                 $this->sendNewsIfDue();

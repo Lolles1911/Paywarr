@@ -73,6 +73,99 @@ trait Posters
         return array_values(array_map(fn ($t) => array_diff_key($t, ['people' => 1]) + ['count' => count($t['people'])], array_slice($titles, 0, $limit)));
     }
 
+    /**
+     * "Because you watched": the customer's latest title, and what others
+     * who watched it (or else anything the customer watched) also watched,
+     * most shared first, without what the customer has seen. From Tracearr's
+     * plays of everyone. Returns ['seed' => title|null, 'items' => [...]].
+     */
+    public static function recommendFor(array $plays, array $accounts, int $limit = 20): array
+    {
+        $byUser = [];
+        $titles = [];
+        $mine = [];
+        $latest = null;
+        foreach ($plays as $p) {
+            $poster = (string) ($p['poster_url'] ?? '');
+            $title = (string) (($p['media_type'] ?? '') === 'episode' ? ($p['show_title'] ?? '') : ($p['media_title'] ?? ''));
+            if ($title === '' || ($p['media_type'] ?? '') === 'track') {
+                continue;
+            }
+            $key = strtolower($title . '|' . ($p['server_type'] ?? ''));
+            $who = strtolower((string) ($p['server_type'] ?? '')) . '|' . strtolower((string) ($p['user']['username'] ?? ''));
+            if (str_starts_with($poster, '/api/v1/images/proxy?')) {
+                $titles[$key] ??= ['title' => $title, 'type' => ($p['media_type'] ?? '') === 'episode' ? 'show' : 'movie',
+                    'server_type' => strtolower((string) ($p['server_type'] ?? '')), 'path' => $poster];
+            }
+            if (isset($accounts[$who])) {
+                $mine[$key] = true;
+                $at = strtotime((string) ($p['started_at'] ?? '')) ?: 0;
+                if ($latest === null || $at > $latest[1]) {
+                    $latest = [$key, $at, $title];
+                }
+            } else {
+                $byUser[$who][$key] = true;
+            }
+        }
+        if (!$mine) {
+            return ['seed' => null, 'items' => []];
+        }
+        $score = function (array $seeds) use ($byUser, $mine, $titles) {
+            $scores = [];
+            foreach ($byUser as $seen) {
+                $overlap = count(array_intersect_key($seen, $seeds));
+                if ($overlap === 0) {
+                    continue;
+                }
+                foreach (array_diff_key($seen, $mine) as $key => $_) {
+                    if (isset($titles[$key])) {
+                        $scores[$key] = ($scores[$key] ?? 0) + $overlap;
+                    }
+                }
+            }
+            arsort($scores);
+
+            return array_keys($scores);
+        };
+        $keys = $score([$latest[0] => true]);
+        $seed = $latest[2];
+        if (count($keys) < 4) {
+            $keys = array_values(array_unique([...$keys, ...$score($mine)]));
+        }
+
+        return ['seed' => $keys ? $seed : null, 'items' => array_map(fn ($k) => $titles[$k], array_slice($keys, 0, $limit))];
+    }
+
+    /** "Because you watched" for a customer (kept an hour; everyone's plays of 90 days, kept 6 hours). */
+    public function recommendations($user): array
+    {
+        return Cache::remember('paywarr:recs:' . $user->id, 3600, function () use ($user) {
+            $tracearr = $this->tracearrOrAny();
+            if ($tracearr === null) {
+                return ['seed' => null, 'items' => []];
+            }
+            $accounts = [];
+            foreach (Service::where('user_id', $user->id)->whereIn('status', ['active', 'suspended'])->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr'))
+                ->with(['product.server', 'properties'])->get() as $service) {
+                foreach ($this->streamAccounts(ExtensionHelper::getServiceProperties($service)) as $account) {
+                    $accounts[$account] = true;
+                }
+            }
+            if (!$accounts) {
+                return ['seed' => null, 'items' => []];
+            }
+            try {
+                $plays = Cache::remember('paywarr:recs:plays', 6 * 3600, fn () => $tracearr->history(time() - 90 * 86400, 20000));
+            } catch (Throwable $e) {
+                return ['seed' => null, 'items' => []];
+            }
+            $recs = self::recommendFor($plays, $accounts);
+            $recs['items'] = self::allowPosters($recs['items']);
+
+            return $recs;
+        });
+    }
+
     /** Half-watched titles of the customer's plays: the latest per title, between 3% and 90%. */
     public static function continueTitles(array $plays, int $limit = 12): array
     {
@@ -252,6 +345,7 @@ trait Posters
         try {
             $shelves = $this->shelves();
             $continue = $this->continueWatching($user);
+            $recs = $this->recommendations($user);
         } catch (Throwable $e) {
             return '';
         }
@@ -259,6 +353,7 @@ trait Posters
         $bad = Cache::get('paywarr:posters:bad', []);
 
         return $this->posterRow(self::t('Continue watching'), self::usablePosters($continue, $bad, 12), true, $links)
+            . ($recs['seed'] !== null ? $this->posterRow(self::t('Because you watched :title', ['title' => $recs['seed']]), self::usablePosters($recs['items'], $bad, 20), true, $links) : '')
             . $this->posterRow(self::t('New on the server'), self::usablePosters($shelves['new'], $bad, 20), true, $links)
             . $this->posterRow(self::t('Popular now'), self::usablePosters($shelves['popular'], $bad, 20), true, $links);
     }
