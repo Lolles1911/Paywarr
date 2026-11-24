@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.34.4',
+    version: '1.35.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -100,6 +100,7 @@ class Wizarr extends Server
     use Concerns\Hub;
     use Concerns\Posters;
     use Concerns\MailList;
+    use Concerns\MailCenter;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -603,14 +604,6 @@ class Wizarr extends Server
                 'required' => false,
                 'validation' => 'nullable|integer|min:2|max:168',
                 'description' => 'Optional. A second reminder, counted from the order. Empty: only one.',
-            ],
-            [
-                'name' => 'mail_colour',
-                'label' => 'Mail colour',
-                'type' => 'text',
-                'required' => false,
-                'placeholder' => '#7c3aed',
-                'description' => 'The colour of buttons in Paywarr\'s mails, as #rrggbb. The logo is the one under Settings (the dark one if there is one).',
             ],
             [
                 'name' => 'showcase',

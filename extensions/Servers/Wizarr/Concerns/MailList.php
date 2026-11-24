@@ -22,6 +22,18 @@ trait MailList
 {
     public const PROP_MAIL_LIST = 'paywarr_mail_list';
 
+    /** Customer: the kinds of mail they turned off ("events,reminders"). */
+    public const PROP_MAIL_OFF = 'paywarr_mail_off';
+
+    /** Where sendMail() puts the line to unsubscribe (mailLayout() leaves it). */
+    public const MAIL_FOOTER_SLOT = '<!--paywarr-unsubscribe-->';
+
+    /**
+     * Mail kinds a customer can turn off (essential ones always go): news
+     * and events only to the mail list; reminders and stats unless turned off.
+     */
+    public const MAIL_KINDS = ['news', 'events', 'reminders', 'stats'];
+
     /** Makes the customer field once (Admin → Configuration → Custom Properties, where you can rename it). */
     public static function ensureMailListField(): void
     {
@@ -52,16 +64,95 @@ trait MailList
         return $user !== null && self::mailListValue($this->propertyValue($user, self::PROP_MAIL_LIST));
     }
 
-    /** The line under a list mail, with the link to leave the list. */
-    public function mailListFooter($user): string
+    /** Whether the customer gets mails of $kind. */
+    public function wantsMail($user, string $kind): bool
     {
-        try {
-            $off = URL::signedRoute('extensions.wizarr.news.off', ['user' => $user->id]);
-        } catch (Throwable $e) {
-            return e(self::t('You get this because you are on our mail list. You can leave it under Account.'));
+        if ($kind === 'essential' || !in_array($kind, self::MAIL_KINDS, true)) {
+            return true;
+        }
+        if (in_array($kind, ['news', 'events'], true) && !$this->onMailList($user)) {
+            return false;
         }
 
-        return e(self::t('You get this because you are on our mail list.')) . ' <a href="' . e($off) . '" style="color:#8f87a8">' . e(self::t('Leave the mail list')) . '</a>';
+        return !in_array($kind, self::mailOff($user, fn ($key) => $this->propertyValue($user, $key)), true);
+    }
+
+    /** The kinds a customer turned off. */
+    public static function mailOff($user, callable $read): array
+    {
+        return array_values(array_filter(explode(',', (string) ($read(self::PROP_MAIL_OFF) ?? ''))));
+    }
+
+    public static function mailKindLabel(string $kind): string
+    {
+        return match ($kind) {
+            'news' => self::t('news and offers'),
+            'events' => self::t('movie nights and challenges'),
+            'reminders' => self::t('reminders'),
+            default => self::t('stats and surveys'),
+        };
+    }
+
+    /** One click: no more mails of $kind (signed; no login). $now: for the mail program's own button. */
+    public function unsubscribeUrl($user, string $kind, bool $now = false): ?string
+    {
+        try {
+            return URL::signedRoute($now ? 'extensions.wizarr.mail.off.now' : 'extensions.wizarr.mail.off', ['user' => $user->id, 'kind' => $kind]);
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    private function unsubscribeFooter(string $kind, string $url): string
+    {
+        return '<div style="margin-bottom:8px">' . e(self::t('You get this because you get :kind from us.', ['kind' => self::mailKindLabel($kind)]))
+            . ' <a href="' . e($url) . '" style="color:#8f87a8">' . e(self::t('Unsubscribe from :kind', ['kind' => self::mailKindLabel($kind)])) . '</a></div>';
+    }
+
+    /** Turns a kind on or off for a customer. */
+    public static function setMailKind($user, string $kind, bool $on): void
+    {
+        if ($kind === 'news') {
+            $user->properties()->updateOrCreate(['key' => self::PROP_MAIL_LIST], ['name' => self::t('Send me news and offers by mail'), 'value' => $on ? '1' : '0']);
+
+            return;
+        }
+        $off = self::mailOff($user, fn ($key) => $user->properties()->where('key', $key)->value('value'));
+        $off = $on ? array_values(array_diff($off, [$kind])) : array_values(array_unique([...$off, $kind]));
+        $user->properties()->updateOrCreate(['key' => self::PROP_MAIL_OFF], ['name' => 'Mails turned off', 'value' => implode(',', $off)]);
+        if ($on && $kind === 'events') {
+            $user->properties()->updateOrCreate(['key' => self::PROP_MAIL_LIST], ['name' => self::t('Send me news and offers by mail'), 'value' => '1']);
+        }
+    }
+
+    /**
+     * GET and POST /wizarr/mail/off/{user}/{kind} (signed): off, with a button
+     * to turn it back on. A POST without a session is the mail program's own
+     * one-click button.
+     */
+    public function mailOffPage($user, $kind)
+    {
+        $user = \App\Models\User::find((int) $user);
+        if (!$user || !in_array($kind, self::MAIL_KINDS, true)) {
+            abort(404);
+        }
+        $on = request()->isMethod('post') && request()->input('on') === '1';
+        $form = URL::signedRoute('extensions.wizarr.mail.off.web', ['user' => $user->id, 'kind' => $kind]);
+        $was = $this->wantsMail($user, $kind);
+        self::setMailKind($user, $kind, $on);
+        if ($was && !$on) {
+            self::countMail('mail_unsubs', $kind);
+        }
+        if (request()->isMethod('post') && !request()->has('on')) {
+            return response('OK');
+        }
+        $e = fn ($v) => e((string) $v);
+        $label = self::mailKindLabel($kind);
+        $html = '<p style="margin-bottom:1rem">' . $e($on ? self::t('Done: you get :kind by mail again.', ['kind' => $label]) : self::t('Done: no more :kind by mail. Mails about your access and subscription still come.', ['kind' => $label])) . '</p>'
+            . '<form method="post" action="' . $e($form) . '">' . csrf_field() . '<input type="hidden" name="on" value="' . ($on ? '0' : '1') . '">'
+            . '<button type="submit" class="border border-neutral rounded-lg px-4 py-2">' . $e($on ? self::t('Unsubscribe again') : self::t('Oops, turn it back on')) . '</button></form>';
+
+        return view('layouts.app', ['slot' => new HtmlString($this->pageFrame(self::t('Mail settings'), $html)), 'title' => self::t('Mail settings')]);
     }
 
     /**

@@ -87,7 +87,7 @@ trait Broadcast
             if (in_array('mail', $channels, true)) {
                 if ($marketing && !$this->onMailList($user)) {
                     $result['not_on_list']++;
-                } elseif ($this->sendMail((string) $user->email, $subject, $marketing ? $this->mailLayout($subject, $this->paragraphs($text), $button, $this->mailListFooter($user)) : $html, (int) $user->id)) {
+                } elseif ($this->sendMail((string) $user->email, $subject, $html, $user, $marketing ? 'news' : 'essential')) {
                     $result['mail']++;
                 }
             }

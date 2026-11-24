@@ -60,11 +60,10 @@ trait WatchParty
             'link' => trim((string) ($data['link'] ?? '')), 'at' => (int) $data['at'], 'products' => array_values(array_map('intval', (array) ($data['products'] ?? []))),
             'going' => [], 'reminded' => null, 'thread' => '', 'invited' => 0];
         if (!empty($data['announce'])) {
-            $text = self::t('Movie night: :title on :date. Watch along with everyone; press "I\'m coming" and we remind you an hour before.', [
-                'title' => $party['title'], 'date' => date(self::t('M j, H:i'), $party['at'])]) . ($party['text'] !== '' ? "\n\n" . $party['text'] : '');
+            $vars = ['title' => $party['title'], 'date' => date(self::t('M j, H:i'), $party['at']), 'about' => $party['text']];
             foreach ($this->partyRecipients($party) as $service) {
                 try {
-                    if ($this->forServiceServer($service)->notifyCustomer($service, self::t('Movie night: :title', ['title' => $party['title']]), $text, [self::t('I\'m coming'), $this->partyUrl()], null, true, true)) {
+                    if ($this->forServiceServer($service)->notifyMail($service, 'party_invite', $vars, $this->partyUrl())) {
                         $party['invited']++;
                     }
                 } catch (Throwable $e) {
@@ -162,9 +161,7 @@ trait WatchParty
                     continue;
                 }
                 try {
-                    $this->forServiceServer($service)->notifyCustomer($service, self::t('Movie night in an hour'),
-                        self::t(':title starts at :time. Open your media server a little before, and press play at :time.', ['title' => $party['title'], 'time' => date('H:i', $party['at'])]),
-                        [self::t('Open movie night'), $this->partyUrl()], null, true, true);
+                    $this->forServiceServer($service)->notifyMail($service, 'party_reminder', ['title' => $party['title'], 'time' => date('H:i', $party['at'])], $this->partyUrl());
                     $sent[] = $userId;
                 } catch (Throwable $e) {
                     Log::warning('Wizarr: movie night reminder to user ' . $userId . ' not sent: ' . $e->getMessage());

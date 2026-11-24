@@ -23,7 +23,7 @@ trait Welcome
     /** Whether this server sends Paywarr's welcome mail (setting "welcome_mail"). */
     public function welcomeMailOn(): bool
     {
-        return $this->truthy($this->config('welcome_mail') ?? false);
+        return $this->truthy($this->config('welcome_mail') ?? false) && !self::mailIsOff('welcome');
     }
 
     /**
@@ -90,7 +90,9 @@ trait Welcome
                 . $p(e(self::t('News, help and other viewers are on our Discord.'))) . $button(self::t('Join our Discord'), $discord);
         }
 
-        return $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html), (int) $user->id);
+        $title = self::mailSubject('welcome', $title);
+
+        return $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html), (int) $user->id, 'essential', 'welcome');
     }
 
     /** "jellyfin", "emby", "plex" or "silo" for a media server's name in Wizarr ('' when unknown). */

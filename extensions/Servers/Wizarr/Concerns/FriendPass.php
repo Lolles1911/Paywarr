@@ -144,8 +144,7 @@ trait FriendPass
                 }
                 if (!$pass['warned'] && $pass['ends'] - $now <= 86400 && $pass['ends'] > $now) {
                     $all[$id]['warned'] = $now;
-                    $title = self::t('Your free week ends tomorrow');
-                    $this->sendMail($pass['email'], $title, $this->mailLayout($title, $this->paragraphs($this->passOfferText()), [self::t('See subscriptions'), $this->shopUrl()]));
+                    $this->sendPassMail('pass_ends', $pass['email']);
                 }
                 if ($now >= $pass['ends']) {
                     $friend = User::where('email', $pass['email'])->first();
@@ -160,8 +159,7 @@ trait FriendPass
                         $all[$id] = ['done' => $now, 'outcome' => 'bought'] + $all[$id];
                     } else {
                         $ext->adminUserAction((int) $pass['user'], 'delete');
-                        $title = self::t('Your free week is over');
-                        $this->sendMail($pass['email'], $title, $this->mailLayout($title, $this->paragraphs($this->passOfferText()), [self::t('See subscriptions'), $this->shopUrl()]));
+                        $this->sendPassMail('pass_over', $pass['email']);
                         $all[$id] = ['done' => $now, 'outcome' => 'ended'] + $all[$id];
                     }
                     $done[] = $all[$id]['outcome'] . ' ' . $pass['email'];
@@ -176,14 +174,14 @@ trait FriendPass
         return $done;
     }
 
-    private function passOfferText(): string
+    /** The friend's mail at the end of the week, with a running campaign's code. */
+    private function sendPassMail(string $id, string $email): void
     {
-        $text = self::t('We hope you enjoyed it! Keep your user and everything you have watched: buy a subscription with this mail address before the week ends.');
-        if (($campaign = self::activeCampaign()) && $campaign['code'] !== '') {
-            $text .= "\n\n" . self::t(':percent% off a new subscription with the code :code, until :date.', ['percent' => $campaign['percent'], 'code' => $campaign['code'], 'date' => date(self::t('M j, Y'), $campaign['ends'])]);
+        $campaign = self::activeCampaign();
+        $vars = $campaign && $campaign['code'] !== '' ? ['percent' => $campaign['percent'], 'code' => $campaign['code'], 'date' => date(self::t('M j, Y'), $campaign['ends'])] : ['percent' => '', 'code' => '', 'date' => ''];
+        if ($parts = self::mailParts($id, $vars)) {
+            $this->sendMail($email, $parts['title'], $this->mailLayout($parts['title'], $this->paragraphs($parts['text']), [$parts['button'], $this->shopUrl()]), null, 'essential', $id);
         }
-
-        return $text;
     }
 
     private function passUrl(): string

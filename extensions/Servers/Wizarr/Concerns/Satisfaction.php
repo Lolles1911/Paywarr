@@ -101,7 +101,7 @@ trait Satisfaction
 
     private function mailSurvey($user, int $now): void
     {
-        $title = self::t('How are we doing?');
+        $title = self::mailSubject('survey', self::t('How are we doing?'));
         $cells = '';
         for ($score = 0; $score <= 10; $score++) {
             $url = URL::signedRoute('extensions.wizarr.nps', ['user' => $user->id, 'score' => $score, 'at' => $now]);
@@ -110,20 +110,20 @@ trait Satisfaction
         }
         $body = '<p style="margin:0 0 12px">' . e(self::t('How likely are you to recommend us to a friend? Click a number; it takes a second.')) . '</p>'
             . '<div style="margin:12px 0">' . $cells . '</div><div style="display:flex;justify-content:space-between;color:#6b6680;font-size:12px;max-width:430px"><span>' . e(self::t('Not likely')) . '</span><span>' . e(self::t('Very likely')) . '</span></div>';
-        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), (int) $user->id);
+        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), $user, 'stats', 'survey');
     }
 
     private function mailWhy($cancellation): void
     {
         $user = $cancellation->service->user;
-        $title = self::t('Sorry to see you go');
+        $title = self::mailSubject('why', self::t('Sorry to see you go'));
         $buttons = '';
         foreach (self::CANCEL_REASONS as $reason) {
             $url = URL::signedRoute('extensions.wizarr.why', ['cancellation' => $cancellation->id, 'reason' => $reason]);
             $buttons .= '<a href="' . e($url) . '" style="display:block;margin:6px 0;padding:10px 14px;border-radius:10px;border:1px solid #d9d4e6;text-decoration:none;color:#1f1a2e">' . e(self::cancelReasonLabel($reason)) . '</a>';
         }
         $body = '<p style="margin:0 0 12px">' . e(self::t('Thank you for watching with us. Would you tell us why you stop? One click:')) . '</p>' . $buttons;
-        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), (int) $user->id);
+        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), $user, 'stats', 'why');
     }
 
     /** GET and POST /wizarr/nps/{user}/{score} (signed): the score, then a comment. */

@@ -115,10 +115,7 @@ trait Loyalty
         $pauses[] = $now;
         $service->user->properties()->updateOrCreate(['key' => self::PROP_SELF_PAUSES], ['name' => 'Paused by the customer', 'value' => json_encode($pauses)]);
         self::logAdmin($service->user, (int) $service->id, 'Paused by the customer until ' . date('M j, Y', $until), 'customer');
-        $this->notifyCustomer($service, self::t('Your subscription is paused'),
-            self::t('Your subscription to :product is paused until :date. Your user and everything you have watched are kept, and your renewal date moves :days days. Want to watch before then? You can resume at any time.',
-                ['product' => (string) ($service->product->name ?? ''), 'date' => date(self::t('M j, Y'), $until), 'days' => $days]),
-            [self::t('Resume now'), $this->pausePageUrl($service)]);
+        $this->notifyMail($service, 'paused', ['product' => (string) ($service->product->name ?? ''), 'date' => date(self::t('M j, Y'), $until), 'days' => $days], $this->pausePageUrl($service));
 
         return $until;
     }
@@ -270,10 +267,7 @@ trait Loyalty
                     'max_uses' => 1, 'max_uses_per_user' => 1, 'starts_at' => date('Y-m-d H:i:s', $now), 'expires_at' => date('Y-m-d H:i:s', $now + $valid * 86400),
                 ], $this->giftableProductIds());
                 $user->properties()->updateOrCreate(['key' => self::PROP_WINBACK_AT], ['name' => 'Come-back code sent', 'value' => (string) $now]);
-                $this->notifyCustomer($last[0], self::t('We\'d love to have you back'),
-                    self::t('Your user and everything you have watched are still here. Come back with :percent% off your first month: use the code :code in the cart, until :date.',
-                        ['percent' => min(100, $percent), 'code' => $code, 'date' => date(self::t('M j, Y'), $now + $valid * 86400)]),
-                    [self::t('See subscriptions'), $this->shopUrl()], null, true, true);
+                $this->notifyMail($last[0], 'winback', ['percent' => min(100, $percent), 'code' => $code, 'date' => date(self::t('M j, Y'), $now + $valid * 86400)], $this->shopUrl());
                 self::logAdmin($user, (int) $last[0]->id, 'Come-back code ' . $code . ' sent (' . $percent . '% off)', 'Paywarr');
                 $sent[] = $userId;
             } catch (Throwable $e) {
@@ -458,9 +452,8 @@ trait Loyalty
         $list[] = (int) $friendService->id;
         $target->user->properties()->updateOrCreate(['key' => self::PROP_REFERRALS], ['name' => 'Friends who joined', 'value' => json_encode(array_values(array_unique($list)))]);
         self::logAdmin($target->user, (int) $target->id, 'A friend joined with their code: ' . $months . ' month(s) added, now renews ' . date('M j, Y', strtotime((string) $target->expires_at)), 'Paywarr');
-        $this->notifyCustomer($target, self::t('A friend joined: you got :months', ['months' => $months === 1 ? self::t('1 month') : self::t(':count months', ['count' => $months])]),
-            self::t('Thank you for bringing a friend! :product now renews on :date.', ['product' => (string) ($target->product->name ?? ''), 'date' => date(self::t('M j, Y'), strtotime((string) $target->expires_at))]),
-            [self::t('Invite another friend'), $this->referralPageUrl()]);
+        $this->notifyMail($target, 'friend_joined', ['months' => $months === 1 ? self::t('1 month') : self::t(':count months', ['count' => $months]),
+            'product' => (string) ($target->product->name ?? ''), 'date' => date(self::t('M j, Y'), strtotime((string) $target->expires_at))], $this->referralPageUrl());
 
         return $months;
     }

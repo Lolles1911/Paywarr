@@ -184,17 +184,15 @@ trait MoveToPaid
             }
         }
         $invoice = $this->paidInvoice($service, $discount);
-        $title = self::t('Your free access becomes a subscription');
-        $text = self::t('Your access continues as :product at :price a period. Pay the invoice by :date to keep your user and everything you have watched; unpaid, the access stops then.', [
-            'product' => (string) $service->product->name, 'price' => number_format((float) $service->price, 2) . ' ' . $service->currency_code, 'date' => date(self::t('M j, Y'), $now + $days * 86400)])
-            . ($discount > 0 ? ' ' . self::t('As a welcome, your first invoice is :percent% off.', ['percent' => $discount]) : '');
+        $vars = ['product' => (string) $service->product->name, 'price' => number_format((float) $service->price, 2) . ' ' . $service->currency_code,
+            'date' => date(self::t('M j, Y'), $now + $days * 86400), 'percent' => $discount > 0 ? (string) $discount : ''];
         try {
             $url = route('invoices.show', $invoice);
         } catch (Throwable $e) {
             $url = $this->accountUrl();
         }
         try {
-            $this->forServiceServer($service)->notifyCustomer($service, $title, $text, [self::t('Pay the invoice'), $url]);
+            $this->forServiceServer($service)->notifyMail($service, 'moved_to_paid', $vars, $url);
         } catch (Throwable $e) {
             Log::warning('Wizarr: customer of service ' . $service->id . ' not told about the move to paid: ' . $e->getMessage());
         }
@@ -337,10 +335,7 @@ trait MoveToPaid
                 $url = $this->accountUrl();
             }
             try {
-                $this->forServiceServer($service)->notifyCustomer($service, self::t('Your access stops soon'),
-                    $left === 1 ? self::t('Pay the invoice for :product by tomorrow to keep watching.', ['product' => (string) $service->product->name])
-                        : self::t('Pay the invoice for :product within :count days to keep watching.', ['product' => (string) $service->product->name, 'count' => $left]),
-                    [self::t('Pay the invoice'), $url]);
+                $this->forServiceServer($service)->notifyMail($service, 'pay_soon', ['product' => (string) $service->product->name, 'count' => (string) $left], $url);
                 $sent[] = $serviceId;
             } catch (Throwable $e) {
                 Log::warning('Wizarr: reminder to pay for service ' . $serviceId . ' not sent: ' . $e->getMessage());

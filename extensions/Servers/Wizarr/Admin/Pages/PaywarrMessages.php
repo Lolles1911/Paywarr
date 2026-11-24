@@ -32,9 +32,9 @@ class PaywarrMessages extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'ri-megaphone-line';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Events';
+    protected static string|\UnitEnum|null $navigationGroup = 'Paywarr: Mail';
 
-    protected static ?int $navigationSort = 204;
+    protected static ?int $navigationSort = 353;
 
     protected static ?string $navigationLabel = 'Message customers';
 

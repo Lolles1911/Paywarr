@@ -1032,7 +1032,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/switch/{service} extensions.wizarr.switch', 'POST wizarr/switch/{service} extensions.wizarr.switch',
         'GET wizarr/nps/{user}/{score} extensions.wizarr.nps', 'POST wizarr/nps/{user}/{score} extensions.wizarr.nps', 'GET wizarr/why/{cancellation}/{reason} extensions.wizarr.why',
         'GET wizarr/movie-night extensions.wizarr.party', 'POST wizarr/movie-night extensions.wizarr.party', 'GET wizarr/challenge extensions.wizarr.challenge',
-        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub', 'GET wizarr/poster/{key} extensions.wizarr.poster', 'GET catalog extensions.wizarr.catalog', 'POST wizarr/mail-list extensions.wizarr.mail-list', 'GET wizarr/join/{code} extensions.wizarr.join',
+        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub', 'GET wizarr/poster/{key} extensions.wizarr.poster', 'GET catalog extensions.wizarr.catalog', 'POST wizarr/mail-list extensions.wizarr.mail-list', 'GET wizarr/join/{code} extensions.wizarr.join', 'GET wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off', 'POST wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off.web', 'POST wizarr/mail/off-now/{user}/{kind} extensions.wizarr.mail.off.now',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -3659,6 +3659,68 @@ function mailsTo(string $email): array
     return array_values(array_filter(\Illuminate\Support\Facades\Mail::$sent, fn ($m) => $m['to'] === $email));
 }
 
+test('unsubscribe: one kind at a time from the link in each mail; mails about access always come', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $ext = ext([]);
+    $user = new \App\Models\User('off@example.com');
+    $user->id = 42;
+    $user->properties()->updateOrCreate(['key' => 'paywarr_mail_list'], ['name' => 'List', 'value' => '1']);
+    same([true, true, true, true, true], [$ext->wantsMail($user, 'essential'), $ext->wantsMail($user, 'news'), $ext->wantsMail($user, 'events'), $ext->wantsMail($user, 'reminders'), $ext->wantsMail($user, 'stats')], 'on the list: everything');
+    $W::setMailKind($user, 'reminders', false);
+    $W::setMailKind($user, 'stats', false);
+    same([true, true, false, false], [$ext->wantsMail($user, 'news'), $ext->wantsMail($user, 'events'), $ext->wantsMail($user, 'reminders'), $ext->wantsMail($user, 'stats')], 'reminders and stats off, the rest still on');
+    $W::setMailKind($user, 'reminders', true);
+    same(true, $ext->wantsMail($user, 'reminders'), 'back on');
+    $W::setMailKind($user, 'news', false);
+    same([false, false, true], [$ext->wantsMail($user, 'news'), $ext->wantsMail($user, 'events'), $ext->wantsMail($user, 'essential')], 'off the mail list: no news or events, access mails still');
+    same(false, $ext->sendMail('off@example.com', 'Offer', $ext->mailLayout('Offer', '<p>Hi</p>'), $user, 'news'), 'a news mail is not sent');
+    same(true, $ext->sendMail('off@example.com', 'Your access', $ext->mailLayout('Your access', '<p>Hi</p>'), $user), 'an access mail is');
+    $html = mailsTo('off@example.com')[0]['html'] ?? '';
+    ok(!str_contains($html, 'Unsubscribe') && !str_contains($html, '<!--paywarr-unsubscribe-->'), 'with no unsubscribe line');
+    $W::setMailKind($user, 'news', true);
+    same(true, $ext->sendMail('off@example.com', 'Offer', $ext->mailLayout('Offer', '<p>Hi</p>'), $user, 'news'), 'on again: sent');
+    $html = mailsTo('off@example.com')[1]['html'] ?? '';
+    ok(str_contains($html, 'Unsubscribe from news and offers') && str_contains($html, 'mail.off'), 'with a link to unsubscribe from just that');
+});
+
+test('mail center: every automatic mail in a list; your own words with {placeholders}, or off; a log and the design', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $keep = \App\Models\Property::$rows;
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    foreach ($W::mailCatalog() as $id => $entry) {
+        ok(in_array($entry['kind'], ['essential', 'news', 'events', 'reminders', 'stats'], true) && $entry['name'] !== '' && $entry['about'] !== '', $id . ': a name, a kind and when');
+        if (isset($entry['make'])) {
+            [$title, $text] = $W::mailDefaultWords($id);
+            foreach (array_keys($entry['vars']) as $var) {
+                ok(str_starts_with($var, '_') || str_contains($title . $text, '{' . $var . '}'), $id . ': {' . $var . '} is in the default words');
+            }
+        }
+    }
+    same(['Your trial ends soon', 'Your trial of Plus ends on Dec 1. Continue with a subscription and keep your user and everything you have watched.'],
+        array_slice(array_values($W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])), 0, 2), 'Paywarr\'s words');
+    $W::setMailChoice('trial_ending', ['subject' => '{product} ends {date}', 'text' => "Hi!\n\n{product} ends on {date}."]);
+    same(['Plus ends Dec 1', "Hi!\n\nPlus ends on Dec 1.", 'reminders'], [$W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])['title'], $W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])['text'], $W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])['kind']], 'your words, filled in');
+    $service = wizarrService(71);
+    ok(in_array('mail', ext()->notifyMail($service, 'trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'], 'https://shop'), true), 'sent with your words');
+    $html = mailsTo('customer71@example.com')[0]['html'] ?? '';
+    ok(str_contains($html, 'Plus ends on Dec 1.') && str_contains($html, 'https://shop'), 'your text and the button');
+    same('trial_ending', $W::storeGet('mail_log', [])[0]['mail'] ?? null, 'logged');
+    same(1, $W::mailCountsSince('mail_counts_by_mail', 30)['trial_ending'] ?? 0, 'counted');
+    $W::setMailChoice('trial_ending', ['off' => true]);
+    same([], ext()->notifyMail($service, 'trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'], 'https://shop'), 'switched off: nothing at all');
+    same(false, ext()->sendMail('x@example.com', 'Hi', '<p>Hi</p>', null, 'essential', 'trial_ending'), 'not by sendMail either');
+    $W::setMailChoice('trial_ending', []);
+    same([], $W::mailChoices(), 'back to Paywarr\'s: nothing kept');
+    $W::setMailChoice('welcome', ['subject' => 'Velkommen!']);
+    same('Velkommen!', $W::mailSubject('welcome', 'Welcome'), 'an HTML mail: your subject');
+    same(1, count(array_filter(array_keys($W::mailCatalog()), fn ($id) => $id === 'welcome')), 'welcome is in the list');
+    $W::storePut('mail_design', ['colour' => '#ff0055', 'logo' => 'name', 'footer' => 'WaffleHub ApS, Somewhere 1']);
+    $html = ext()->mailLayout('Hi', '<p>x</p>', ['Go', 'https://x']);
+    ok(str_contains($html, '#ff0055') && str_contains($html, 'WaffleHub ApS, Somewhere 1'), 'the design: colour and the line at the bottom');
+    \App\Models\Property::$rows = $keep;
+});
+
 test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {
     \Illuminate\Support\Facades\Mail::$sent = [];
     $service = wizarrService(60);
@@ -3921,7 +3983,7 @@ test('new on the server: weekly on the chosen day from 17:00, movies and shows e
     same(null, ext($config)->sendNewsIfDue($sunday - 86400, $items, [$customer]), 'not the day');
     same(null, ext($config)->sendNewsIfDue($sunday - 3 * 3600, $items, [$customer]), 'before 17:00');
     same(['discord' => true, 'mails' => 1], ext($config)->sendNewsIfDue($sunday, $items, [$customer, $offList]), 'sent, only to the one on the mail list');
-    ok(str_contains(mailsTo('viewer@example.com')[0]['html'] ?? '', 'Leave the mail list'), 'with a link to leave the list');
+    ok(str_contains(mailsTo('viewer@example.com')[0]['html'] ?? '', 'Afmeld nyheder og tilbud') || str_contains(mailsTo('viewer@example.com')[0]['html'] ?? '', 'Unsubscribe from news and offers'), 'with a link to leave the list');
     same(null, ext($config)->sendNewsIfDue($sunday + 3600, $items, [$customer]), 'once that day');
     $html = mailsTo('viewer@example.com')[0]['html'] ?? '';
     ok(substr_count($html, 'Arrival (2016)') === 1 && str_contains($html, 'Glass Harbor (2024)') && !str_contains($html, 'Pilot'), 'each once, no single episodes');

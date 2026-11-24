@@ -70,9 +70,7 @@ trait Reminders
         $ends = strtotime((string) ($properties[self::PROP_TRIAL_ENDS] ?? '')) ?: null;
         if ($this->truthy($this->config('remind_trial') ?? false) && $this->isTrial($trial) && $ends !== null && $ends > $now && $ends - $now <= 2 * 86400
             && empty($properties[self::PROP_TRIAL_CONVERTED]) && ($properties[self::PROP_REMINDED_TRIAL] ?? '') !== (string) $ends) {
-            $this->notifyCustomer($service, self::t('Your trial ends soon'),
-                self::t('Your trial of :product ends on :date. Continue with a subscription and keep your user and everything you have watched.', ['product' => $product, 'date' => date(self::t('M j, Y'), $ends)]),
-                [self::t('See subscriptions'), $this->shopUrl()]);
+            $this->notifyMail($service, 'trial_ending', ['product' => $product, 'date' => date(self::t('M j, Y'), $ends)], $this->shopUrl());
             $this->setProperty($service, self::PROP_REMINDED_TRIAL, 'Reminded: trial ends', (string) $ends);
             $done[] = 'trial';
         }
@@ -99,9 +97,7 @@ trait Reminders
                     return ['url' => $url, 'code' => (string) ($view[self::PROP_INVITE_CODE] ?? $url), 'server' => $this->grantLabel($properties)];
                 });
                 if ($link !== null) {
-                    $this->notifyCustomer($service, self::t('Your user is waiting'),
-                        self::t('You haven\'t created your user for :product yet. Your personal link is ready; it only takes a minute.', ['product' => $link['server'] !== '' ? $link['server'] : $product]),
-                        [self::t('Create your user'), $link['url']]);
+                    $this->notifyMail($service, 'user_waiting', ['product' => $link['server'] !== '' ? $link['server'] : $product], $link['url']);
                     $this->setProperty($service, self::PROP_REMINDED_LINK, 'Reminded: unused link', $link['code']);
                     $done[] = 'link';
 
@@ -116,9 +112,7 @@ trait Reminders
             && empty($service->subscription_id) && ($properties[self::PROP_REMINDED_RENEWAL] ?? '') !== date('Y-m-d', $expires)) {
             $invoice = $invoiceFor($service);
             if ($invoice) {
-                $this->notifyCustomer($service, self::t('Your subscription renews soon'),
-                    self::t(':product renews on :date. Pay the invoice before then to keep watching without a break.', ['product' => $product, 'date' => date(self::t('M j, Y'), $expires)]),
-                    [self::t('Pay the invoice'), $this->invoiceUrl($invoice)]);
+                $this->notifyMail($service, 'renewal', ['product' => $product, 'date' => date(self::t('M j, Y'), $expires)], $this->invoiceUrl($invoice));
                 $this->setProperty($service, self::PROP_REMINDED_RENEWAL, 'Reminded: renewal', date('Y-m-d', $expires));
                 $done[] = 'renewal';
             }

@@ -1,11 +1,12 @@
 # Admin: the Paywarr pages
 
-Paymenter's admin gets three Paywarr groups: **Paywarr: Customers**
+Paymenter's admin gets four Paywarr groups: **Paywarr: Customers**
 (Customers, Media server users, Invitations, Free access, Moved to paid,
 Streams and sharing), **Paywarr: Events** (Campaigns, Movie nights,
-Challenges, Message customers, Invite a friend, Satisfaction) and **Paywarr:
-Operations** (Server status, Service status, Checks, Libraries per product,
-Help page, Monthly reports, and Paywarr Stats' pages). Below, "Paywarr → X"
+Challenges, Invite a friend, Satisfaction), **Paywarr: Operations** (Server
+status, Service status, Checks, Libraries per product, Help page, Monthly
+reports, and Paywarr Stats' pages) and **Paywarr: Mail** (Automatic mails,
+Recipients, Message customers, Sent, Design). Below, "Paywarr → X"
 is the page X in one of them. Staff who may view services see them; the
 buttons need the right to edit services (products for the libraries). The
 pages ask Wizarr and Silo at most once a minute.
@@ -223,6 +224,29 @@ again.
   month, and once per friend. After the week the friend's user is deleted
   unless they bought a subscription with the same mail address.
 
+## Mail
+
+- **Automatic mails:** every mail Paywarr sends by itself (welcome,
+  reminders, movie nights, anniversaries, the survey and more), with when it
+  goes and what customers unsubscribe from it as. **Preview** shows it with
+  example values (an HTML mail such as the welcome: the last one sent),
+  **Send me a test** mails it to you, **Edit** switches it off or gives it your
+  own subject and text with {placeholders} such as {product} and {date}
+  (blank: Paywarr's words, in the customer's language; your words are used in
+  every language). **Paywarr's words** goes back. Whether a reminder is used at
+  all is still set on the Wizarr server. Welcome switched off: Paymenter's own
+  mail with the link goes instead.
+- **Recipients:** how many are on the mail list and have unsubscribed from
+  each kind, unsubscribes in the last 30 days, and every customer with what
+  they get. **Change** sets it for a customer who asks you.
+- **Message customers:** as before, now in this group.
+- **Sent:** Paywarr's mails in the last 7 and 30 days, per kind, and the last
+  300 (**Open** shows the mail). Paymenter's own Email logs has every mail.
+- **Design:** the colour of buttons and the line under the logo, the logo or
+  the site's name on top, and a line at the bottom (e.g. company name and
+  address), with a preview. ("Mail colour" on the Wizarr server is gone; a
+  colour set there is used until you save one here.)
+
 ## The mail list
 
 News and offers go by mail only to customers on the mail list: they tick
@@ -237,6 +261,24 @@ it; mails about the customer's own subscription (invitations, reminders,
 invoices, outages) always go. The field is a Paymenter custom property
 (Admin → Configuration → Custom Properties, key `paywarr_mail_list`) that
 Paywarr makes; rename it there if you like.
+
+### Unsubscribe
+
+Every mail a customer can do without ends with a line like "You get this
+because you get reminders from us. **Unsubscribe from reminders**". One click
+turns off that kind only (no login), with a button to turn it back on. Mail
+programs show their own Unsubscribe button too (the `List-Unsubscribe` header).
+
+| Kind | Mails |
+|---|---|
+| News and offers | campaigns, "New on the server", Message customers (as marketing), "we'd love to have you back". Unsubscribing takes them off the mail list |
+| Movie nights and challenges | movie night invitations and reminders, challenge prizes (also only on the mail list) |
+| Reminders | trial ending, user not created yet, renewal, unpaid cart, free access about to end, Paywarr Stats' "we miss you" |
+| Stats and surveys | the satisfaction survey, anniversaries, Paywarr Stats' Wrapped |
+
+Mails about access and payment (invitations, access ready, new password, move
+to paid, outages, gifts, pauses, the Discord page) have no such line and always
+go. What a customer turned off is the user property `paywarr_mail_off`.
 
 ## Satisfaction, Invite a friend board, CSV
 

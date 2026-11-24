@@ -3,6 +3,30 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.35.0 (2026-11-24)
+
+- **New admin group Paywarr: Mail:**
+  - **Automatic mails:** all of Paywarr's automatic mails in one list, with
+    a preview, a test to yourself, your own subject and text (with
+    {placeholders}), or switched off.
+  - **Recipients:** who is on the mail list and who unsubscribed from what,
+    and changing it for a customer.
+  - **Sent:** Paywarr's mails per kind, and the last 300.
+  - **Design:** colour, logo or name, and a line at the bottom of every mail
+    (before: "Mail colour" on the Wizarr server).
+  - **Message customers** moved here from Paywarr: Events.
+- Paywarr's mails are marked as sent in Paymenter's Email logs (before:
+  "pending").
+
+- **Unsubscribe in every mail you can do without:** news and offers, movie
+  nights and challenges, reminders, and stats and surveys each end with a link
+  to unsubscribe from just that kind, in one click (no login, with a button to
+  turn it back on). Mail programs' own Unsubscribe button works too
+  (`List-Unsubscribe`). Mails about access and payment always go. See
+  docs/admin.md → Unsubscribe.
+- The weekly "New on the server" mail uses the same line (before: "Leave the
+  mail list").
+
 ## 1.34.4 (2026-11-23)
 
 - **Invite a friend with a link:** each customer has a link to share (with a

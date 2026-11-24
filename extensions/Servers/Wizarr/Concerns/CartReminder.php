@@ -60,9 +60,7 @@ trait CartReminder
                     continue;
                 }
                 $product = (string) ($service->product->name ?? '');
-                $this->notifyCustomer($service, self::t('Forgot something?'),
-                    self::t('Your order of :product is waiting for payment. Pay the invoice and your access is ready a moment later.', ['product' => $product]),
-                    [self::t('Pay the invoice'), $this->invoiceUrl($invoice)], discord: false);
+                $this->notifyMail($service, 'cart', ['product' => $product], $this->invoiceUrl($invoice), discord: false);
                 $this->setProperty($service, self::PROP_CART_REMINDED, 'Reminded of the unpaid order', (string) ($count + 1));
                 $sent[] = (int) $service->id;
             } catch (Throwable $e) {
