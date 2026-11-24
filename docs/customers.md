@@ -274,6 +274,29 @@ as many as there are free seats get "A seat is free"; the shop is open to
 everyone then, so it is first come. 48 hours later, if a seat is still free,
 the next on the list.
 
+## Because you watched
+
+On the My page, after "Continue watching": titles that other customers who
+watched the customer's latest title also watched (most shared first), from
+Tracearr's last 90 days of plays, without what the customer has already seen.
+Only titles on the server. Without Tracearr, or before the customer has watched
+anything, the row isn't there.
+
+## Most wanted
+
+On Requests (Seerr), a title someone has requested that isn't on the server
+yet shows **I want it too**; the start page lists the most wanted. A request
+counts as a vote, and requesting something already requested adds a vote
+instead of an error. You see them under Paywarr → Most wanted.
+
+## The app on the home screen
+
+The client area can be added to a phone's home screen ("Add to Home Screen" in
+Safari, "Install app" in Chrome) and opens as an app, full screen. Icon:
+**App icon** under Settings → Shop (a square PNG, at least 512 x 512), else
+Paymenter's favicon or logo, else the first letter of the site's name. No push
+messages.
+
 ## Languages
 
 Customer texts follow the language Paymenter shows the visitor: the language

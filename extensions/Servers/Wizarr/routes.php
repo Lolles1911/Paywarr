@@ -138,3 +138,8 @@ Route::middleware(['web', 'throttle:60,1'])->get('coming-soon', [Wizarr::class, 
 
 // Save with yearly: switch a monthly subscription to the yearly plan at the next renewal.
 Route::middleware(['web', 'auth', 'throttle:20,1'])->match(['get', 'post'], 'wizarr/yearly', [Wizarr::class, 'yearlyPage'])->name('extensions.wizarr.yearly');
+
+// The client area as an app on the home screen: manifest, icons, service worker.
+Route::middleware(['throttle:120,1'])->get('wizarr/app.webmanifest', [Wizarr::class, 'manifestFile'])->name('extensions.wizarr.manifest');
+Route::middleware(['throttle:120,1'])->get('wizarr/app-icon/{size}', [Wizarr::class, 'appIconFile'])->whereNumber('size')->name('extensions.wizarr.app-icon');
+Route::middleware(['throttle:120,1'])->get('paywarr-sw.js', [Wizarr::class, 'serviceWorkerFile'])->name('extensions.wizarr.sw');

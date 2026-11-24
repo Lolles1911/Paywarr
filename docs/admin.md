@@ -234,6 +234,28 @@ secrets and tokens are kept encrypted. Updating from 1.36 or older moves the
 values from the server(s) here once, by themselves (the first server with a
 value wins).
 
+## Price changes, most wanted
+
+- **Price changes** (Customers): **New price** picks a plan, the new price and a
+  date at least 30 days away. The plan's price changes at once (new customers),
+  everyone on the plan gets "Price change" by mail, and on the date their
+  subscriptions get the new price (with any discount they have), so invoices
+  made from then on use it. **Cancel** before the date puts the plan's price
+  back (customers were told already: send a message if needed).
+- **Most wanted** (Customers): titles requested and not on the server yet, by
+  how many want them. **Added** takes one off the list.
+
+## Updates and backup
+
+- **Updates** (Operations): the installed and newest versions of Paywarr and
+  Paywarr Stats (from GitHub, every 6 hours), what each newer version brings,
+  and the commands for the server. The menu shows a badge when there is one.
+- **Backup** (Operations): **Download a backup** gives Paywarr's own data in one
+  file (settings without keys, secrets and tokens; mail texts and design;
+  campaigns, movie nights, challenges; the waiting list; price changes; the
+  help page; logs). **Restore** puts such a file back; the keys you have now
+  are kept. Customers, subscriptions and invoices are in Paymenter's database.
+
 ## Capacity and the waiting list
 
 **Paywarr → Capacity** (Operations): every media server with seats in use =
