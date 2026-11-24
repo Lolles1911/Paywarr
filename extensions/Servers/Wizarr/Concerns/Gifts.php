@@ -65,10 +65,8 @@ trait Gifts
             $this->setProperty($service, self::PROP_GIFT_CODE, 'Gift code', $code);
             $this->setProperty($service, self::PROP_GIFT_COUPON, 'Gift coupon ID', (string) $id);
             $this->setProperty($service, self::PROP_GIFT_EXPIRES, 'Gift code valid until', (string) $expires);
-            $this->notifyCustomer($service, self::t('Your gift code'),
-                self::t('Thank you! Your gift code is :code. It gives :months of a subscription and can be used once, until :date. Send it to a friend from your subscription, or give it yourself: it is entered under "Coupon" in the cart.',
-                    ['code' => $code, 'months' => $months === 1 ? self::t('1 month') : self::t(':count months', ['count' => $months]), 'date' => date(self::t('M j, Y'), $expires)]),
-                [self::t('Send it to a friend'), $this->giftPageUrl($service)], discord: false);
+            $this->notifyMail($service, 'gift_code', ['code' => $code, 'months' => $months === 1 ? self::t('1 month') : self::t(':count months', ['count' => $months]), 'date' => date(self::t('M j, Y'), $expires)],
+                $this->giftPageUrl($service), discord: false);
             Log::info('Wizarr: gift card service ' . $service->id . ' made code ' . $code . '.');
         }
 

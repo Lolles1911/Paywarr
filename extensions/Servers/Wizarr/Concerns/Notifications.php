@@ -29,7 +29,7 @@ trait Notifications
      * "reminders". $marketing is the older way to say "news". The bell and
      * Discord go as always.
      */
-    public function notifyCustomer(Service $service, string $title, string $text, ?array $button = null, ?string $html = null, bool $discord = true, bool $marketing = false, string $kind = ''): array
+    public function notifyCustomer(Service $service, string $title, string $text, ?array $button = null, ?string $html = null, bool $discord = true, bool $marketing = false, string $kind = '', string $mail = ''): array
     {
         $user = $service->user;
         if (!$user) {
@@ -42,7 +42,7 @@ trait Notifications
         } catch (Throwable $e) {
             Log::warning('Wizarr: notification for user ' . $user->id . ' not created: ' . $e->getMessage());
         }
-        if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html ?? $this->paragraphs($text), $button), $user, $kind ?: ($marketing ? 'news' : 'essential'))) {
+        if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html ?? $this->paragraphs($text), $button), $user, $kind ?: ($marketing ? 'news' : 'essential'), $mail)) {
             $used[] = 'mail';
         }
         if ($discord && $this->sendDiscordMessage($user, $title, $text, $button)) {
@@ -59,8 +59,11 @@ trait Notifications
      * Gmail/Outlook's own button).
      */
     /** $who: the customer (or their ID), for the log and their mail choices. */
-    public function sendMail(string $to, string $subject, string $html, $who = null, string $kind = 'essential'): bool
+    public function sendMail(string $to, string $subject, string $html, $who = null, string $kind = 'essential', string $mail = ''): bool
     {
+        if (self::mailIsOff($mail)) {
+            return false;
+        }
         $user = is_object($who) ? $who : null;
         $userId = $user ? (int) $user->id : ($who ? (int) $who : null);
         if ($to === '' || (function_exists('config') && config('settings.mail_disable'))) {
@@ -76,9 +79,10 @@ trait Notifications
             $offNow = $user ? $this->unsubscribeUrl($user, $kind, true) : null;
         }
         $html = str_replace(self::MAIL_FOOTER_SLOT, $off ? $this->unsubscribeFooter($kind, $off) : '', $html);
+        $log = null;
         try {
             if (class_exists(\App\Models\EmailLog::class)) {
-                \App\Models\EmailLog::create(['user_id' => $userId, 'subject' => $subject, 'to' => $to, 'body' => $html]);
+                $log = \App\Models\EmailLog::create(['user_id' => $userId, 'subject' => $subject, 'to' => $to, 'body' => $html]);
             }
         } catch (Throwable $e) {
             // The log is only for you; the mail still goes.
@@ -91,6 +95,12 @@ trait Notifications
                     $mail->getSymfonyMessage()->getHeaders()->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
                 }
             });
+            try {
+                $log?->update(['status' => 'sent', 'sent_at' => now()]);
+            } catch (Throwable $e) {
+                // Only the log.
+            }
+            self::logMail($to, $subject, $kind, $mail, $userId, $log ? (int) $log->id : null);
 
             return true;
         } catch (Throwable $e) {
@@ -124,9 +134,10 @@ trait Notifications
     {
         $site = e((string) ((function_exists('config') ? (config('settings.company_name') ?: config('app.name')) : '') ?: 'Paywarr'));
         $accent = self::mailAccent();
+        $design = self::mailDesign();
         $logo = '';
         try {
-            $file = (string) (config('settings.logo_dark') ?: config('settings.logo') ?: '');
+            $file = $design['logo'] === 'name' ? '' : (string) (config('settings.logo_dark') ?: config('settings.logo') ?: '');
             if ($file !== '') {
                 $logo = '<img src="' . e(url(\Illuminate\Support\Facades\Storage::url($file))) . '" alt="' . $site . '" height="32" style="height:32px;width:auto;border:0;display:block">';
             }
@@ -158,13 +169,16 @@ trait Notifications
             . '<h1 style="font-size:22px;line-height:1.3;margin:0 0 14px;color:#14101f">' . e($title) . '</h1>' . $body . $buttonHtml . '</td></tr>'
             . '<tr><td style="padding:18px 8px 0;color:#8f87a8;font-size:12px;line-height:1.6;text-align:center">'
             . ($footer !== '' ? '<div style="margin-bottom:8px">' . $footer . '</div>' : '') . self::MAIL_FOOTER_SLOT
-            . implode(' &nbsp;·&nbsp; ', $links) . '<br>' . $site . '</td></tr>'
+            . implode(' &nbsp;·&nbsp; ', $links) . '<br>' . (trim($design['footer']) !== '' ? nl2br(e(trim($design['footer']))) : $site) . '</td></tr>'
             . '</table></td></tr></table></body></html>';
     }
 
-    /** The colour of buttons and the line under the logo in mails: "Mail colour" on the Wizarr server, else violet. */
+    /** The colour of buttons and the line under the logo in mails: Mail → Design, else the older "Mail colour" on the Wizarr server, else violet. */
     public static function mailAccent(): string
     {
+        if (preg_match('/^#[0-9a-fA-F]{6}$/', $colour = trim((string) self::mailDesign()['colour']))) {
+            return $colour;
+        }
         try {
             foreach (\App\Models\Server::where('extension', 'Wizarr')->with('settings')->get() as $server) {
                 $colour = trim((string) (ExtensionHelper::settingsToArray($server->settings)['mail_colour'] ?? ''));

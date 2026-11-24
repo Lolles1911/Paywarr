@@ -1,11 +1,12 @@
 # Admin: the Paywarr pages
 
-Paymenter's admin gets three Paywarr groups: **Paywarr: Customers**
+Paymenter's admin gets four Paywarr groups: **Paywarr: Customers**
 (Customers, Media server users, Invitations, Free access, Moved to paid,
 Streams and sharing), **Paywarr: Events** (Campaigns, Movie nights,
-Challenges, Message customers, Invite a friend, Satisfaction) and **Paywarr:
-Operations** (Server status, Service status, Checks, Libraries per product,
-Help page, Monthly reports, and Paywarr Stats' pages). Below, "Paywarr → X"
+Challenges, Invite a friend, Satisfaction), **Paywarr: Operations** (Server
+status, Service status, Checks, Libraries per product, Help page, Monthly
+reports, and Paywarr Stats' pages) and **Paywarr: Mail** (Automatic mails,
+Recipients, Message customers, Sent, Design). Below, "Paywarr → X"
 is the page X in one of them. Staff who may view services see them; the
 buttons need the right to edit services (products for the libraries). The
 pages ask Wizarr and Silo at most once a minute.
@@ -222,6 +223,29 @@ again.
   then have **Friend pass** in their menu: a free week for a friend, once a
   month, and once per friend. After the week the friend's user is deleted
   unless they bought a subscription with the same mail address.
+
+## Mail
+
+- **Automatic mails:** every mail Paywarr sends by itself (welcome,
+  reminders, movie nights, anniversaries, the survey and more), with when it
+  goes and what customers unsubscribe from it as. **Preview** shows it with
+  example values (an HTML mail such as the welcome: the last one sent),
+  **Send me a test** mails it to you, **Edit** switches it off or gives it your
+  own subject and text with {placeholders} such as {product} and {date}
+  (blank: Paywarr's words, in the customer's language; your words are used in
+  every language). **Paywarr's words** goes back. Whether a reminder is used at
+  all is still set on the Wizarr server. Welcome switched off: Paymenter's own
+  mail with the link goes instead.
+- **Recipients:** how many are on the mail list and have unsubscribed from
+  each kind, unsubscribes in the last 30 days, and every customer with what
+  they get. **Change** sets it for a customer who asks you.
+- **Message customers:** as before, now in this group.
+- **Sent:** Paywarr's mails in the last 7 and 30 days, per kind, and the last
+  300 (**Open** shows the mail). Paymenter's own Email logs has every mail.
+- **Design:** the colour of buttons and the line under the logo, the logo or
+  the site's name on top, and a line at the bottom (e.g. company name and
+  address), with a preview. ("Mail colour" on the Wizarr server is gone; a
+  colour set there is used until you save one here.)
 
 ## The mail list
 

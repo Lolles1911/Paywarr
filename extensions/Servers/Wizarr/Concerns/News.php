@@ -124,7 +124,7 @@ trait News
         $recipients ??= User::whereHas('services', fn ($query) => $query->where('status', 'active')->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr')))
             ->whereDoesntHave('properties', fn ($query) => $query->where('key', self::PROP_NEWS_OFF))->get();
         $recipients = array_filter(is_array($recipients) ? $recipients : iterator_to_array($recipients), fn ($user) => $this->onMailList($user));
-        $title = self::t('New on the server this week');
+        $title = self::mailSubject('news', self::t('New on the server this week'));
         $section = function (string $heading, array $titles) {
             return $titles ? '<h2 style="font-size:16px;margin:18px 0 8px">' . e($heading) . '</h2><ul style="margin:0 0 12px;padding-left:20px">'
                 . implode('', array_map(fn ($t) => '<li style="margin-bottom:4px">' . e($t) . '</li>', array_slice($titles, 0, 40))) . '</ul>' : '';
@@ -133,7 +133,7 @@ trait News
             . $section(self::t('Movies'), $lists['movie']) . $section(self::t('Shows'), $lists['show']);
         $sent = 0;
         foreach ($recipients as $user) {
-            if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body, [self::t('Start watching'), $this->accountUrl()]), $user, 'news')) {
+            if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body, [self::t('Start watching'), $this->accountUrl()]), $user, 'news', 'news')) {
                 $sent++;
             }
         }

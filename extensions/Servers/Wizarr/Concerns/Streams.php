@@ -170,11 +170,7 @@ trait Streams
 
         if ((int) ($properties[self::PROP_STREAMS_WARNED] ?? 0) < $now - 86400) {
             $this->setProperty($service, self::PROP_STREAMS_WARNED, 'Warned about streams', (string) $now);
-            $this->notifyCustomer($service, self::t('Too many streams at once'),
-                $stop
-                    ? self::t(':product allows :count stream(s) at the same time, and :n were playing, so the newest was stopped. Is someone else using your account? Change your password, or choose a subscription with more streams.', ['product' => (string) ($service->product->name ?? ''), 'count' => $max, 'n' => count($streams)])
-                    : self::t(':product allows :count stream(s) at the same time, and :n were playing. Is someone else using your account? Change your password, or choose a subscription with more streams.', ['product' => (string) ($service->product->name ?? ''), 'count' => $max, 'n' => count($streams)]),
-                [self::t('See subscriptions'), $this->shopUrl()]);
+            $this->notifyMail($service, 'streams', ['product' => (string) ($service->product->name ?? ''), 'count' => $max, 'n' => count($streams), '_stopped' => $stop ? '1' : ''], $this->shopUrl());
         }
 
         return count($streams) - $max;

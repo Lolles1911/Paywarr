@@ -524,11 +524,16 @@ trait Discord
     /** Tells the customer, in Paymenter (the bell) and by mail. */
     private function notifyDiscordMembership($user, string $kind, array $replace): void
     {
-        [$title, $body] = match ($kind) {
-            'warning' => [self::t('You have left our Discord'), self::t('Your subscription :service needs you on our Discord. Join again within :hours hours, or your access will be paused.', $replace)],
-            'suspended' => [self::t('Your access is paused'), self::t('You are no longer on our Discord, so :service is paused. Join our Discord again and it opens by itself.', $replace)],
-            default => [self::t('Your access is back'), self::t('Welcome back on our Discord. :service is open again.', $replace)],
+        $id = match ($kind) {
+            'warning' => 'discord_left',
+            'suspended' => 'discord_paused',
+            default => 'discord_back',
         };
+        $parts = self::mailParts($id, $replace);
+        if (!$parts) {
+            return;
+        }
+        [$title, $body] = [$parts['title'], $parts['text']];
         $url = function_exists('route') ? route('extensions.wizarr.discord') : null;
         try {
             \App\Models\Notification::create(['user_id' => $user->id, 'title' => $title, 'body' => $body, 'url' => $url]);
@@ -536,7 +541,7 @@ trait Discord
             Log::warning('Wizarr: notification for user ' . $user->id . ' not created: ' . $e->getMessage());
         }
         try {
-            $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $this->paragraphs($body), $url ? [self::t('Open the Discord page'), $url] : null), (int) $user->id);
+            $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $this->paragraphs($body), $url ? [$parts['button'], $url] : null), (int) $user->id, 'essential', $id);
         } catch (Throwable $e) {
             Log::warning('Wizarr: mail to user ' . $user->id . ' not sent: ' . $e->getMessage());
         }

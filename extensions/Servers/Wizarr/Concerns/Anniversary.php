@@ -99,9 +99,7 @@ trait Anniversary
             $gift = self::t('As a thank-you, here is :percent% off a period: the code :code, until :date.', ['percent' => min(100, $amount), 'code' => $code, 'date' => date(self::t('M j, Y'), $now + 60 * 86400)]);
         }
         $name = trim((string) ($user->first_name ?? ''));
-        $this->notifyCustomer($service, self::t('Thank you for :period with us', ['period' => $period]),
-            ($name !== '' ? self::t('Hi :name,', ['name' => $name]) . "\n\n" : '') . self::t('Today it is :period since you joined. Thank you for watching with us!', ['period' => $period]) . ($gift !== '' ? "\n\n" . $gift : ''),
-            [self::t('See your subscription'), $this->accountUrl()], kind: 'stats');
+        $this->notifyMail($service, 'anniversary', ['name' => $name, 'period' => $period, 'gift' => $gift], $this->accountUrl());
         self::logAdmin($user, (int) $service->id, 'Anniversary (' . $months . ' months): ' . ($reward === 'days' ? $amount . ' days added' : ($reward === 'coupon' ? $amount . '% code' : 'a thank-you')), 'Paywarr');
     }
 

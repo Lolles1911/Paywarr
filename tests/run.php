@@ -3684,6 +3684,43 @@ test('unsubscribe: one kind at a time from the link in each mail; mails about ac
     ok(str_contains($html, 'Unsubscribe from news and offers') && str_contains($html, 'mail.off'), 'with a link to unsubscribe from just that');
 });
 
+test('mail center: every automatic mail in a list; your own words with {placeholders}, or off; a log and the design', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    $keep = \App\Models\Property::$rows;
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    foreach ($W::mailCatalog() as $id => $entry) {
+        ok(in_array($entry['kind'], ['essential', 'news', 'events', 'reminders', 'stats'], true) && $entry['name'] !== '' && $entry['about'] !== '', $id . ': a name, a kind and when');
+        if (isset($entry['make'])) {
+            [$title, $text] = $W::mailDefaultWords($id);
+            foreach (array_keys($entry['vars']) as $var) {
+                ok(str_starts_with($var, '_') || str_contains($title . $text, '{' . $var . '}'), $id . ': {' . $var . '} is in the default words');
+            }
+        }
+    }
+    same(['Your trial ends soon', 'Your trial of Plus ends on Dec 1. Continue with a subscription and keep your user and everything you have watched.'],
+        array_slice(array_values($W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])), 0, 2), 'Paywarr\'s words');
+    $W::setMailChoice('trial_ending', ['subject' => '{product} ends {date}', 'text' => "Hi!\n\n{product} ends on {date}."]);
+    same(['Plus ends Dec 1', "Hi!\n\nPlus ends on Dec 1.", 'reminders'], [$W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])['title'], $W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])['text'], $W::mailParts('trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'])['kind']], 'your words, filled in');
+    $service = wizarrService(71);
+    ok(in_array('mail', ext()->notifyMail($service, 'trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'], 'https://shop'), true), 'sent with your words');
+    $html = mailsTo('customer71@example.com')[0]['html'] ?? '';
+    ok(str_contains($html, 'Plus ends on Dec 1.') && str_contains($html, 'https://shop'), 'your text and the button');
+    same('trial_ending', $W::storeGet('mail_log', [])[0]['mail'] ?? null, 'logged');
+    same(1, $W::mailCountsSince('mail_counts_by_mail', 30)['trial_ending'] ?? 0, 'counted');
+    $W::setMailChoice('trial_ending', ['off' => true]);
+    same([], ext()->notifyMail($service, 'trial_ending', ['product' => 'Plus', 'date' => 'Dec 1'], 'https://shop'), 'switched off: nothing at all');
+    same(false, ext()->sendMail('x@example.com', 'Hi', '<p>Hi</p>', null, 'essential', 'trial_ending'), 'not by sendMail either');
+    $W::setMailChoice('trial_ending', []);
+    same([], $W::mailChoices(), 'back to Paywarr\'s: nothing kept');
+    $W::setMailChoice('welcome', ['subject' => 'Velkommen!']);
+    same('Velkommen!', $W::mailSubject('welcome', 'Welcome'), 'an HTML mail: your subject');
+    same(1, count(array_filter(array_keys($W::mailCatalog()), fn ($id) => $id === 'welcome')), 'welcome is in the list');
+    $W::storePut('mail_design', ['colour' => '#ff0055', 'logo' => 'name', 'footer' => 'WaffleHub ApS, Somewhere 1']);
+    $html = ext()->mailLayout('Hi', '<p>x</p>', ['Go', 'https://x']);
+    ok(str_contains($html, '#ff0055') && str_contains($html, 'WaffleHub ApS, Somewhere 1'), 'the design: colour and the line at the bottom');
+    \App\Models\Property::$rows = $keep;
+});
+
 test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {
     \Illuminate\Support\Facades\Mail::$sent = [];
     $service = wizarrService(60);

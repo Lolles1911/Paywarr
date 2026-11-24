@@ -138,7 +138,11 @@ trait MailList
         }
         $on = request()->isMethod('post') && request()->input('on') === '1';
         $form = URL::signedRoute('extensions.wizarr.mail.off.web', ['user' => $user->id, 'kind' => $kind]);
+        $was = $this->wantsMail($user, $kind);
         self::setMailKind($user, $kind, $on);
+        if ($was && !$on) {
+            self::countMail('mail_unsubs', $kind);
+        }
         if (request()->isMethod('post') && !request()->has('on')) {
             return response('OK');
         }

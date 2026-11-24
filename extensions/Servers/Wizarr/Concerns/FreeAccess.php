@@ -325,14 +325,13 @@ trait FreeAccess
     {
         $rules = self::freeRules();
         if ($action === 'warn') {
-            $title = self::t('Still watching?');
-            $text = self::t('You haven\'t watched anything for :days days. Your free access ends on :date unless you watch something before then; just start anything and it stays.', [
-                'days' => $row['idle_days'], 'date' => date(self::t('M j, Y'), time() + $rules['warn_days'] * 86400)]);
+            $vars = ['days' => $row['idle_days'], 'date' => date(self::t('M j, Y'), time() + $rules['warn_days'] * 86400)];
             if ($row['kind'] === 'subscription') {
-                return $this->forServiceServer($row['service'])->notifyCustomer($row['service'], $title, $text, [self::t('Start watching'), $this->accountUrl()], null, true, false, 'reminders') !== [];
+                return $this->forServiceServer($row['service'])->notifyMail($row['service'], 'still_watching', $vars, $this->accountUrl()) !== [];
             }
+            $parts = self::mailParts('still_watching', $vars);
 
-            return $row['email'] !== '' && $this->sendMail($row['email'], $title, $this->mailLayout($title, $this->paragraphs($text)));
+            return $parts && $row['email'] !== '' && $this->sendMail($row['email'], $parts['title'], $this->mailLayout($parts['title'], $this->paragraphs($parts['text'])), null, 'essential', 'still_watching');
         }
         if ($row['kind'] === 'subscription') {
             $service = $row['service'];
