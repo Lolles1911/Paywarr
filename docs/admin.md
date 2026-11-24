@@ -97,7 +97,7 @@ doesn't go unnoticed for days. `systemctl restart paymenter` starts it again;
 
 ## Streams and sharing
 
-With **Tracearr URL** and **API key** on the Wizarr server (Tracearr:
+With **Tracearr URL** and **API key** under Paywarr → Settings (Tracearr:
 Settings → Data & API → API), Paywarr knows what is streaming:
 
 - **Max streams at once** on a product: checked every minute. More at the same
@@ -219,10 +219,20 @@ again.
   month), credit (Paymenter uses it on the next invoice) and/or a Discord role.
   Counted hourly from Tracearr and Silo; a play counts after 2 minutes, a movie
   or episode once. At the end the prizes are given and the result posted.
-- **Friend pass**: tick **Friend pass** on the Wizarr server. Paying customers
+- **Friend pass**: tick **Friend pass** under Paywarr → Settings. Paying customers
   then have **Friend pass** in their menu: a free week for a friend, once a
   month, and once per friend. After the week the friend's user is deleted
   unless they bought a subscription with the same mail address.
+
+## Settings
+
+**Paywarr → Settings** (Operations): every setting for the whole shop, in
+tabs: Shop, Reminders, Loyalty, Discord, Connections (Seerr, Tracearr, Sonarr,
+Radarr) and Alerts and clean-up. The Wizarr server under Servers keeps only how
+Paymenter reaches Wizarr or Silo (address, public address, API key). Keys,
+secrets and tokens are kept encrypted. Updating from 1.36 or older moves the
+values from the server(s) here once, by themselves (the first server with a
+value wins).
 
 ## Capacity and the waiting list
 
@@ -274,7 +284,7 @@ server**.
   own subject and text with {placeholders} such as {product} and {date}
   (blank: Paywarr's words, in the customer's language; your words are used in
   every language). **Paywarr's words** goes back. Whether a reminder is used at
-  all is still set on the Wizarr server. Welcome switched off: Paymenter's own
+  all is still set under Paywarr → Settings. Welcome switched off: Paymenter's own
   mail with the link goes instead.
 - **Recipients:** how many are on the mail list and have unsubscribed from
   each kind, unsubscribes in the last 30 days, and every customer with what
@@ -284,7 +294,7 @@ server**.
   300 (**Open** shows the mail). Paymenter's own Email logs has every mail.
 - **Design:** the colour of buttons and the line under the logo, the logo or
   the site's name on top, and a line at the bottom (e.g. company name and
-  address), with a preview. ("Mail colour" on the Wizarr server is gone; a
+  address), with a preview. ("Mail colour" is gone from the Wizarr server; a
   colour set there is used until you save one here.)
 
 ## The mail list
@@ -322,7 +332,7 @@ go. What a customer turned off is the user property `paywarr_mail_off`.
 
 ## Satisfaction, Invite a friend board, CSV
 
-- **Satisfaction** (with **Satisfaction survey** on the Wizarr server): after a
+- **Satisfaction** (with **Satisfaction survey** under Paywarr → Settings): after a
   month as a paying customer and every half year after, a mail asks "How likely
   are you to recommend us?" (0-10, one click, then a comment); customers who
   cancel are asked why (one click). The page shows the NPS, the answers, and

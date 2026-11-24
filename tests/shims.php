@@ -452,6 +452,13 @@ namespace Illuminate\Support\Facades {
             return true;
         }
 
+        public static function forever($key, $value): bool
+        {
+            self::$store[$key] = $value;
+
+            return true;
+        }
+
         public static function forget($key): bool
         {
             unset(self::$store[$key]);

@@ -153,6 +153,6 @@ trait Cleanup
     {
         $server = Server::with('settings')->find($serverId);
 
-        return $server ? new static(\App\Helpers\ExtensionHelper::settingsToArray($server->settings)) : $this;
+        return $server ? new static(\App\Helpers\self::serverSettings($server)) : $this;
     }
 }

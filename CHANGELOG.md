@@ -3,6 +3,17 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.37.0 (2026-11-25)
+
+- **Paywarr → Settings:** everything for the whole shop now has its own page
+  in admin (Paywarr: Operations), in tabs: Shop, Reminders, Loyalty, Discord,
+  Connections and Alerts and clean-up. The Wizarr server in Paymenter keeps
+  only the connection (Wizarr or Silo, addresses, API key); it went from 56
+  fields to 4.
+- Your settings are moved there by themselves at the update; nothing to type
+  again. Keys, secrets and tokens are kept encrypted.
+- Paywarr Stats 1.11.6 reads Paywarr's Tracearr from the new page.
+
 ## 1.36.0 (2026-11-25)
 
 For customers:

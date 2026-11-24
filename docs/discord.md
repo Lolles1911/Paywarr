@@ -51,7 +51,7 @@ filled in.
 
 ## Customers who leave the Discord
 
-Tick **Suspend customers who leave the Discord** on the Wizarr server, and
+Tick **Suspend customers who leave the Discord** under Paywarr → Settings, and
 subscriptions to products with **Require Discord membership** follow the
 membership after purchase too. Paywarr checks every hour:
 
@@ -104,7 +104,7 @@ can insert it.
 
 ## Shop for Discord members only
 
-Tick **Only Discord members can see the shop** on the Wizarr server. Categories,
+Tick **Only Discord members can see the shop** under Paywarr → Settings. Categories,
 products and the cart then require the customer to be logged in, have
 connected Discord, and be a member of your server:
 
@@ -180,7 +180,7 @@ Customers can ask the bot, and only they see the answer:
 
 To switch them on: in the [Discord developer portal](https://discord.com/developers/applications),
 your application → **General Information**: copy the **Public Key** into
-**Discord application: Public key** on the Wizarr server, and set
+**Discord application: Public key** under Paywarr → Settings, and set
 **Interactions Endpoint URL** to `https://your-paymenter/wizarr/discord/interactions`
 (Discord checks it when you save). Paywarr registers the commands on your
 Discord server within the hour. Customers need to have connected Discord

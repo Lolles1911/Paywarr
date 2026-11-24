@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.36.0',
+    version: '1.37.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -106,6 +106,7 @@ class Wizarr extends Server
     use Concerns\ComingSoon;
     use Concerns\Yearly;
     use Concerns\AtRisk;
+    use Concerns\Settings;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -267,7 +268,18 @@ class Wizarr extends Server
      | Configuration
      * ----------------------------------------------------------------- */
 
+    /** The Wizarr server in Paymenter: only how to reach Wizarr or Silo. The rest is under Paywarr → Settings. */
     public function getConfig($values = []): array
+    {
+        $fields = array_values(array_filter($this->allConfigFields(), fn ($f) => in_array($f['name'], self::CONNECTION_KEYS, true)));
+        $fields[] = ['name' => 'everything_else', 'label' => 'Admin -> Paywarr: Operations -> Settings', 'type' => 'placeholder',
+            'description' => 'Discord, Seerr, Tracearr, Sonarr/Radarr, reminders, events and the rest are set there, for the whole shop.'];
+
+        return $fields;
+    }
+
+    /** Every setting's field (Paymenter's format): the connection here, the rest on Paywarr → Settings. */
+    public function allConfigFields(): array
     {
         return [
             [
@@ -945,6 +957,8 @@ class Wizarr extends Server
     {
         require __DIR__ . '/routes.php';
         View::addNamespace('wizarr', __DIR__ . '/resources/views');
+        // Once: the shop-wide settings from the server(s) to Paywarr → Settings.
+        self::migrateSettings();
 
         // A line on top of the admin dashboard when customers or servers need a look.
         if (class_exists(\Filament\Support\Facades\FilamentView::class) && class_exists(\App\Admin\Pages\Dashboard::class)) {

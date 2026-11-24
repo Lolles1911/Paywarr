@@ -742,7 +742,7 @@ trait ClientArea
                 continue;
             }
             // That service's own server settings, not the first server's.
-            $extension = new static(ExtensionHelper::settingsToArray($server->settings));
+            $extension = new static(self::serverSettings($server));
             $state = $extension->liveBannerState($service, $service->properties->pluck('value', 'key')->all());
             if (!in_array($state['state'], ['none', 'done'], true)) {
                 return response()->json($state);

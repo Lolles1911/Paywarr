@@ -45,7 +45,7 @@ trait Streams
         }
         try {
             foreach (\App\Models\Server::where('extension', 'Wizarr')->with('settings')->get() as $server) {
-                $ext = new static(ExtensionHelper::settingsToArray($server->settings));
+                $ext = new static(self::serverSettings($server));
                 if ($ext->tracearrConfigured()) {
                     return $ext->tracearr();
                 }

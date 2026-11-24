@@ -52,7 +52,7 @@ trait Loyalty
         }
         try {
             foreach (\App\Models\Server::where('extension', 'Wizarr')->with('settings')->get() as $server) {
-                $settings = ExtensionHelper::settingsToArray($server->settings);
+                $settings = self::serverSettings($server);
                 if (trim((string) ($settings[$key] ?? '')) !== '') {
                     return new static($settings);
                 }

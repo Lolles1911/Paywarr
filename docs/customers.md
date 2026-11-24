@@ -87,7 +87,7 @@ again, and the actual error is written to Paymenter's log.
 
 ## Pausing
 
-With **Customers may pause: times a year** set on the Wizarr server, active
+With **Customers may pause: times a year** set under Paywarr → Settings, active
 subscriptions (not trials) get **Pause subscription**. The customer chooses
 how long (up to **Longest pause (days)**, 30 by default): access is switched
 off, the renewal date moves as many days, and their user and history stay.
@@ -171,7 +171,7 @@ is made (at most 7 days).
 
 ## Unpaid orders
 
-With **Unpaid order: remind after (hours)** on the Wizarr server, an order
+With **Unpaid order: remind after (hours)** under Paywarr → Settings, an order
 whose first invoice is unpaid gets one mail with the link to pay (and a second
 with **remind again after (hours)**). Orders older than a week are left alone.
 
@@ -197,7 +197,7 @@ server with their user and **Open** (or **Create your user**), and shortcuts.
 
 ## The selection for visitors
 
-With **Show the selection to visitors** on the Wizarr server, the front page
+With **Show the selection to visitors** under Paywarr → Settings, the front page
 gets a row of posters ("Something for everyone") and **See the whole
 selection** opens `/catalog`: movies and shows apart, posters only (no titles
 or search), and **See subscriptions**. The posters are what's new and popular
@@ -249,7 +249,7 @@ passwords are the customer's own Plex account). At most 6 a hour.
 
 ## Coming soon
 
-With Sonarr and/or Radarr on the Wizarr server (URL and API key, read only),
+With Sonarr and/or Radarr under Paywarr → Settings (URL and API key, read only),
 **Coming soon** (`/coming-soon`, and under My) shows new episodes and movies
 due in the next 30 days, per day with posters: Sonarr's air dates (one entry
 per show and day, "New show" / "New season" on a first episode), and Radarr's

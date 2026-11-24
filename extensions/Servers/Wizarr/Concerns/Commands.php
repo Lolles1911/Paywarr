@@ -85,7 +85,7 @@ trait Commands
         $candidates = [$this];
         try {
             foreach (\App\Models\Server::where('extension', 'Wizarr')->with('settings')->get() as $server) {
-                $candidates[] = new static(ExtensionHelper::settingsToArray($server->settings));
+                $candidates[] = new static(self::serverSettings($server));
             }
         } catch (Throwable $e) {
             // Only this one then.
@@ -276,7 +276,7 @@ trait Commands
             $done = false;
             try {
                 foreach (\App\Models\Server::where('extension', 'Wizarr')->with('settings')->get() as $server) {
-                    $done = (new static(ExtensionHelper::settingsToArray($server->settings)))->registerDiscordCommandsIfNeeded(false) || $done;
+                    $done = (new static(self::serverSettings($server)))->registerDiscordCommandsIfNeeded(false) || $done;
                 }
             } catch (Throwable $e) {
                 return $this->registerDiscordCommandsIfNeeded(false);
