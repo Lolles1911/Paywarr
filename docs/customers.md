@@ -239,6 +239,41 @@ the menu on a phone):
 there too. Paymenter shows them as plain links; how they look is up to the
 theme.
 
+## My devices
+
+**My → My devices** (`/wizarr/devices`): what plays on the customer's users
+right now, with **Stop**; the devices used in the last 30 days (device, app,
+last play, plays), from Tracearr; and **Choose a new password**, which opens
+Wizarr's page to set a new password for Jellyfin and Emby users (Plex
+passwords are the customer's own Plex account). At most 6 a hour.
+
+## Coming soon
+
+With Sonarr and/or Radarr on the Wizarr server (URL and API key, read only),
+**Coming soon** (`/coming-soon`, and under My) shows new episodes and movies
+due in the next 30 days, per day with posters: Sonarr's air dates (one entry
+per show and day, "New show" / "New season" on a first episode), and Radarr's
+digital (else disc) release, so cinema-only dates are left out. Nothing that is
+already on the server. With **Coming soon for visitors**, the front page gets a
+row for the next two weeks and visitors can open the page too.
+
+## Save with yearly
+
+A customer paying monthly (or every few months), not paid automatically, whose
+product has a **yearly plan** in Paymenter (1 year, or 12 months) that is
+cheaper, sees **Save with yearly** under My and on the My page: the yearly
+price, what they pay now in a year, and the saving. **Switch to yearly** changes
+nothing now: the next renewal invoice (or the one already waiting) is for a
+year. Until that invoice is paid they can press **Keep paying monthly**.
+
+## Waiting list
+
+When a product is sold out (Paywarr → Capacity), its page shows **Sold out right
+now** with **Join the waiting list** (an email for visitors). When seats open,
+as many as there are free seats get "A seat is free"; the shop is open to
+everyone then, so it is first come. 48 hours later, if a seat is still free,
+the next on the list.
+
 ## Languages
 
 Customer texts follow the language Paymenter shows the visitor: the language

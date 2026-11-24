@@ -859,6 +859,12 @@ namespace Illuminate\Support\Facades {
             return $this->add('POST', $uri, $action);
         }
 
+        /** Route::match(['get', 'post'], ...): one route here, listed as "GET|POST". */
+        public function match(array $methods, $uri, $action): RegisteredRoute
+        {
+            return $this->add(strtoupper(implode('|', $methods)), $uri, $action);
+        }
+
         public function add(string $method, string $uri, $action): RegisteredRoute
         {
             // Laravel stores route URIs without leading or trailing slashes.

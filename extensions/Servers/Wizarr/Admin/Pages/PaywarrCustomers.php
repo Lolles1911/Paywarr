@@ -528,20 +528,57 @@ class PaywarrCustomers extends Page implements HasTable
                     $this->bulk('bulkNewLink', 'Allow a new link', 'ri-link', fn (Wizarr $wizarr, Service $service) => $wizarr->adminAllowNewLink($service)),
                     $this->bulk('bulkInvite', 'New invitation (mailed)', 'ri-mail-send-line', fn (Wizarr $wizarr, Service $service) => $wizarr->adminNewInvitation($service, true)),
                     $this->bulk('bulkReinvite', 'Re-invite missing users (mailed)', 'ri-user-received-line', fn (Wizarr $wizarr, Service $service) => $wizarr->adminReinvite($service, true)),
+                    $this->bulk('bulkDays', 'Give extra days', 'ri-calendar-check-line', fn (Wizarr $wizarr, Service $service, array $data) => $wizarr->adminGiveDays($service, (int) $data['days'], (bool) $data['tell']))
+                        ->modalDescription('Adds the days to each subscription (a trial gets a longer trial). With "Tell them", the customer gets "Extra days" (Mail → Automatic mails).')
+                        ->schema([TextInput::make('days')->label('Days')->integer()->minValue(1)->maxValue(366)->default(7)->required(), Toggle::make('tell')->label('Tell them')->default(true)]),
+                    BulkAction::make('bulkMessage')->label('Send a message')->icon('ri-send-plane-line')->modalWidth('2xl')
+                        ->schema(PaywarrMessages::messageFields(false))->modalSubmitActionLabel('Send')
+                        ->action(function (Collection $records, array $data) {
+                            $sent = [];
+                            foreach ($records->pluck('user_id')->unique() as $userId) {
+                                try {
+                                    PaywarrMessages::send('user:' . $userId, $data);
+                                    $sent[] = $userId;
+                                } catch (Throwable $e) {
+                                    report($e);
+                                }
+                            }
+                            Notification::make()->title('Sent to ' . count($sent) . ' customer(s)')->success()->send();
+                        })->deselectRecordsAfterCompletion(),
+                    $this->bulk('bulkServers', 'Change media server', 'ri-swap-line', fn (Wizarr $wizarr, Service $service, array $data) => $wizarr->adminChangeServers($service, $data['servers']))
+                        ->modalDescription('Each selected subscription gets these media servers: new ones get an invitation (mailed), the user on servers taken away is removed.')
+                        ->schema(fn () => [CheckboxList::make('servers')->label('Media servers')->required()->options(self::allMediaServers())]),
                 ])->visible(fn () => self::canChange()),
             ]);
+    }
+
+    /** Verified media servers of every Wizarr, for "Change media server" on several. */
+    private static function allMediaServers(): array
+    {
+        $options = [];
+        foreach (PaywarrInventory::get() as $backend) {
+            if ($backend['kind'] === 'wizarr' && $backend['ok']) {
+                foreach ($backend['servers'] as $s) {
+                    if ($s['verified']) {
+                        $options[(string) $s['id']] = $s['name'] . ' (' . ucfirst($s['type']) . ')';
+                    }
+                }
+            }
+        }
+
+        return $options;
     }
 
     /** The same action on every selected subscription; tells which worked. */
     private function bulk(string $name, string $label, string $icon, callable $fn): BulkAction
     {
         return BulkAction::make($name)->label($label)->icon($icon)->requiresConfirmation()
-            ->action(function (Collection $records) use ($label, $fn) {
+            ->action(function (Collection $records, array $data = []) use ($label, $fn) {
                 $done = [];
                 $failed = [];
                 foreach ($records as $record) {
                     try {
-                        $fn((new Wizarr([]))->forService($record), $record);
+                        $fn((new Wizarr([]))->forService($record), $record, $data);
                         Wizarr::logAdmin($record->user, $record->id, $label . ' (several at once)', (string) Auth::user()?->email);
                         $done[] = '#' . $record->id;
                     } catch (Throwable $e) {

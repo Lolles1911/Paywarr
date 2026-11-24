@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.35.0',
+    version: '1.36.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -101,6 +101,11 @@ class Wizarr extends Server
     use Concerns\Posters;
     use Concerns\MailList;
     use Concerns\MailCenter;
+    use Concerns\Capacity;
+    use Concerns\Devices;
+    use Concerns\ComingSoon;
+    use Concerns\Yearly;
+    use Concerns\AtRisk;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -612,6 +617,44 @@ class Wizarr extends Server
                 'description' => 'A wall of posters (no titles) of what is new and popular, on the front page and on /catalog, so visitors see the selection before they buy. From Tracearr.',
             ],
             [
+                'name' => 'sonarr_url',
+                'label' => 'Sonarr URL (internal)',
+                'type' => 'text',
+                'required' => false,
+                'placeholder' => 'http://sonarr:8989',
+                'description' => 'Optional. For "Coming soon": new episodes due in the next 30 days.',
+            ],
+            [
+                'name' => 'sonarr_api_key',
+                'label' => 'Sonarr API key',
+                'type' => 'password',
+                'required' => false,
+                'encrypted' => true,
+                'description' => 'Sonarr: Settings -> General -> API Key. Only read.',
+            ],
+            [
+                'name' => 'radarr_url',
+                'label' => 'Radarr URL (internal)',
+                'type' => 'text',
+                'required' => false,
+                'placeholder' => 'http://radarr:7878',
+                'description' => 'Optional. For "Coming soon": movies due to be watchable at home in the next 30 days.',
+            ],
+            [
+                'name' => 'radarr_api_key',
+                'label' => 'Radarr API key',
+                'type' => 'password',
+                'required' => false,
+                'encrypted' => true,
+                'description' => 'Radarr: Settings -> General -> API Key. Only read.',
+            ],
+            [
+                'name' => 'coming_soon',
+                'label' => 'Coming soon for visitors',
+                'type' => 'checkbox',
+                'description' => 'Show "Coming soon" (from Sonarr and Radarr) on the front page and /coming-soon to visitors too. Customers always see it under My.',
+            ],
+            [
                 'name' => 'friend_pass',
                 'label' => 'Friend pass',
                 'type' => 'checkbox',
@@ -971,6 +1014,10 @@ class Wizarr extends Server
         Event::listen('pages.home', fn () => $this->renderShowcase());
         // A campaign's banner with a countdown, also for visitors.
         Event::listen('footer', fn () => $this->renderCampaignBanner());
+        // New episodes and movies on their way (ComingSoon), for visitors when on.
+        Event::listen('pages.home', fn () => $this->renderComingSoon());
+        // A sold-out product (Capacity): the waiting list.
+        Event::listen('footer', fn () => $this->renderWaitlist());
 
         // Deleting a customer in Paymenter removes their services in the
         // database only, without any hook. Remove their access first.
@@ -1042,7 +1089,14 @@ class Wizarr extends Server
                         'children' => array_map(fn ($l) => ['name' => $l['label'] !== self::t('Create your user') ? trim(str_replace(trim(self::t('Create your user on :server', ['server' => ''])), '', $l['label'])) : (($l['product'] ?? '') ?: $l['label']), 'url' => $l['url'], 'spa' => false], $invites)];
             }
             // "My <site>": the page, and what's on now.
-            $children = [['name' => self::t('Overview'), 'url' => $this->hubUrl(), 'spa' => false]];
+            $children = [['name' => self::t('Overview'), 'url' => $this->hubUrl(), 'spa' => false],
+                ['name' => self::t('My devices'), 'url' => $this->routeOr('extensions.wizarr.devices', '/wizarr/devices'), 'spa' => false]];
+            if (Cache::remember('wizarr:yearly:' . $user->id, 600, fn () => $this->yearlyChoices($user) !== [])) {
+                $children[] = ['name' => self::t('Save with yearly'), 'url' => $this->routeOr('extensions.wizarr.yearly', '/wizarr/yearly'), 'spa' => false];
+            }
+            if (Cache::remember('wizarr:coming-on', 600, fn () => $this->comingSoonConfigured())) {
+                $children[] = ['name' => self::t('Coming soon'), 'url' => $this->comingUrl(), 'spa' => false];
+            }
             if (self::watchParties() !== [] && self::watchPartiesFor($this->partyProductIds($user)) !== []) {
                 $children[] = ['name' => self::t('Movie night'), 'url' => $this->partyUrl(), 'spa' => false];
             }
@@ -1102,6 +1156,7 @@ class Wizarr extends Server
                 $this->runChallenges();
                 $this->runFriendPasses();
                 $this->finishSwitches();
+                $this->finishYearlySwitches();
                 $this->sendCartReminders();
                 $this->sendSurveys();
                 $this->sendNewsIfDue();
@@ -1119,6 +1174,9 @@ class Wizarr extends Server
                 $this->enforceStreamLimits();
                 $this->monitorStatus();
                 $this->remindWatchParties();
+                if ((int) date('i') % 5 === 0) {
+                    $this->runCapacity();
+                }
             })
                 ->everyMinute()
                 ->name('wizarr-stream-limits')

@@ -234,6 +234,21 @@ trait Gifts
         return $ids;
     }
 
+    /** Which Paywarr feature made a code (Paywarr → Discount codes). */
+    public static function couponKind(string $code, int $couponId, array $friendCoupons, array $campaignCodes): string
+    {
+        $code = strtoupper($code);
+
+        return match (true) {
+            str_starts_with($code, 'GIFT-') => 'gift',
+            str_starts_with($code, 'BACK-') => 'back',
+            str_starts_with($code, 'THANKS-') => 'thanks',
+            isset($friendCoupons[$couponId]) => 'friend',
+            isset($campaignCodes[$code]) => 'campaign',
+            default => 'other',
+        };
+    }
+
     private function makeCoupon(array $fields, array $products): int
     {
         $coupon = \App\Models\Coupon::create($fields);

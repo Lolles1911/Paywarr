@@ -70,6 +70,14 @@ trait Hub
                 . $e($service->status === 'suspended' ? self::t('Paused or suspended') : ($expires ? self::t('Renews :date', ['date' => date(self::t('M j, Y'), $expires)]) : self::t('Active'))) . '</span></a>';
         }
         $cards .= $this->hubCard('📦', self::t('Your subscriptions'), $rows !== '' ? $rows : '<p>' . $e(self::t('No subscription yet.')) . '</p>', [self::t('See all'), $this->routeOr('services', '/services')]);
+        $best = 0;
+        foreach ($this->yearlyChoices($user) as $choice) {
+            $best = max($best, (int) ($choice['offer']['percent'] ?? 0));
+        }
+        if ($best > 0) {
+            $cards .= $this->hubCard('💰', self::t('Save :percent% with yearly', ['percent' => $best]), '<p>' . $e(self::t('Pay for a year at a time from your next renewal, and pay less.')) . '</p>',
+                [self::t('See the price'), $this->routeOr('extensions.wizarr.yearly', '/wizarr/yearly')]);
+        }
 
         // Service status.
         try {

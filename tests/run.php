@@ -1032,7 +1032,7 @@ test('boot registers the Discord pages, the checkout guard and the hourly retry'
         'GET wizarr/switch/{service} extensions.wizarr.switch', 'POST wizarr/switch/{service} extensions.wizarr.switch',
         'GET wizarr/nps/{user}/{score} extensions.wizarr.nps', 'POST wizarr/nps/{user}/{score} extensions.wizarr.nps', 'GET wizarr/why/{cancellation}/{reason} extensions.wizarr.why',
         'GET wizarr/movie-night extensions.wizarr.party', 'POST wizarr/movie-night extensions.wizarr.party', 'GET wizarr/challenge extensions.wizarr.challenge',
-        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub', 'GET wizarr/poster/{key} extensions.wizarr.poster', 'GET catalog extensions.wizarr.catalog', 'POST wizarr/mail-list extensions.wizarr.mail-list', 'GET wizarr/join/{code} extensions.wizarr.join', 'GET wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off', 'POST wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off.web', 'POST wizarr/mail/off-now/{user}/{kind} extensions.wizarr.mail.off.now',
+        'GET wizarr/friend-pass extensions.wizarr.pass', 'POST wizarr/friend-pass extensions.wizarr.pass', 'GET wizarr/me extensions.wizarr.hub', 'GET wizarr/poster/{key} extensions.wizarr.poster', 'GET catalog extensions.wizarr.catalog', 'POST wizarr/mail-list extensions.wizarr.mail-list', 'GET wizarr/join/{code} extensions.wizarr.join', 'GET wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off', 'POST wizarr/mail/off/{user}/{kind} extensions.wizarr.mail.off.web', 'POST wizarr/mail/off-now/{user}/{kind} extensions.wizarr.mail.off.now', 'POST wizarr/waitlist extensions.wizarr.waitlist', 'GET|POST wizarr/devices extensions.wizarr.devices', 'GET coming-soon extensions.wizarr.coming', 'GET|POST wizarr/yearly extensions.wizarr.yearly',
     ], $routes, 'routes');
     $byName = array_column(array_map(fn ($r) => ['n' => $r->name, 'm' => $r->middleware], \Illuminate\Support\Facades\Route::$routes), 'm', 'n');
     same(['web', 'guest'], $byName['extensions.wizarr.discord.login'], 'login only for guests');
@@ -3719,6 +3719,106 @@ test('mail center: every automatic mail in a list; your own words with {placehol
     $html = ext()->mailLayout('Hi', '<p>x</p>', ['Go', 'https://x']);
     ok(str_contains($html, '#ff0055') && str_contains($html, 'WaffleHub ApS, Somewhere 1'), 'the design: colour and the line at the bottom');
     \App\Models\Property::$rows = $keep;
+});
+
+test('capacity: seats per media server count users, unused invitations and unpaid orders; a full server sells out its products', function () {
+    $now = 1_800_000_000;
+    $inventory = [['ok' => true, 'key' => 'w1', 'host' => 'http://wizarr', 'paymenter' => [5 => 'Wizarr'],
+        'servers' => [['id' => 1, 'name' => 'Jelly', 'type' => 'jellyfin', 'users' => 8], ['id' => 2, 'name' => 'Plexy', 'type' => 'plex', 'users' => 3]],
+        'invitations' => [
+            ['used_by' => '', 'status' => 'pending', 'expires' => '', 'servers' => ['Jelly']],
+            ['used_by' => 'bob', 'status' => 'used', 'expires' => '', 'servers' => ['Jelly']],
+            ['used_by' => '', 'status' => 'pending', 'expires' => date('c', $now - 60), 'servers' => ['Jelly']],
+        ]]];
+    $plus = (object) ['id' => 7, 'name' => 'Plus', 'server_id' => 5, 'settings' => []];
+    $pending = [(object) ['product_id' => 7]];
+    $rows = ext()->capacityRows($inventory, [$plus], $pending, ['w1|1' => 10], $now);
+    same([8, 1, 1, 10, 0], [$rows['w1|1']['users'], $rows['w1|1']['invitations'], $rows['w1|1']['pending'], $rows['w1|1']['used'], $rows['w1|1']['free']], 'users + unused invitation + unpaid order = full');
+    same(null, $rows['w1|2']['free'], 'no maximum: no limit');
+    same([7 => 0], \Paymenter\Extensions\Servers\Wizarr\Wizarr::productFreeSeats($rows), 'the product sells out');
+    $rows = ext()->capacityRows($inventory, [$plus], [], ['w1|1' => 12, 'w1|2' => 4], $now);
+    same([7 => 1], \Paymenter\Extensions\Servers\Wizarr\Wizarr::productFreeSeats($rows), 'on two servers: the fewest free');
+});
+
+test('waiting list: in order, once per address; free seats mail the next, held 48 hours, then the next in line', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $keep = \App\Models\Property::$rows;
+    $now = 1_800_000_000;
+    same(1, $W::joinWaitlist(7, 'A@example.com', null, $now), 'first');
+    same(2, $W::joinWaitlist(7, 'b@example.com', null, $now + 10), 'second');
+    same(1, $W::joinWaitlist(7, 'a@example.com', null, $now + 20), 'the same address keeps its place');
+    $all = $W::waitlist();
+    $ids = array_keys($all);
+    same(['mail' => [], 'drop' => []], $W::waitlistDue($all, [7 => 0], $now), 'full: nobody');
+    same(['mail' => [$ids[0]], 'drop' => []], $W::waitlistDue($all, [7 => 1], $now), 'one seat: the first');
+    $all[$ids[0]]['mailed'] = $now;
+    same(['mail' => [], 'drop' => []], $W::waitlistDue($all, [7 => 1], $now + 3600), 'the seat is held for them');
+    same(['mail' => [$ids[1]], 'drop' => [$ids[0]]], $W::waitlistDue($all, [7 => 1], $now + 49 * 3600), 'after 48 hours: the next');
+    \App\Models\Property::$rows = $keep;
+});
+
+test('my devices: streams now and devices in 30 days for the customer\'s own users only', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $accounts = ['jellyfin|anna' => true];
+    $streams = [['id' => 's1', 'server_type' => 'jellyfin', 'username' => 'Anna'], ['id' => 's2', 'server_type' => 'jellyfin', 'username' => 'bo']];
+    same(['s1'], array_column($W::streamsFor($streams, $accounts), 'id'), 'only theirs');
+    $history = [
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'anna'], 'device' => 'Apple TV', 'player' => 'Swiftfin', 'started_at' => '2026-11-20T20:00:00Z'],
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'anna'], 'device' => 'Apple TV', 'player' => 'Swiftfin', 'started_at' => '2026-11-22T20:00:00Z'],
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'anna'], 'device' => 'iPhone', 'player' => 'Jellyfin', 'started_at' => '2026-11-10T08:00:00Z'],
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'bo'], 'device' => 'TV', 'player' => 'X', 'started_at' => '2026-11-23T08:00:00Z'],
+    ];
+    $devices = $W::devicesFrom($history, $accounts);
+    same([['Apple TV', 2], ['iPhone', 1]], array_map(fn ($d) => [$d['device'], $d['plays']], $devices), 'grouped, newest first');
+});
+
+test('coming soon: Sonarr episodes per show and day, Radarr movies on their home release; nothing already there', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $now = strtotime('2026-11-24T12:00:00Z');
+    $poster = [['coverType' => 'poster', 'remoteUrl' => 'https://image.tmdb.org/p.jpg']];
+    $eps = [
+        ['airDateUtc' => '2026-11-26T02:00:00Z', 'seasonNumber' => 2, 'episodeNumber' => 1, 'hasFile' => false, 'series' => ['title' => 'Severance', 'images' => $poster]],
+        ['airDateUtc' => '2026-11-26T03:00:00Z', 'seasonNumber' => 2, 'episodeNumber' => 2, 'hasFile' => false, 'series' => ['title' => 'Severance', 'images' => $poster]],
+        ['airDateUtc' => '2026-11-27T02:00:00Z', 'seasonNumber' => 1, 'episodeNumber' => 5, 'hasFile' => true, 'series' => ['title' => 'Done', 'images' => []]],
+    ];
+    $shows = $W::comingFromSonarr($eps, $now);
+    same([['Severance', [1, 2], true, 'https://image.tmdb.org/p.jpg']], array_map(fn ($i) => [$i['title'], $i['episodes'], $i['premiere'], $i['poster']], $shows), 'one entry, a new season, not what is already there');
+    $movies = $W::comingFromRadarr([
+        ['title' => 'Dune 3', 'year' => 2026, 'inCinemas' => '2026-12-01', 'digitalRelease' => '2027-02-01T00:00:00Z', 'hasFile' => false, 'images' => $poster],
+        ['title' => 'Cinema only', 'inCinemas' => '2026-12-01', 'hasFile' => false],
+    ], $now);
+    same([['Dune 3', '2027-02-01']], array_map(fn ($i) => [$i['title'], gmdate('Y-m-d', $i['at'])], $movies), 'on the digital release; cinema only is left out');
+});
+
+test('save with yearly: periods a year and the saving', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    same([12, 4, 0, 0], [$W::periodsPerYear('month', 1), $W::periodsPerYear('month', 3), $W::periodsPerYear('month', 12), $W::periodsPerYear('year', 1)], 'monthly, quarterly; yearly is not offered');
+    same(['now' => 588.0, 'save' => 99.0, 'percent' => 16], $W::yearlySaving(49, 12, 489), '49 a month or 489 a year');
+    same(0, $W::yearlySaving(49, 12, 600)['save'], 'yearly not cheaper: no offer');
+});
+
+test('at risk: paying customers by how long since they watched; trials and Silo-only left out', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $now = 1_800_000_000;
+    $last = $W::lastPlayPer([['server_type' => 'jellyfin', 'user' => ['username' => 'customer81'], 'started_at' => date('c', $now - 20 * 86400)]]);
+    $paying = wizarrService(81);
+    $paying->price = 49;
+    $paying->properties()->updateOrCreate(['key' => 'wizarr_users'], ['name' => 'Users', 'value' => '1:customer81:jellyfin']);
+    $rows = ext()->atRiskRows([$paying], $last, $now - 60 * 86400, $now);
+    same(20, $rows[81]['idle'] ?? null, '20 days since they watched');
+    $free = wizarrService(82);
+    $free->price = 0;
+    same([], ext()->atRiskRows([$free], $last, $now - 60 * 86400, $now), 'not paying: not listed');
+    $parts = $W::mailParts('inactive', ['name' => '', 'product' => 'Plus', 'days' => 20, 'titles' => 'Dune, Up']);
+    ok(str_contains($parts['text'], 'Dune, Up') && $parts['kind'] === 'reminders', 'the mail has new titles and can be unsubscribed from');
+});
+
+test('discount codes: which Paywarr feature made a code', function () {
+    $P = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    same(['gift', 'back', 'thanks', 'friend', 'campaign', 'other'], [
+        $P::couponKind('GIFT-AB12-CD34', 1, [], []), $P::couponKind('BACK-AB12-CD34', 2, [], []), $P::couponKind('THANKS-AB12-CD34', 3, [], []),
+        $P::couponKind('ANNA-5BK3', 4, [4 => 0], []), $P::couponKind('BLACKFRIDAY25', 5, [], ['BLACKFRIDAY25' => 0]), $P::couponKind('MYOWN', 6, [], []),
+    ], 'by prefix, the friend coupons and the campaigns');
 });
 
 test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {
