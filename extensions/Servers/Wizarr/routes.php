@@ -63,7 +63,7 @@ Route::middleware(['throttle:120,1'])
     ->name('extensions.wizarr.discord.interactions');
 
 // "New on the server" mails: stop getting them (a signed link in the mail).
-Route::middleware(['web', 'signed'])
+Route::middleware(['web', \Paymenter\Extensions\Servers\Wizarr\SignedLink::class])
     ->get('/wizarr/news/off/{user}', [Wizarr::class, 'newsUnsubscribe'])->whereNumber('user')
     ->name('extensions.wizarr.news.off');
 
@@ -83,11 +83,11 @@ Route::middleware(['web', 'auth', 'throttle:30,1'])->name('extensions.wizarr.swi
 });
 
 // Satisfaction: one click in the mail (signed), then a comment; and why they cancelled.
-Route::middleware(['web', 'signed', 'throttle:30,1'])->name('extensions.wizarr.nps')->group(function () {
+Route::middleware(['web', \Paymenter\Extensions\Servers\Wizarr\SignedLink::class, 'throttle:30,1'])->name('extensions.wizarr.nps')->group(function () {
     Route::get('wizarr/nps/{user}/{score}', [Wizarr::class, 'npsAnswer'])->whereNumber('user')->whereNumber('score');
     Route::post('wizarr/nps/{user}/{score}', [Wizarr::class, 'npsAnswer'])->whereNumber('user')->whereNumber('score');
 });
-Route::middleware(['web', 'signed', 'throttle:30,1'])
+Route::middleware(['web', \Paymenter\Extensions\Servers\Wizarr\SignedLink::class, 'throttle:30,1'])
     ->get('wizarr/why/{cancellation}/{reason}', [Wizarr::class, 'whyAnswer'])->whereNumber('cancellation')
     ->name('extensions.wizarr.why');
 
@@ -122,10 +122,10 @@ Route::middleware(['web', 'auth', 'throttle:30,1'])->post('wizarr/mail-list', [W
 Route::middleware(['web', 'throttle:30,1'])->get('wizarr/join/{code}', [Wizarr::class, 'joinPage'])->where('code', '[A-Za-z0-9-]{3,40}')->name('extensions.wizarr.join');
 
 // Unsubscribe from one kind of mail (signed link in every such mail; no login).
-Route::middleware(['web', 'signed', 'throttle:30,1'])->get('wizarr/mail/off/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off');
-Route::middleware(['web', 'signed', 'throttle:30,1'])->post('wizarr/mail/off/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.web');
+Route::middleware(['web', \Paymenter\Extensions\Servers\Wizarr\SignedLink::class, 'throttle:30,1'])->get('wizarr/mail/off/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off');
+Route::middleware(['web', \Paymenter\Extensions\Servers\Wizarr\SignedLink::class, 'throttle:30,1'])->post('wizarr/mail/off/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.web');
 // The mail program's own one-click button (List-Unsubscribe-Post): no session, so no CSRF.
-Route::middleware(['signed', 'throttle:30,1'])->post('wizarr/mail/off-now/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.now');
+Route::middleware([\Paymenter\Extensions\Servers\Wizarr\SignedLink::class, 'throttle:30,1'])->post('wizarr/mail/off-now/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.now');
 
 // A sold-out product's waiting list (Capacity).
 Route::middleware(['web', 'throttle:10,1'])->post('wizarr/waitlist', [Wizarr::class, 'waitlistJoin'])->name('extensions.wizarr.waitlist');

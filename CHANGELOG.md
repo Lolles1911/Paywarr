@@ -3,6 +3,17 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.37.2 (2026-11-25)
+
+- **Fix: "403 Forbidden" on links in mails** (unsubscribe, the survey, why
+  they cancelled). The links were signed with the full address, so a reverse
+  proxy that passes https on as http (or another host name), or a mail program
+  that adds tracking such as `?utm_source=`, made them fail. New links are
+  signed over the path only; links in mails sent before are checked against
+  the site's address (APP_URL) with http and https, so they work too. A link
+  that really is broken shows a short page with a way to Account instead of an
+  error.
+
 ## 1.37.1 (2026-11-25)
 
 - **Message customers: one customer.** "To" now lists every customer with a
