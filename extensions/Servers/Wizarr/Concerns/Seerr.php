@@ -390,7 +390,7 @@ trait Seerr
             return $this;
         }
 
-        return $this->serverInstances[(int) $server->id] ??= new static(ExtensionHelper::settingsToArray($server->settings));
+        return $this->serverInstances[(int) $server->id] ??= new static(self::serverSettings($server));
     }
 
     private function isSilo(): bool
@@ -476,7 +476,7 @@ trait Seerr
         if ($server?->extension !== 'Wizarr') {
             return;
         }
-        $extension = new static(ExtensionHelper::settingsToArray($server->settings));
+        $extension = new static(self::serverSettings($server));
         $productSettings = ExtensionHelper::settingsToArray($service->product->settings);
         if ($extension->isTopUp($productSettings)) {
             if ($extension->topUpTarget($service) === null) {
@@ -507,7 +507,7 @@ trait Seerr
         foreach ($upgrade->configs as $config) {
             $properties[$config->configOption->env_variable] = $config->configValue->env_variable ?? $config->configValue->name;
         }
-        (new static(ExtensionHelper::settingsToArray($server->settings)))
+        (new static(self::serverSettings($server)))
             ->checkSeerrServer(ExtensionHelper::settingsToArray($upgrade->product->settings), $properties);
     }
 

@@ -118,6 +118,9 @@ function test(string $name, callable $fn): void
     global $results;
     stub('/_test/reset');
     \Illuminate\Support\Facades\Cache::$store = [];
+    // Paywarr -> Settings: each test starts with the settings on its server.
+    \App\Models\Property::$rows = array_values(array_filter(\App\Models\Property::$rows, fn ($r) => ($r['key'] ?? '') !== 'settings'));
+    \Paymenter\Extensions\Servers\Wizarr\Wizarr::forgetGlobalSettings();
     NotificationHelper::$sent = [];
     NotificationHelper::$fail = false;
     \App\Models\Service::$all = [];
@@ -3819,6 +3822,27 @@ test('discount codes: which Paywarr feature made a code', function () {
         $P::couponKind('GIFT-AB12-CD34', 1, [], []), $P::couponKind('BACK-AB12-CD34', 2, [], []), $P::couponKind('THANKS-AB12-CD34', 3, [], []),
         $P::couponKind('ANNA-5BK3', 4, [4 => 0], []), $P::couponKind('BLACKFRIDAY25', 5, [], ['BLACKFRIDAY25' => 0]), $P::couponKind('MYOWN', 6, [], []),
     ], 'by prefix, the friend coupons and the campaigns');
+});
+
+test('settings: the server keeps the connection; the rest is moved once to Paywarr -> Settings and read from there', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $keep = \App\Models\Property::$rows;
+    $names = array_column(ext()->allConfigFields(), 'name');
+    same([], array_values(array_diff($names, $W::CONNECTION_KEYS, $W::globalKeys())), 'every setting is on the server or a tab');
+    same([], array_values(array_diff($W::globalKeys(), $names)), 'every tab setting exists');
+    same(['backend', 'host', 'public_url', 'api_key', 'everything_else'], array_column(ext()->getConfig(), 'name'), 'the server: only the connection');
+    $W::forgetGlobalSettings();
+    same('7', ext(['news_day' => '7'])->config('news_day'), 'before moving: the server\'s value');
+    $server = (object) ['settings' => ['host' => 'http://w', 'news_day' => '5', 'discord_bot_token' => 'secret', 'winback_days' => '']];
+    $moved = $W::migrateSettings([$server]);
+    same(['news_day' => '5', 'discord_bot_token' => 'secret'], $moved, 'moved: what had a value');
+    same(null, $W::migrateSettings([$server]), 'only once');
+    $W::forgetGlobalSettings();
+    same(['5', 'secret', null, 'http://w'], [ext(['news_day' => '7', 'host' => 'http://w'])->config('news_day'), ext()->config('discord_bot_token'), ext(['winback_days' => '30'])->config('winback_days'), ext(['host' => 'http://w'])->config('host')],
+        'after: from Settings (an empty one stays empty), the connection from the server');
+    ok(str_starts_with((string) (\Paymenter\Extensions\Servers\Wizarr\Wizarr::storeGet('settings')['discord_bot_token'] ?? ''), 'enc:'), 'secrets are kept encrypted');
+    \App\Models\Property::$rows = $keep;
+    $W::forgetGlobalSettings();
 });
 
 test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {

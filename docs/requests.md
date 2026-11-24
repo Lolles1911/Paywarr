@@ -55,7 +55,7 @@ client area.
 A Seerr is connected to one media server (Jellyfin, Emby or Plex). To offer
 Requests to customers on several, run a Seerr for each (they can all send
 requests to the same Radarr and Sonarr) and fill in **Seerr 2** and **Seerr 3**
-on the Wizarr server: URL (internal), URL (public) and API key, like the first.
+under Paywarr → Settings: URL (internal), URL (public) and API key, like the first.
 Paywarr asks each Seerr which media server it uses.
 
 - A customer gets **one** Seerr account: on the Seerr of their first server

@@ -53,7 +53,7 @@ mention anyone.
 
 1. In Discord, open the settings of a private channel → **Integrations** →
    **Webhooks** → **New Webhook** → **Copy Webhook URL**.
-2. Paste it into **Alerts: Discord webhook** on the Wizarr server in Paymenter.
+2. Paste it into **Alerts: Discord webhook** under Paywarr → Settings.
 
 **The hourly run itself can stop** (the scheduler's cron line is gone, or the
 machine is down), and then nothing above is checked. To hear about that, use

@@ -147,7 +147,7 @@ trait CustomerLifecycle
                 continue;
             }
             // That service's own server decides.
-            $settings = ExtensionHelper::settingsToArray($server->settings);
+            $settings = self::serverSettings($server);
             if (($settings['refund_action'] ?? 'suspend') === 'nothing') {
                 continue;
             }

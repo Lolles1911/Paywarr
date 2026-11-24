@@ -547,7 +547,7 @@ trait Admin
         $services = is_array($services) ? $services : iterator_to_array($services, false);
         $backends = [];
         foreach ($servers as $server) {
-            $ext = new static(ExtensionHelper::settingsToArray($server->settings));
+            $ext = new static(self::serverSettings($server));
             $key = $ext->backendKey();
             $backends[$key] ??= ['key' => $key, 'kind' => $ext->isSilo() ? 'silo' : 'wizarr', 'host' => rtrim((string) $ext->config('host'), '/'),
                 'paymenter' => [], 'server_id' => (int) $server->id, 'ext' => $ext];
@@ -896,7 +896,7 @@ trait Admin
             }
         }
         foreach ($servers as $server) {
-            $config = ExtensionHelper::settingsToArray($server->settings);
+            $config = self::serverSettings($server);
             if (trim((string) ($config['public_url'] ?? '')) === '' && ($config['backend'] ?? 'wizarr') !== 'silo') {
                 $add('warning', 'Server "' . $server->name . '" has no public address', 'Invitation links then use Wizarr\'s own address, which customers may not reach.', 'server:' . $server->id);
             }

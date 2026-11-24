@@ -119,7 +119,7 @@ trait Status
             $siloUp = [];
             try {
                 foreach (\App\Models\Server::where('extension', 'Wizarr')->with('settings')->get() as $server) {
-                    $ext = new static(ExtensionHelper::settingsToArray($server->settings));
+                    $ext = new static(self::serverSettings($server));
                     if ($ext->isSilo()) {
                         try {
                             $ext->client()->status();

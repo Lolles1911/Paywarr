@@ -72,7 +72,7 @@ trait Discord
         }
 
         $this->checkPurchaseAllowed(
-            ExtensionHelper::settingsToArray($server->settings),
+            self::serverSettings($server),
             $productSettings,
             $this->propertyValue($service->user, self::PROP_DISCORD_ID),
         );
@@ -438,7 +438,7 @@ trait Discord
             if (!in_array($service->status ?? '', ['active', 'suspended'], true) || $service->product?->server?->extension !== 'Wizarr') {
                 continue;
             }
-            $serverSettings = ExtensionHelper::settingsToArray($service->product->server->settings);
+            $serverSettings = self::serverSettings($service->product->server);
             if (!$this->truthy(ExtensionHelper::settingsToArray($service->product->settings)['require_discord'] ?? false)
                 || !$this->truthy($serverSettings['discord_suspend_leavers'] ?? false)
                 || !$this->discordConfigured($serverSettings)) {

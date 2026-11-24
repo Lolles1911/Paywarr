@@ -96,8 +96,11 @@ In Paymenter: **Admin → Servers → New server**, extension **Wizarr**:
 | API key | The key from Wizarr |
 
 Press **Test Connection**. Use IP and port as the internal address, not
-container names. The Discord and Seerr fields on the same page are optional and
-described further down.
+container names. That's all the server needs: everything else (Discord,
+Seerr, Tracearr, Sonarr/Radarr, reminders, events, clean-up) is for the whole
+shop and lives under **Admin → Paywarr: Operations → Settings**, in tabs. Those
+settings are optional and described further down. (Before 1.37 they were on
+the server; updating moves them there by itself.)
 
 ### 7. Create the product
 
