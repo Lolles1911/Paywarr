@@ -332,6 +332,36 @@ trait Admin
     }
 
     /** Adds $days to the trial, from its end (or from now, when it has ended). */
+    /** Extra days: a longer trial, or a later renewal. With $tell, the customer gets "Extra days". */
+    public function adminGiveDays(Service $service, int $days, bool $tell = true): string
+    {
+        $settings = ExtensionHelper::settingsToArray($service->product->settings ?? []);
+        if ($this->isTrial($settings)) {
+            $result = $this->adminExtendTrial($service, $days);
+        } else {
+            if (!$service->expires_at) {
+                throw new DisplayException('This subscription has no renewal date to move.');
+            }
+            $service->expires_at = date('Y-m-d H:i:s', strtotime('+' . $days . ' days', strtotime((string) $service->expires_at)));
+            $service->save();
+            try {
+                foreach ($service->invoices()->where('status', 'pending')->get() as $invoice) {
+                    $invoice->due_at = $service->expires_at;
+                    $invoice->save();
+                }
+            } catch (Throwable $e) {
+                // The invoice keeps its date.
+            }
+            $result = $days . ' days added; renews ' . date('M j, Y', strtotime((string) $service->expires_at));
+        }
+        if ($tell) {
+            $this->notifyMail($service, 'extra_days', ['days' => $days, 'product' => (string) ($service->product->name ?? ''),
+                'date' => $service->expires_at ? date(self::t('M j, Y'), strtotime((string) $service->expires_at)) : ''], $this->accountUrl());
+        }
+
+        return $result;
+    }
+
     public function adminExtendTrial(Service $service, int $days, ?int $now = null): string
     {
         $now ??= time();

@@ -73,6 +73,17 @@ trait MailCenter
             'pass_over' => ['name' => 'Friend pass is over', 'kind' => 'essential', 'vars' => ['code' => '', 'percent' => '', 'date' => ''],
                 'about' => 'To the friend, when the free week ended without buying.',
                 'make' => fn ($v) => [self::t('Your free week is over'), self::passOffer($v), self::t('See subscriptions')]],
+            'inactive' => ['name' => 'Watched nothing for a while', 'kind' => 'reminders', 'vars' => ['name' => 'Anna', 'product' => 'Plus', 'days' => '14', 'titles' => 'Dune, Severance, The Bear'],
+                'about' => 'A paying customer who watched nothing for a while, at most once a month ("Remind customers who watched nothing" in Paywarr Stats, or "Send a reminder" under At risk). {titles}: a few new titles.',
+                'make' => fn ($v) => [self::t('We miss you'), (($v['name'] ?? '') !== '' ? self::t('Hi :name,', $v) . "\n\n" : '')
+                    . self::t('You haven\'t watched anything on :product for :days days. Is something not working? Tell us with "Report a problem".', $v)
+                    . (($v['titles'] ?? '') !== '' ? "\n\n" . self::t('New since then: :titles. Something for tonight?', $v) : ''), self::t('Start watching')]],
+            'extra_days' => ['name' => 'Extra days', 'kind' => 'essential', 'vars' => ['days' => '7', 'product' => 'Plus', 'date' => 'Dec 8, 2026'],
+                'about' => 'When you give extra days under Customers (several at once, "Tell them").',
+                'make' => fn ($v) => [self::t('You got :days extra days', $v), self::t(':product now runs until :date, at no cost. Enjoy!', $v), self::t('See your subscription')]],
+            'waitlist' => ['name' => 'A seat is free (waiting list)', 'kind' => 'essential', 'vars' => ['product' => 'Plus', 'hours' => '48'],
+                'about' => 'To the next on the waiting list when a full media server gets a free seat (Capacity).',
+                'make' => fn ($v) => [self::t('A seat is free for you'), self::t('Good news: a seat is free on :product. Order soon: the shop is open to everyone again, and after :hours hours we tell the next on the waiting list.', $v), self::t('Order now')]],
             'party_invite' => ['name' => 'Movie night invitation', 'kind' => 'events', 'vars' => ['title' => 'Dune', 'date' => 'Dec 5, 20:00', 'about' => ''],
                 'about' => 'When you plan a movie night with "Announce". {about}: your text for the night.',
                 'make' => fn ($v) => [self::t('Movie night: :title', $v), self::t('Movie night: :title on :date. Watch along with everyone; press "I\'m coming" and we remind you an hour before.', $v)

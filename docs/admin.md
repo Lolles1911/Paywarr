@@ -224,6 +224,46 @@ again.
   month, and once per friend. After the week the friend's user is deleted
   unless they bought a subscription with the same mail address.
 
+## Capacity and the waiting list
+
+**Paywarr → Capacity** (Operations): every media server with seats in use =
+users + unused invitations + unpaid orders. **Set maximum** gives a server a
+number of seats; Paywarr then keeps the Paymenter stock of the products on it
+at the free seats (every 5 minutes, and right after you save), so a full server
+shows "out of stock" in the shop. A product on several servers gets the fewest
+free. Removing the maximum makes the stock unlimited again. Products without a
+maximum are left alone.
+
+**Paywarr → Waiting list** (Customers): who waits for which product, and who was
+mailed. **Offer a seat now** mails one by hand; **Remove** takes them off.
+Those who order leave the list by themselves.
+
+## At risk
+
+**Paywarr → At risk** (Customers): paying customers (no trials, gift cards or
+top-ups) who haven't watched for at least 7/14/30/60 days, from Tracearr's last
+60 days, soonest renewal first, with when they were last reminded. **Send a
+reminder** mails "Watched nothing for a while" with a few new titles. The
+automatic reminder is Paywarr Stats' "Remind customers who watched nothing";
+with Paywarr Stats 1.11.5 or newer it sends that same mail. Silo users aren't
+counted here.
+
+## Discount codes
+
+**Paywarr → Discount codes** (Events): every coupon, newest first, marked by
+what made it: Gift card (`GIFT-`), Come back (`BACK-`), Anniversary
+(`THANKS-`), Invite a friend, Campaign, or Other (your own). For each: how
+often it was used, and **Paid since**: everything the subscriptions that used
+it have paid, the first invoice and every renewal. On top, the same per kind.
+
+## Several customers at once
+
+On **Paywarr → Customers**, tick subscriptions and open **Bulk actions**:
+besides Sync, a new link and invitations, there are **Give extra days** (a
+longer trial, or a later renewal; the waiting invoice moves too; "Tell them"
+sends "Extra days"), **Send a message** (once per customer), and **Change media
+server**.
+
 ## Mail
 
 - **Automatic mails:** every mail Paywarr sends by itself (welcome,

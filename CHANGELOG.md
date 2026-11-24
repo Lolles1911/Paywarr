@@ -3,6 +3,35 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.36.0 (2026-11-25)
+
+For customers:
+
+- **My devices:** what plays now on their users (with Stop), the devices
+  used in 30 days, and a new password for Jellyfin and Emby (Tracearr).
+- **Coming soon:** new episodes and movies due in 30 days, from Sonarr and
+  Radarr (new settings on the Wizarr server), with posters; optionally on the
+  front page and for visitors too.
+- **Save with yearly:** monthly customers can switch to the product's yearly
+  plan from their next renewal, and see what they save; they can change their
+  mind until that invoice is paid.
+- **Waiting list** on sold-out products; when seats open, the next in line get
+  a mail.
+
+In admin:
+
+- **Capacity** (Operations): seats per media server; with a maximum, the
+  stock of its products follows the free seats, so a full server sells out.
+- **Waiting list** and **At risk** (Customers): paying customers who don't
+  watch, soonest renewal first, with "Send a reminder". Paywarr Stats 1.11.5
+  sends the same mail automatically, now with new titles.
+- **Discount codes** (Events): every code Paywarr made, how often it was used
+  and what those subscriptions have paid since.
+- **Customers, several at once:** give extra days, send a message, change
+  media server.
+- New automatic mails, editable under Mail: Watched nothing for a while,
+  A seat is free, Extra days.
+
 ## 1.35.0 (2026-11-24)
 
 - **New admin group Paywarr: Mail:**

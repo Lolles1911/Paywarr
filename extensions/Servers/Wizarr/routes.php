@@ -126,3 +126,15 @@ Route::middleware(['web', 'signed', 'throttle:30,1'])->get('wizarr/mail/off/{use
 Route::middleware(['web', 'signed', 'throttle:30,1'])->post('wizarr/mail/off/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.web');
 // The mail program's own one-click button (List-Unsubscribe-Post): no session, so no CSRF.
 Route::middleware(['signed', 'throttle:30,1'])->post('wizarr/mail/off-now/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.now');
+
+// A sold-out product's waiting list (Capacity).
+Route::middleware(['web', 'throttle:10,1'])->post('wizarr/waitlist', [Wizarr::class, 'waitlistJoin'])->name('extensions.wizarr.waitlist');
+
+// My devices: playing now (Stop), devices in 30 days, a new password.
+Route::middleware(['web', 'auth', 'throttle:30,1'])->match(['get', 'post'], 'wizarr/devices', [Wizarr::class, 'devicesPage'])->name('extensions.wizarr.devices');
+
+// Coming soon (Sonarr and Radarr's calendars).
+Route::middleware(['web', 'throttle:60,1'])->get('coming-soon', [Wizarr::class, 'comingPage'])->name('extensions.wizarr.coming');
+
+// Save with yearly: switch a monthly subscription to the yearly plan at the next renewal.
+Route::middleware(['web', 'auth', 'throttle:20,1'])->match(['get', 'post'], 'wizarr/yearly', [Wizarr::class, 'yearlyPage'])->name('extensions.wizarr.yearly');
