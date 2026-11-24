@@ -78,6 +78,12 @@ class PaywarrMessages extends Page implements HasTable
             foreach (Product::whereHas('server', fn ($q) => $q->where('extension', 'Wizarr'))->orderBy('name')->get() as $product) {
                 $options['By product']['product:' . $product->id] = $product->name;
             }
+            // One customer: everyone with a Paywarr subscription (type to search).
+            foreach (\App\Models\User::whereHas('services', fn ($q) => $q->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr')))
+                ->orderBy('first_name')->limit(2000)->get(['id', 'first_name', 'last_name', 'email']) as $user) {
+                $name = trim($user->first_name . ' ' . $user->last_name);
+                $options['One customer']['user:' . $user->id] = ($name !== '' ? $name . ' · ' : '') . $user->email;
+            }
         } catch (Throwable $e) {
             // Without them then.
         }
@@ -135,7 +141,7 @@ class PaywarrMessages extends Page implements HasTable
                     ->description(fn (array $record) => $record['mail'] . ' mail · ' . $record['discord'] . ' Discord · ' . $record['app'] . ' bell' . (!empty($record['channel']) ? ' · channel' : '')),
             ])
             ->emptyStateHeading('No messages yet')
-            ->emptyStateDescription('"New message" sends one to everyone active, or to those on a server, product or status.');
+            ->emptyStateDescription('"New message" sends one to everyone active, to those on a server, product or status, or to one customer.');
     }
 
     private static function recipientLabel(string $to): string

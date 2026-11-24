@@ -3,6 +3,12 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.37.1 (2026-11-25)
+
+- **Message customers: one customer.** "To" now lists every customer with a
+  Paywarr subscription under "One customer" (type a name or address to find
+  them). Before, one customer could only be messaged from their own page.
+
 ## 1.37.0 (2026-11-25)
 
 - **Paywarr → Settings:** everything for the whole shop now has its own page
