@@ -488,9 +488,6 @@
     "Apps and guides": "Apps og vejledninger",
     "Send me news and offers by mail": "Send mig nyheder og tilbud på mail",
     "Offers, movie nights and what's new on the server. You can stop any time under Account.": "Tilbud, filmaftener og nyt på serveren. Du kan altid framelde dig under Konto.",
-    "You get this because you are on our mail list. You can leave it under Account.": "Du får denne mail, fordi du er på vores mailliste. Du kan framelde dig under Konto.",
-    "You get this because you are on our mail list.": "Du får denne mail, fordi du er på vores mailliste.",
-    "Leave the mail list": "Frameld maillisten",
     "You are off the mail list: no more news and offers by mail. Mails about your subscription still come. You can join again under Account.": "Du er frameldt maillisten: ikke flere nyheder og tilbud på mail. Mails om dit abonnement kommer stadig. Du kan tilmelde dig igen under Konto.",
     "News and offers by mail?": "Nyheder og tilbud på mail?",
     "Yes please": "Ja tak",
@@ -500,5 +497,16 @@
     "Copy link": "Kopiér link",
     "Share the link: your friend's discount is added in the cart by itself. Or they enter the code under \"Coupon\". It works once per friend, on a subscription.": "Del linket: din vens rabat lægges i kurven af sig selv. Eller de skriver koden under \"Coupon\". Den virker én gang pr. ven, på et abonnement.",
     "Choose a subscription with the button: the code is added in the cart by itself.": "Vælg et abonnement med knappen: koden lægges i kurven af sig selv.",
-    "A friend invited you: :percent% off your first month with the code :code. It is added in the cart by itself.": "En ven har inviteret dig: :percent % rabat på din første måned med koden :code. Den lægges i kurven af sig selv."
+    "A friend invited you: :percent% off your first month with the code :code. It is added in the cart by itself.": "En ven har inviteret dig: :percent % rabat på din første måned med koden :code. Den lægges i kurven af sig selv.",
+    "news and offers": "nyheder og tilbud",
+    "movie nights and challenges": "filmaftener og udfordringer",
+    "reminders": "påmindelser",
+    "stats and surveys": "statistik og undersøgelser",
+    "You get this because you get :kind from us.": "Du får denne mail, fordi du får :kind fra os.",
+    "Unsubscribe from :kind": "Afmeld :kind",
+    "Done: you get :kind by mail again.": "Sådan: du får :kind på mail igen.",
+    "Done: no more :kind by mail. Mails about your access and subscription still come.": "Sådan: ikke flere :kind på mail. Mails om din adgang og dit abonnement kommer stadig.",
+    "Unsubscribe again": "Afmeld igen",
+    "Oops, turn it back on": "Ups, slå det til igen",
+    "Mail settings": "Mailindstillinger"
 }

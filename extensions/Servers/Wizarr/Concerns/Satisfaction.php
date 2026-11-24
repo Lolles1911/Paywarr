@@ -110,7 +110,7 @@ trait Satisfaction
         }
         $body = '<p style="margin:0 0 12px">' . e(self::t('How likely are you to recommend us to a friend? Click a number; it takes a second.')) . '</p>'
             . '<div style="margin:12px 0">' . $cells . '</div><div style="display:flex;justify-content:space-between;color:#6b6680;font-size:12px;max-width:430px"><span>' . e(self::t('Not likely')) . '</span><span>' . e(self::t('Very likely')) . '</span></div>';
-        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), (int) $user->id);
+        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), $user, 'stats');
     }
 
     private function mailWhy($cancellation): void
@@ -123,7 +123,7 @@ trait Satisfaction
             $buttons .= '<a href="' . e($url) . '" style="display:block;margin:6px 0;padding:10px 14px;border-radius:10px;border:1px solid #d9d4e6;text-decoration:none;color:#1f1a2e">' . e(self::cancelReasonLabel($reason)) . '</a>';
         }
         $body = '<p style="margin:0 0 12px">' . e(self::t('Thank you for watching with us. Would you tell us why you stop? One click:')) . '</p>' . $buttons;
-        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), (int) $user->id);
+        $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body), $user, 'stats');
     }
 
     /** GET and POST /wizarr/nps/{user}/{score} (signed): the score, then a comment. */

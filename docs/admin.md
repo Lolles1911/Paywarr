@@ -238,6 +238,24 @@ invoices, outages) always go. The field is a Paymenter custom property
 (Admin → Configuration → Custom Properties, key `paywarr_mail_list`) that
 Paywarr makes; rename it there if you like.
 
+### Unsubscribe
+
+Every mail a customer can do without ends with a line like "You get this
+because you get reminders from us. **Unsubscribe from reminders**". One click
+turns off that kind only (no login), with a button to turn it back on. Mail
+programs show their own Unsubscribe button too (the `List-Unsubscribe` header).
+
+| Kind | Mails |
+|---|---|
+| News and offers | campaigns, "New on the server", Message customers (as marketing), "we'd love to have you back". Unsubscribing takes them off the mail list |
+| Movie nights and challenges | movie night invitations and reminders, challenge prizes (also only on the mail list) |
+| Reminders | trial ending, user not created yet, renewal, unpaid cart, free access about to end, Paywarr Stats' "we miss you" |
+| Stats and surveys | the satisfaction survey, anniversaries, Paywarr Stats' Wrapped |
+
+Mails about access and payment (invitations, access ready, new password, move
+to paid, outages, gifts, pauses, the Discord page) have no such line and always
+go. What a customer turned off is the user property `paywarr_mail_off`.
+
 ## Satisfaction, Invite a friend board, CSV
 
 - **Satisfaction** (with **Satisfaction survey** on the Wizarr server): after a

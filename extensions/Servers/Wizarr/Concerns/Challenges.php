@@ -226,7 +226,7 @@ trait Challenges
                 }
                 self::logAdmin($service->user, (int) $service->id, 'Challenge "' . $c['title'] . '" won: ' . implode(', ', $given), 'Paywarr');
                 $this->forServiceServer($service)->notifyCustomer($service, self::t('You made it: :title', ['title' => $c['title']]),
-                    self::t('Congratulations! You reached the goal and get :prize.', ['prize' => implode(', ', $given) ?: $this->prizeText($c)]), [self::t('See the challenge'), $this->challengeUrl()]);
+                    self::t('Congratulations! You reached the goal and get :prize.', ['prize' => implode(', ', $given) ?: $this->prizeText($c)]), [self::t('See the challenge'), $this->challengeUrl()], kind: 'events');
             } catch (Throwable $e) {
                 Log::warning('Wizarr: challenge prize for user ' . $userId . ' not (all) given: ' . $e->getMessage());
             }

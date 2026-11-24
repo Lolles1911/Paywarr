@@ -64,7 +64,7 @@ trait WatchParty
                 'title' => $party['title'], 'date' => date(self::t('M j, H:i'), $party['at'])]) . ($party['text'] !== '' ? "\n\n" . $party['text'] : '');
             foreach ($this->partyRecipients($party) as $service) {
                 try {
-                    if ($this->forServiceServer($service)->notifyCustomer($service, self::t('Movie night: :title', ['title' => $party['title']]), $text, [self::t('I\'m coming'), $this->partyUrl()], null, true, true)) {
+                    if ($this->forServiceServer($service)->notifyCustomer($service, self::t('Movie night: :title', ['title' => $party['title']]), $text, [self::t('I\'m coming'), $this->partyUrl()], null, true, false, 'events')) {
                         $party['invited']++;
                     }
                 } catch (Throwable $e) {
@@ -164,7 +164,7 @@ trait WatchParty
                 try {
                     $this->forServiceServer($service)->notifyCustomer($service, self::t('Movie night in an hour'),
                         self::t(':title starts at :time. Open your media server a little before, and press play at :time.', ['title' => $party['title'], 'time' => date('H:i', $party['at'])]),
-                        [self::t('Open movie night'), $this->partyUrl()], null, true, true);
+                        [self::t('Open movie night'), $this->partyUrl()], null, true, false, 'events');
                     $sent[] = $userId;
                 } catch (Throwable $e) {
                     Log::warning('Wizarr: movie night reminder to user ' . $userId . ' not sent: ' . $e->getMessage());

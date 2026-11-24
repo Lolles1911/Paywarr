@@ -72,7 +72,7 @@ trait Reminders
             && empty($properties[self::PROP_TRIAL_CONVERTED]) && ($properties[self::PROP_REMINDED_TRIAL] ?? '') !== (string) $ends) {
             $this->notifyCustomer($service, self::t('Your trial ends soon'),
                 self::t('Your trial of :product ends on :date. Continue with a subscription and keep your user and everything you have watched.', ['product' => $product, 'date' => date(self::t('M j, Y'), $ends)]),
-                [self::t('See subscriptions'), $this->shopUrl()]);
+                [self::t('See subscriptions'), $this->shopUrl()], kind: 'reminders');
             $this->setProperty($service, self::PROP_REMINDED_TRIAL, 'Reminded: trial ends', (string) $ends);
             $done[] = 'trial';
         }
@@ -101,7 +101,7 @@ trait Reminders
                 if ($link !== null) {
                     $this->notifyCustomer($service, self::t('Your user is waiting'),
                         self::t('You haven\'t created your user for :product yet. Your personal link is ready; it only takes a minute.', ['product' => $link['server'] !== '' ? $link['server'] : $product]),
-                        [self::t('Create your user'), $link['url']]);
+                        [self::t('Create your user'), $link['url']], kind: 'reminders');
                     $this->setProperty($service, self::PROP_REMINDED_LINK, 'Reminded: unused link', $link['code']);
                     $done[] = 'link';
 
@@ -118,7 +118,7 @@ trait Reminders
             if ($invoice) {
                 $this->notifyCustomer($service, self::t('Your subscription renews soon'),
                     self::t(':product renews on :date. Pay the invoice before then to keep watching without a break.', ['product' => $product, 'date' => date(self::t('M j, Y'), $expires)]),
-                    [self::t('Pay the invoice'), $this->invoiceUrl($invoice)]);
+                    [self::t('Pay the invoice'), $this->invoiceUrl($invoice)], kind: 'reminders');
                 $this->setProperty($service, self::PROP_REMINDED_RENEWAL, 'Reminded: renewal', date('Y-m-d', $expires));
                 $done[] = 'renewal';
             }

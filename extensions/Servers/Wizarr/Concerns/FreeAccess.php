@@ -329,7 +329,7 @@ trait FreeAccess
             $text = self::t('You haven\'t watched anything for :days days. Your free access ends on :date unless you watch something before then; just start anything and it stays.', [
                 'days' => $row['idle_days'], 'date' => date(self::t('M j, Y'), time() + $rules['warn_days'] * 86400)]);
             if ($row['kind'] === 'subscription') {
-                return $this->forServiceServer($row['service'])->notifyCustomer($row['service'], $title, $text, [self::t('Start watching'), $this->accountUrl()]) !== [];
+                return $this->forServiceServer($row['service'])->notifyCustomer($row['service'], $title, $text, [self::t('Start watching'), $this->accountUrl()], null, true, false, 'reminders') !== [];
             }
 
             return $row['email'] !== '' && $this->sendMail($row['email'], $title, $this->mailLayout($title, $this->paragraphs($text)));

@@ -101,7 +101,7 @@ trait Anniversary
         $name = trim((string) ($user->first_name ?? ''));
         $this->notifyCustomer($service, self::t('Thank you for :period with us', ['period' => $period]),
             ($name !== '' ? self::t('Hi :name,', ['name' => $name]) . "\n\n" : '') . self::t('Today it is :period since you joined. Thank you for watching with us!', ['period' => $period]) . ($gift !== '' ? "\n\n" . $gift : ''),
-            [self::t('See your subscription'), $this->accountUrl()]);
+            [self::t('See your subscription'), $this->accountUrl()], kind: 'stats');
         self::logAdmin($user, (int) $service->id, 'Anniversary (' . $months . ' months): ' . ($reward === 'days' ? $amount . ' days added' : ($reward === 'coupon' ? $amount . '% code' : 'a thank-you')), 'Paywarr');
     }
 

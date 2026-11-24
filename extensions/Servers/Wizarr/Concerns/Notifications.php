@@ -24,10 +24,12 @@ trait Notifications
      * @return string[] the channels used: mail, app, discord
      */
     /**
-     * $marketing: news and offers. The mail goes only to customers on the
-     * mail list (with a link to leave it); the bell and Discord as always.
+     * $kind: what sort of mail it is (MailList::MAIL_KINDS): "essential" (about
+     * their access; always sent) or one the customer can turn off, e.g.
+     * "reminders". $marketing is the older way to say "news". The bell and
+     * Discord go as always.
      */
-    public function notifyCustomer(Service $service, string $title, string $text, ?array $button = null, ?string $html = null, bool $discord = true, bool $marketing = false): array
+    public function notifyCustomer(Service $service, string $title, string $text, ?array $button = null, ?string $html = null, bool $discord = true, bool $marketing = false, string $kind = ''): array
     {
         $user = $service->user;
         if (!$user) {
@@ -40,8 +42,7 @@ trait Notifications
         } catch (Throwable $e) {
             Log::warning('Wizarr: notification for user ' . $user->id . ' not created: ' . $e->getMessage());
         }
-        if ((!$marketing || $this->onMailList($user))
-            && $this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html ?? $this->paragraphs($text), $button, $marketing ? $this->mailListFooter($user) : ''), (int) $user->id)) {
+        if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $html ?? $this->paragraphs($text), $button), $user, $kind ?: ($marketing ? 'news' : 'essential'))) {
             $used[] = 'mail';
         }
         if ($discord && $this->sendDiscordMessage($user, $title, $text, $button)) {
@@ -51,12 +52,30 @@ trait Notifications
         return $used;
     }
 
-    /** Sends a mail now (not through the queue), and notes it in Paymenter's email log. */
-    public function sendMail(string $to, string $subject, string $html, ?int $userId = null): bool
+    /**
+     * Sends a mail now (not through the queue), and notes it in Paymenter's
+     * email log. For a customer ($userId) and a $kind they can turn off: not
+     * when they did, and with a one-click unsubscribe (in the mail and for
+     * Gmail/Outlook's own button).
+     */
+    /** $who: the customer (or their ID), for the log and their mail choices. */
+    public function sendMail(string $to, string $subject, string $html, $who = null, string $kind = 'essential'): bool
     {
+        $user = is_object($who) ? $who : null;
+        $userId = $user ? (int) $user->id : ($who ? (int) $who : null);
         if ($to === '' || (function_exists('config') && config('settings.mail_disable'))) {
             return false;
         }
+        $off = $offNow = null;
+        if ($userId && $kind !== 'essential') {
+            $user ??= \App\Models\User::find($userId);
+            if ($user && !$this->wantsMail($user, $kind)) {
+                return false;
+            }
+            $off = $user ? $this->unsubscribeUrl($user, $kind) : null;
+            $offNow = $user ? $this->unsubscribeUrl($user, $kind, true) : null;
+        }
+        $html = str_replace(self::MAIL_FOOTER_SLOT, $off ? $this->unsubscribeFooter($kind, $off) : '', $html);
         try {
             if (class_exists(\App\Models\EmailLog::class)) {
                 \App\Models\EmailLog::create(['user_id' => $userId, 'subject' => $subject, 'to' => $to, 'body' => $html]);
@@ -65,7 +84,13 @@ trait Notifications
             // The log is only for you; the mail still goes.
         }
         try {
-            \Illuminate\Support\Facades\Mail::html($html, fn ($mail) => $mail->to($to)->subject($subject));
+            \Illuminate\Support\Facades\Mail::html($html, function ($mail) use ($to, $subject, $offNow) {
+                $mail->to($to)->subject($subject);
+                if ($offNow && method_exists($mail, 'getSymfonyMessage')) {
+                    $mail->getSymfonyMessage()->getHeaders()->addTextHeader('List-Unsubscribe', '<' . $offNow . '>');
+                    $mail->getSymfonyMessage()->getHeaders()->addTextHeader('List-Unsubscribe-Post', 'List-Unsubscribe=One-Click');
+                }
+            });
 
             return true;
         } catch (Throwable $e) {
@@ -132,7 +157,7 @@ trait Notifications
             . '<tr><td style="background:#ffffff;border-radius:0 0 18px 18px;padding:28px 26px 30px;line-height:1.6;font-size:15px">'
             . '<h1 style="font-size:22px;line-height:1.3;margin:0 0 14px;color:#14101f">' . e($title) . '</h1>' . $body . $buttonHtml . '</td></tr>'
             . '<tr><td style="padding:18px 8px 0;color:#8f87a8;font-size:12px;line-height:1.6;text-align:center">'
-            . ($footer !== '' ? '<div style="margin-bottom:8px">' . $footer . '</div>' : '')
+            . ($footer !== '' ? '<div style="margin-bottom:8px">' . $footer . '</div>' : '') . self::MAIL_FOOTER_SLOT
             . implode(' &nbsp;·&nbsp; ', $links) . '<br>' . $site . '</td></tr>'
             . '</table></td></tr></table></body></html>';
     }

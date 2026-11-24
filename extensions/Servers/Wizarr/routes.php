@@ -120,3 +120,9 @@ Route::middleware(['web', 'auth', 'throttle:30,1'])->post('wizarr/mail-list', [W
 
 // A friend's link: remembers their code for the cart, then the shop. For visitors too.
 Route::middleware(['web', 'throttle:30,1'])->get('wizarr/join/{code}', [Wizarr::class, 'joinPage'])->where('code', '[A-Za-z0-9-]{3,40}')->name('extensions.wizarr.join');
+
+// Unsubscribe from one kind of mail (signed link in every such mail; no login).
+Route::middleware(['web', 'signed', 'throttle:30,1'])->get('wizarr/mail/off/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off');
+Route::middleware(['web', 'signed', 'throttle:30,1'])->post('wizarr/mail/off/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.web');
+// The mail program's own one-click button (List-Unsubscribe-Post): no session, so no CSRF.
+Route::middleware(['signed', 'throttle:30,1'])->post('wizarr/mail/off-now/{user}/{kind}', [Wizarr::class, 'mailOffPage'])->whereNumber('user')->name('extensions.wizarr.mail.off.now');

@@ -133,8 +133,7 @@ trait News
             . $section(self::t('Movies'), $lists['movie']) . $section(self::t('Shows'), $lists['show']);
         $sent = 0;
         foreach ($recipients as $user) {
-            $footer = $this->mailListFooter($user);
-            if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body, [self::t('Start watching'), $this->accountUrl()], $footer), (int) $user->id)) {
+            if ($this->sendMail((string) $user->email, $title, $this->mailLayout($title, $body, [self::t('Start watching'), $this->accountUrl()]), $user, 'news')) {
                 $sent++;
             }
         }

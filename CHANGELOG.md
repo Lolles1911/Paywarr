@@ -3,6 +3,17 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.35.0 (2026-11-24)
+
+- **Unsubscribe in every mail you can do without:** news and offers, movie
+  nights and challenges, reminders, and stats and surveys each end with a link
+  to unsubscribe from just that kind, in one click (no login, with a button to
+  turn it back on). Mail programs' own Unsubscribe button works too
+  (`List-Unsubscribe`). Mails about access and payment always go. See
+  docs/admin.md → Unsubscribe.
+- The weekly "New on the server" mail uses the same line (before: "Leave the
+  mail list").
+
 ## 1.34.4 (2026-11-23)
 
 - **Invite a friend with a link:** each customer has a link to share (with a
