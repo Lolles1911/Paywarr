@@ -32,7 +32,7 @@ trait MailList
      * Mail kinds a customer can turn off (essential ones always go): news
      * and events only to the mail list; reminders and stats unless turned off.
      */
-    public const MAIL_KINDS = ['news', 'events', 'reminders', 'stats'];
+    public const MAIL_KINDS = ['news', 'events', 'reminders', 'stats', 'shows'];
 
     /** Makes the customer field once (Admin → Configuration → Custom Properties, where you can rename it). */
     public static function ensureMailListField(): void
@@ -89,6 +89,7 @@ trait MailList
             'news' => self::t('news and offers'),
             'events' => self::t('movie nights and challenges'),
             'reminders' => self::t('reminders'),
+            'shows' => self::t('news from your shows'),
             default => self::t('stats and surveys'),
         };
     }

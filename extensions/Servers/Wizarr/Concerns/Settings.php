@@ -22,7 +22,7 @@ trait Settings
     /** The tabs of Paywarr → Settings and their settings, in order. */
     public const SETTING_TABS = [
         'Shop' => ['refund_action', 'welcome_mail', 'welcome_text', 'showcase', 'coming_soon', 'app_icon', 'streams_over_limit', 'requests_page_for', 'more_requests_url', 'report_department'],
-        'Reminders' => ['remind_trial', 'remind_link', 'remind_renewal', 'cart_reminder_hours', 'cart_reminder_again_hours', 'news_day', 'news_mail', 'survey'],
+        'Reminders' => ['remind_trial', 'remind_link', 'remind_renewal', 'new_episodes', 'cart_reminder_hours', 'cart_reminder_again_hours', 'news_day', 'news_mail', 'survey'],
         'Loyalty' => ['pause_per_year', 'pause_max_days', 'winback_days', 'winback_percent', 'winback_valid_days', 'referral_percent', 'referral_products', 'referral_reward_months',
             'anniversary_months', 'anniversary_reward', 'anniversary_amount', 'friend_pass'],
         'Discord' => ['discord_invite_url', 'discord_guild_id', 'discord_client_id', 'discord_client_secret', 'discord_bot_token', 'discord_public_key', 'announce_channel_id',

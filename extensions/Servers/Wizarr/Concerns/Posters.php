@@ -36,6 +36,33 @@ trait Posters
         return '/api/v1/images/proxy?' . http_build_query(['server' => $server, 'url' => $path, 'width' => 300, 'height' => 450, 'fallback' => 'poster']);
     }
 
+    /** The media server's ID of a title: the show for an episode, else the title itself. */
+    public static function titleId(array $row): string
+    {
+        return (string) (($row['media_type'] ?? '') === 'episode' ? ($row['grandparent_rating_key'] ?? '') : ($row['rating_key'] ?? ''));
+    }
+
+    /**
+     * Where a poster opens: the title itself on Jellyfin and Silo, else the
+     * server's start page ($base; Plex and Emby need IDs Paywarr doesn't have).
+     */
+    public static function titleLink(array $item, string $base): string
+    {
+        $id = (string) ($item['id'] ?? '');
+        $parts = parse_url($base);
+        if ($id === '' || empty($parts['host'])) {
+            return $base;
+        }
+        $root = ($parts['scheme'] ?? 'https') . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        $path = rtrim((string) ($parts['path'] ?? ''), '/');
+
+        return match ($item['server_type'] ?? '') {
+            'jellyfin' => $root . preg_replace('~/web(/.*)?$~', '', $path) . '/web/index.html#/details?id=' . rawurlencode($id),
+            'silo' => $root . '/item/' . rawurlencode($id),
+            default => $base,
+        };
+    }
+
     public static function posterKey(string $path): string
     {
         return substr(hash('sha256', $path), 0, 16);
@@ -69,7 +96,7 @@ trait Posters
             }
             $key = strtolower($title . '|' . ($p['server_type'] ?? ''));
             $titles[$key] ??= ['title' => $title, 'year' => ($p['media_type'] ?? '') === 'movie' ? ($p['year'] ?? null) : null, 'type' => ($p['media_type'] ?? '') === 'episode' ? 'show' : 'movie',
-                'server_type' => strtolower((string) ($p['server_type'] ?? '')), 'path' => $poster, 'people' => []];
+                'server_type' => strtolower((string) ($p['server_type'] ?? '')), 'path' => $poster, 'id' => self::titleId($p), 'people' => []];
             $titles[$key]['people'][strtolower((string) ($p['user']['username'] ?? ''))] = true;
         }
         uasort($titles, fn ($a, $b) => count($b['people']) <=> count($a['people']));
@@ -99,7 +126,7 @@ trait Posters
             $who = strtolower((string) ($p['server_type'] ?? '')) . '|' . strtolower((string) ($p['user']['username'] ?? ''));
             if (str_starts_with($poster, '/api/v1/images/proxy?')) {
                 $titles[$key] ??= ['title' => $title, 'type' => ($p['media_type'] ?? '') === 'episode' ? 'show' : 'movie',
-                    'server_type' => strtolower((string) ($p['server_type'] ?? '')), 'path' => $poster];
+                    'server_type' => strtolower((string) ($p['server_type'] ?? '')), 'path' => $poster, 'id' => self::titleId($p)];
             }
             if (isset($accounts[$who])) {
                 $mine[$key] = true;
@@ -198,7 +225,7 @@ trait Posters
                     foreach ($tracearr->recentlyAdded(time() - 45 * 86400, 120) as $row) {
                         if (($path = self::addedPosterPath($row)) !== null) {
                             $new[] = ['title' => (string) ($row['title'] ?? ''), 'year' => $row['year'] ?? null, 'type' => (string) $row['media_type'],
-                                'server_type' => strtolower((string) ($row['server_type'] ?? '')), 'path' => $path];
+                                'server_type' => strtolower((string) ($row['server_type'] ?? '')), 'path' => $path, 'id' => self::titleId($row)];
                         }
                     }
                 } catch (Throwable $e) {
@@ -249,7 +276,7 @@ trait Posters
                         $poster = (string) ($p['poster_url'] ?? '');
                         $plays[] = ['title' => (string) ($p['media_title'] ?? ''), 'show' => (string) ($p['show_title'] ?? ''), 'type' => (string) ($p['media_type'] ?? ''),
                             'server_type' => strtolower((string) ($p['server_type'] ?? '')), 'percent' => (float) ($p['percent_complete'] ?? 0), 'watched' => !empty($p['watched']),
-                            'path' => str_starts_with($poster, '/api/v1/images/proxy?') ? $poster : '', 'at' => strtotime((string) ($p['started_at'] ?? '')) ?: 0];
+                            'path' => str_starts_with($poster, '/api/v1/images/proxy?') ? $poster : '', 'id' => (string) ($p['rating_key'] ?? ''), 'at' => strtotime((string) ($p['started_at'] ?? '')) ?: 0];
                     }
                 } catch (Throwable $e) {
                     // Without Tracearr's plays.
@@ -262,7 +289,7 @@ trait Posters
                         $item = (string) ($p['media_item_id'] ?? '');
                         $plays[] = ['title' => (string) ($p['media_title'] ?? ''), 'show' => (string) ($p['series_title'] ?? ''), 'type' => (string) ($p['media_type'] ?? ''), 'server_type' => 'silo',
                             'percent' => $duration > 0 ? 100 * min(1, (float) ($p['watched_seconds'] ?? 0) / $duration) : 0, 'watched' => !empty($p['completed']),
-                            'path' => $item !== '' ? 'silo:' . (int) $service->product->server_id . ':' . $item : '', 'at' => strtotime((string) ($p['started_at'] ?? '')) ?: 0];
+                            'path' => $item !== '' ? 'silo:' . (int) $service->product->server_id . ':' . $item : '', 'id' => $item, 'at' => strtotime((string) ($p['started_at'] ?? '')) ?: 0];
                     }
                 } catch (Throwable $e) {
                     // Without that account.
@@ -322,7 +349,7 @@ trait Posters
         $html = '<section style="grid-column:1/-1"><h2 style="font-size:1.15rem;font-weight:700;margin:.4rem 0 .7rem">' . $e($title) . '</h2>'
             . '<div style="display:flex;gap:.8rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:.5rem;-webkit-overflow-scrolling:touch">';
         foreach ($items as $item) {
-            $url = $links[$item['server_type'] ?? ''] ?? '';
+            $url = isset($links[$item['server_type'] ?? '']) ? self::titleLink($item, $links[$item['server_type']]) : '';
             $label = $item['type'] === 'episode' && ($item['show'] ?? '') !== '' ? $item['show'] : $item['title'];
             $card = '<img src="' . $e($this->posterSrc($item['key'])) . '" alt="' . ($titles ? $e($label) : '') . '" loading="lazy" onerror="this.parentNode.style.display=\'none\'" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:.7rem;background:rgba(127,127,127,.18);display:block">'
                 . (isset($item['percent']) ? '<div style="height:4px;border-radius:4px;background:rgba(127,127,127,.3);margin-top:.35rem;overflow:hidden"><div style="height:100%;width:' . (int) $item['percent'] . '%;background:#db2777"></div></div>' : '')

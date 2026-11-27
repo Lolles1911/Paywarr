@@ -59,13 +59,14 @@ class PaywarrMailRecipients extends Page implements HasTable
         $list = in_array(strtolower(trim((string) $value(Wizarr::PROP_MAIL_LIST))), self::TRUE, true);
         $off = Wizarr::mailOff($user, $value);
 
-        return ['news' => $list, 'events' => $list && !in_array('events', $off, true), 'reminders' => !in_array('reminders', $off, true), 'stats' => !in_array('stats', $off, true)];
+        return ['news' => $list, 'events' => $list && !in_array('events', $off, true), 'reminders' => !in_array('reminders', $off, true), 'stats' => !in_array('stats', $off, true),
+            'shows' => !in_array('shows', $off, true)];
     }
 
     public function content(Schema $schema): Schema
     {
         $onList = \App\Models\Property::where('model_type', User::class)->where('key', Wizarr::PROP_MAIL_LIST)->whereIn('value', self::TRUE)->count();
-        $off = array_fill_keys(['events', 'reminders', 'stats'], 0);
+        $off = array_fill_keys(['events', 'reminders', 'stats', 'shows'], 0);
         foreach (\App\Models\Property::where('model_type', User::class)->where('key', Wizarr::PROP_MAIL_OFF)->pluck('value') as $value) {
             foreach (array_filter(explode(',', (string) $value)) as $kind) {
                 if (isset($off[$kind])) {
@@ -76,11 +77,12 @@ class PaywarrMailRecipients extends Page implements HasTable
         $unsubs = Wizarr::mailCountsSince('mail_unsubs', 30);
 
         return $schema->components([
-            Section::make()->columns(['default' => 2, 'lg' => 5])->schema([
+            Section::make()->columns(['default' => 2, 'lg' => 6])->schema([
                 TextEntry::make('list')->label('On the mail list')->state($onList . ' of ' . User::count()),
                 TextEntry::make('events')->label('Movie nights off')->state((string) $off['events']),
                 TextEntry::make('reminders')->label('Reminders off')->state((string) $off['reminders']),
                 TextEntry::make('stats')->label('Stats and surveys off')->state((string) $off['stats']),
+                TextEntry::make('shows')->label('Their shows off')->state((string) $off['shows']),
                 TextEntry::make('unsubs')->label('Unsubscribed, 30 days')->state((string) array_sum($unsubs))
                     ->helperText($unsubs ? implode(', ', array_map(fn ($k, $n) => PaywarrMails::kindLabel($k) . ' ' . $n, array_keys($unsubs), $unsubs)) : null),
             ]),
@@ -90,8 +92,8 @@ class PaywarrMailRecipients extends Page implements HasTable
 
     public function table(Table $table): Table
     {
-        $labels = ['news' => 'News and offers', 'events' => 'Movie nights and challenges', 'reminders' => 'Reminders', 'stats' => 'Stats and surveys'];
-        $short = ['news' => 'News', 'events' => 'Movie nights', 'reminders' => 'Reminders', 'stats' => 'Stats'];
+        $labels = ['news' => 'News and offers', 'events' => 'Movie nights and challenges', 'reminders' => 'Reminders', 'stats' => 'Stats and surveys', 'shows' => 'News from their shows'];
+        $short = ['news' => 'News', 'events' => 'Movie nights', 'reminders' => 'Reminders', 'stats' => 'Stats', 'shows' => 'Their shows'];
 
         return $table
             ->query(User::query()->with('properties'))
@@ -118,7 +120,7 @@ class PaywarrMailRecipients extends Page implements HasTable
                             default => $query,
                         };
                     }),
-                SelectFilter::make('off')->label('Unsubscribed from')->options(['events' => 'Movie nights and challenges', 'reminders' => 'Reminders', 'stats' => 'Stats and surveys'])
+                SelectFilter::make('off')->label('Unsubscribed from')->options(['events' => 'Movie nights and challenges', 'reminders' => 'Reminders', 'stats' => 'Stats and surveys', 'shows' => 'News from their shows'])
                     ->query(fn ($query, array $data) => ($data['value'] ?? null)
                         ? $query->whereHas('properties', fn ($q) => $q->where('key', Wizarr::PROP_MAIL_OFF)->where('value', 'like', '%' . $data['value'] . '%'))
                         : $query),
@@ -134,7 +136,7 @@ class PaywarrMailRecipients extends Page implements HasTable
                     ->action(function (User $record, array $data) {
                         $kinds = (array) ($data['kinds'] ?? []);
                         // News first: switching events on puts them (back) on the list.
-                        foreach (['news', 'events', 'reminders', 'stats'] as $kind) {
+                        foreach (['news', 'events', 'reminders', 'stats', 'shows'] as $kind) {
                             Wizarr::setMailKind($record, $kind, in_array($kind, $kinds, true));
                         }
                         Wizarr::logAdmin($record, null, 'Mail choices changed: ' . (implode(', ', $kinds) ?: 'none'), (string) (Auth::user()?->email ?? 'admin'));

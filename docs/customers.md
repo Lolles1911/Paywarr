@@ -306,6 +306,20 @@ messages.
   customer's user, they get a mail asking if it was them, with a link to My
   devices. The first check only learns the devices already in use.
 
+## New episodes of your shows
+
+When a new episode of a show a customer watched in the last 60 days arrives,
+they get **"New episodes of your shows"** with the shows and episodes, from
+Tracearr. Under Paywarr → Settings → Reminders, **New episodes** chooses once a
+day (the default, after 17:00), right away, once a week (Sunday) or off. The
+first run only notes the time. Customers can stop it under "News from your
+shows" in their mail settings.
+
+## Posters open the title
+
+On the My page, a poster opens the title itself on Jellyfin and Silo; on Plex
+and Emby it opens the server, as before.
+
 ## Languages
 
 Customer texts follow the language Paymenter shows the visitor: the language

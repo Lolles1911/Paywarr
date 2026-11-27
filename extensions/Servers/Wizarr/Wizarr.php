@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.39.0',
+    version: '1.40.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -113,6 +113,7 @@ class Wizarr extends Server
     use Concerns\Updates;
     use Concerns\Backup;
     use Concerns\TracearrExtras;
+    use Concerns\ShowAlerts;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -470,6 +471,19 @@ class Wizarr extends Server
                 'label' => 'Remind: renews in 3 days and the invoice is unpaid',
                 'type' => 'checkbox',
                 'description' => 'Not for subscriptions paid automatically (card or PayPal subscription). Paymenter\'s own invoice mail goes 7 days before, as always.',
+            ],
+            [
+                'name' => 'new_episodes',
+                'label' => 'New episodes of their shows',
+                'type' => 'select',
+                'default' => 'daily',
+                'options' => [
+                    ['value' => 'daily', 'label' => 'Once a day, at 17:00'],
+                    ['value' => 'instant', 'label' => 'Right away (checked every hour)'],
+                    ['value' => 'weekly', 'label' => 'Once a week, Sunday at 17:00'],
+                    ['value' => 'off', 'label' => 'Off'],
+                ],
+                'description' => 'A mail with the new episodes of the shows a customer watched in the last 60 days (Tracearr). Customers can unsubscribe from "news from your shows".',
             ],
             [
                 'name' => 'pause_per_year',
@@ -1192,6 +1206,8 @@ class Wizarr extends Server
                 $this->finishYearlySwitches();
                 $this->applyPriceChanges();
                 $this->checkNewDevices();
+                $this->runShowAlerts();
+                $this->runPlannedGifts();
                 $this->sendCartReminders();
                 $this->sendSurveys();
                 $this->sendNewsIfDue();
