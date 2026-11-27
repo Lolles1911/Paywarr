@@ -61,7 +61,7 @@ use Throwable;
 #[ExtensionMeta(
     name: 'Wizarr',
     description: 'Invites paying customers to Plex, Jellyfin or Emby through Wizarr, and removes access again when they stop paying.',
-    version: '1.38.0',
+    version: '1.39.0',
     author: 'Paywarr',
     url: 'https://github.com/Lolles1911/Paywarr',
 )]
@@ -112,6 +112,7 @@ class Wizarr extends Server
     use Concerns\PriceChanges;
     use Concerns\Updates;
     use Concerns\Backup;
+    use Concerns\TracearrExtras;
     use Concerns\Help;
     use Concerns\Checklist;
     use Concerns\SwitchServer;
@@ -1038,6 +1039,7 @@ class Wizarr extends Server
         Event::listen('footer', fn () => $this->renderReferralNote());
 
         // The selection for visitors, on the front page (Posters).
+        Event::listen('pages.home', fn () => $this->renderLibraryNumbers());
         Event::listen('pages.home', fn () => $this->renderShowcase());
         // A campaign's banner with a countdown, also for visitors.
         Event::listen('footer', fn () => $this->renderCampaignBanner());
@@ -1045,6 +1047,8 @@ class Wizarr extends Server
         Event::listen('pages.home', fn () => $this->renderComingSoon());
         // The client area as an app on the home screen (HomeScreen).
         Event::listen('head', fn () => $this->renderHomeScreenHead());
+        // What is on a product's media server(s), in numbers (Tracearr).
+        Event::listen('footer', fn () => $this->renderProductLibrary());
         // A sold-out product (Capacity): the waiting list.
         Event::listen('footer', fn () => $this->renderWaitlist());
 
@@ -1187,6 +1191,7 @@ class Wizarr extends Server
                 $this->finishSwitches();
                 $this->finishYearlySwitches();
                 $this->applyPriceChanges();
+                $this->checkNewDevices();
                 $this->sendCartReminders();
                 $this->sendSurveys();
                 $this->sendNewsIfDue();

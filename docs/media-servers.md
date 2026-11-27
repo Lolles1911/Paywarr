@@ -134,3 +134,14 @@ They behave differently, and that is up to Wizarr, not the extension:
   gets a new invitation at the next payment, so the access repairs itself.
 
 [← Paywarr](../README.md)
+
+## Silo through Tracearr
+
+Tracearr 3.3 and newer can watch a Silo server. Add it in Tracearr, and Paywarr
+notices by itself (checked every hour): Silo's users, plays and streams then
+come from Tracearr like Jellyfin's, Emby's and Plex's, so stream limits, My
+devices, At risk, Continue watching, "Because you watched", challenges, free
+access and service status cover Silo users too, and Silo isn't asked for them
+separately (nothing is counted twice). Paywarr Stats 1.12.0 does the same.
+Without Silo in Tracearr, Paywarr asks Silo itself, as before. Tracearr matches
+Silo users by their username, as for the other servers.

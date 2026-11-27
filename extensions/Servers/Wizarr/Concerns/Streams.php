@@ -57,14 +57,41 @@ trait Streams
         return null;
     }
 
-    /** The media server accounts of a subscription, as "type|username" (lowercase), Silo left out. */
-    public function streamAccounts(array $properties): array
+    /**
+     * Whether Tracearr watches a Silo server too (Tracearr 3.3 and newer):
+     * then Silo's plays, streams and users come from Tracearr like the others',
+     * and Paywarr stops asking Silo itself. Kept an hour.
+     */
+    public function tracearrHasSilo(): bool
     {
+        try {
+            return (bool) Cache::remember('paywarr:tracearr:silo', 3600, function () {
+                $tracearr = $this->tracearrOrAny();
+                if ($tracearr === null) {
+                    return 0;
+                }
+                foreach ($tracearr->servers() as $server) {
+                    if (strtolower((string) ($server['server_type'] ?? $server['type'] ?? '')) === 'silo') {
+                        return 1;
+                    }
+                }
+
+                return 0;
+            });
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    /** The media server accounts of a subscription, as "type|username" (lowercase); Silo only when Tracearr watches it. */
+    public function streamAccounts(array $properties, ?bool $withSilo = null): array
+    {
+        $withSilo ??= $this->tracearrHasSilo();
         $keys = [];
         foreach ($properties as $key => $value) {
             if ($key === self::PROP_USERS || str_starts_with((string) $key, self::PROP_USERS . ':')) {
                 foreach ($this->parseUsers((string) $value) as $user) {
-                    if (strtolower($user['type']) !== 'silo') {
+                    if ($withSilo || strtolower($user['type']) !== 'silo') {
                         $keys[] = strtolower($user['type']) . '|' . strtolower($user['username']);
                     }
                 }

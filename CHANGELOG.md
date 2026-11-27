@@ -3,6 +3,32 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.39.0 (2026-11-27)
+
+- **Silo through Tracearr:** Tracearr 3.3 watches Silo too. When your
+  Tracearr has a Silo server, Paywarr takes Silo's users, plays and streams from
+  Tracearr like the others', and stops asking Silo itself for them:
+  - stream limits, "Streams and sharing", My devices (with Stop) and At risk
+    now include Silo users;
+  - Continue watching, "Because you watched", challenges and free access use
+    Tracearr's Silo plays, with Silo's posters through Tracearr;
+  - service status takes Silo's up/down from Tracearr.
+  Without a Silo server in Tracearr, everything works as before (Silo is asked
+  directly). Paywarr Stats 1.12.0 does the same for its pages.
+- **The library in numbers** (Tracearr's libraries): movies, shows, episodes and
+  titles in 4K as tiles on the front page (with "Show the selection to
+  visitors"), on the My page, and as a line on each product's page (for its
+  media server types).
+- **"New device on your account"**: when a device a customer's users haven't
+  used before plays something, they get "Was this you?" with a link to My
+  devices (checked hourly; the first run only learns the devices of the last
+  90 days). Can be switched off under Mail → Automatic mails.
+- **"Popular now" shows how many watched it** this week.
+- **Profiles** (Silo, Tracearr 3.3): My devices shows the profile that plays
+  and the profiles per device.
+- **Why a server is down**: Tracearr's reason is in the log and in the alert
+  to you (Alerts: Discord webhook).
+
 ## 1.38.0 (2026-11-26)
 
 For customers:

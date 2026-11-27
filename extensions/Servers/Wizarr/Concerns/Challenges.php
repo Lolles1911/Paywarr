@@ -101,13 +101,14 @@ trait Challenges
     {
         $byAccount = [];
         $silo = [];
+        $viaTracearr = $this->tracearrHasSilo();
         foreach (Service::whereIn('status', ['active', 'suspended'])->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr'))
             ->with(['product.server', 'properties'])->get() as $service) {
             $properties = ExtensionHelper::getServiceProperties($service);
             foreach ($this->streamAccounts($properties) as $account) {
                 $byAccount[$account] = (int) $service->user_id;
             }
-            foreach ($properties as $key => $value) {
+            foreach ($viaTracearr ? [] : $properties as $key => $value) {
                 if ($key === self::PROP_USERS || str_starts_with((string) $key, self::PROP_USERS . ':')) {
                     foreach ($this->parseUsers((string) $value) as $user) {
                         if (strtolower($user['type']) === 'silo') {

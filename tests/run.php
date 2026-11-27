@@ -3914,6 +3914,38 @@ test('backup: everything Paywarr keeps, without secrets; restoring keeps the key
     $W::forgetGlobalSettings();
 });
 
+test('silo through tracearr: silo users count once tracearr watches silo; posters and status follow', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $props = ['wizarr_users' => '7:Mette:silo,11:anna:jellyfin'];
+    same(['jellyfin|anna'], ext()->streamAccounts($props, false), 'without: Silo is asked itself, not through Tracearr');
+    same(['silo|mette', 'jellyfin|anna'], ext()->streamAccounts($props, true), 'with: Silo users like the others');
+    same(false, ext()->tracearrHasSilo(), 'no Tracearr: no');
+    $path = $W::addedPosterPath(['rating_key' => 'abc-123', 'server_id' => 'srv', 'server_type' => 'silo']);
+    ok(str_contains(urldecode((string) $path), 'url=/content/abc-123/poster'), 'a Silo poster through Tracearr');
+    $state = ext()->monitorStatus(1_800_000_000, [['server_name' => 'Silo', 'server_type' => 'silo', 'status' => 'up'], ['server_name' => 'Jelly', 'server_type' => 'jellyfin', 'status' => 'up']]);
+    ok(is_array($state), 'status with a Silo server in Tracearr: no second check of Silo');
+});
+
+test('tracearr extras: library numbers, and new devices per customer (once each)', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $libs = [
+        ['server_type' => 'jellyfin', 'movie_count' => 1200, 'show_count' => 0, 'episode_count' => 0, 'total_file_size' => 10, 'resolutions' => ['4k' => 150, '1080p' => 1000]],
+        ['server_type' => 'jellyfin', 'movie_count' => 0, 'show_count' => 300, 'episode_count' => 9000, 'total_file_size' => 20, 'resolutions' => ['2160p' => 20]],
+        ['server_type' => 'plex', 'movie_count' => 50, 'show_count' => 0, 'episode_count' => 0, 'total_file_size' => 5, 'resolutions' => []],
+    ];
+    same(['movies' => 1250, 'shows' => 300, 'episodes' => 9000, 'uhd' => 170, 'bytes' => 35], $W::libraryTotals($libs), 'everything');
+    same(1200, $W::libraryTotals($libs, ['jellyfin'])['movies'], 'only a product\'s server types');
+    same('1.250 movies · 300 shows · 9.000 episodes · 170 in 4K', $W::libraryLine($W::libraryTotals($libs)), 'as a line');
+
+    $play = fn ($user, $device, $at) => ['server_type' => 'jellyfin', 'user' => ['username' => $user], 'device' => $device, 'player' => 'App', 'platform' => '', 'started_at' => $at];
+    $known = [7 => ['apple tv|app|' => 1]];
+    $new = $W::newDevices([$play('anna', 'Apple TV', '2026-11-27T10:00:00Z'), $play('anna', 'iPhone', '2026-11-27T11:00:00Z'), $play('anna', 'iPhone', '2026-11-27T12:00:00Z'), $play('bo', 'TV', '2026-11-27T12:00:00Z')],
+        ['jellyfin|anna' => 7], $known, 100);
+    same([7], array_keys($new), 'only customers; strangers left out');
+    same(['iPhone'], array_column($new[7], 'device'), 'the new device once, not the one she has');
+    ok(isset($known[7]['iphone|app|']), 'and remembered');
+});
+
 test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {
     \Illuminate\Support\Facades\Mail::$sent = [];
     $service = wizarrService(60);

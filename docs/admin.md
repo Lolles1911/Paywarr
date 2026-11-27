@@ -277,8 +277,8 @@ top-ups) who haven't watched for at least 7/14/30/60 days, from Tracearr's last
 60 days, soonest renewal first, with when they were last reminded. **Send a
 reminder** mails "Watched nothing for a while" with a few new titles. The
 automatic reminder is Paywarr Stats' "Remind customers who watched nothing";
-with Paywarr Stats 1.11.5 or newer it sends that same mail. Silo users aren't
-counted here.
+with Paywarr Stats 1.11.5 or newer it sends that same mail. Silo users count
+when Tracearr watches your Silo (Tracearr 3.3 or newer).
 
 ## Discount codes
 

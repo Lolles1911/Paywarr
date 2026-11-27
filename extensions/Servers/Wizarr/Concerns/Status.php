@@ -113,7 +113,12 @@ trait Status
             if (!empty($server['historical']) || ($server['status'] ?? '') === 'unknown') {
                 continue;
             }
-            $seen['tracearr:' . $server['server_name']] = ['name' => (string) $server['server_name'], 'type' => strtolower((string) ($server['server_type'] ?? '')), 'up' => ($server['status'] ?? '') !== 'down', 'servers' => []];
+            $seen['tracearr:' . $server['server_name']] = ['name' => (string) $server['server_name'], 'type' => strtolower((string) ($server['server_type'] ?? '')), 'up' => ($server['status'] ?? '') !== 'down', 'servers' => [],
+                'reason' => mb_substr(trim((string) ($server['reason'] ?? '')), 0, 200)];
+        }
+        $tracearrSilo = array_filter($tracearrServers ?? [], fn ($s) => strtolower((string) ($s['server_type'] ?? '')) === 'silo');
+        if ($siloUp === null && $tracearrSilo) {
+            $siloUp = []; // Tracearr watches Silo: its word, not a second check
         }
         if ($siloUp === null) {
             $siloUp = [];
@@ -151,7 +156,7 @@ trait Status
                     'kind' => 'outage', 'servers' => $server['servers'], 'types' => $server['servers'] ? [] : [$server['type']], 'starts' => $now, 'ends' => null, 'auto' => true, 'key' => $key, 'by' => ''];
                 $changed = true;
                 $this->announce('🔴 ' . self::t(':name is down. We are working on it.', ['name' => $server['name']]) . ' ' . $this->statusPageUrl());
-                Log::warning('Wizarr: ' . $server['name'] . ' is down; customers are told.');
+                Log::warning('Wizarr: ' . $server['name'] . ' is down' . (($server['reason'] ?? '') !== '' ? ' (' . $server['reason'] . ')' : '') . '; customers are told.');
             } elseif (!$wasUp && $isUp) {
                 foreach ($notices as &$notice) {
                     if (!empty($notice['auto']) && $notice['key'] === $key && empty($notice['ends'])) {

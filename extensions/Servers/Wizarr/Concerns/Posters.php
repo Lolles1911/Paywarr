@@ -27,7 +27,11 @@ trait Posters
         if ($id === '' || $server === '') {
             return null;
         }
-        $path = strtolower((string) ($row['server_type'] ?? '')) === 'plex' ? '/library/metadata/' . $id . '/thumb' : '/Items/' . $id . '/Images/Primary';
+        $path = match (strtolower((string) ($row['server_type'] ?? ''))) {
+            'plex' => '/library/metadata/' . $id . '/thumb',
+            'silo' => '/content/' . $id . '/poster',
+            default => '/Items/' . $id . '/Images/Primary',
+        };
 
         return '/api/v1/images/proxy?' . http_build_query(['server' => $server, 'url' => $path, 'width' => 300, 'height' => 450, 'fallback' => 'poster']);
     }
@@ -211,13 +215,14 @@ trait Posters
         });
     }
 
-    /** The customer's half-watched titles (Tracearr and Silo), kept 10 minutes. */
+    /** The customer's half-watched titles (Tracearr, and Silo itself when Tracearr doesn't watch it), kept 10 minutes. */
     public function continueWatching($user): array
     {
         return Cache::remember('paywarr:continue:' . $user->id, 600, function () use ($user) {
             $plays = [];
             $accounts = [];
             $silo = [];
+            $viaTracearr = $this->tracearrHasSilo();
             foreach (Service::where('user_id', $user->id)->whereIn('status', ['active', 'suspended'])->whereHas('product.server', fn ($q) => $q->where('extension', 'Wizarr'))
                 ->with(['product.server', 'properties'])->get() as $service) {
                 $properties = ExtensionHelper::getServiceProperties($service);
@@ -227,7 +232,7 @@ trait Posters
                 foreach ($properties as $key => $value) {
                     if ($key === self::PROP_USERS || str_starts_with((string) $key, self::PROP_USERS . ':')) {
                         foreach ($this->parseUsers((string) $value) as $u) {
-                            if (strtolower($u['type']) === 'silo') {
+                            if (!$viaTracearr && strtolower($u['type']) === 'silo') {
                                 $silo[] = [$service, (int) $u['id']];
                             }
                         }
@@ -321,7 +326,8 @@ trait Posters
             $label = $item['type'] === 'episode' && ($item['show'] ?? '') !== '' ? $item['show'] : $item['title'];
             $card = '<img src="' . $e($this->posterSrc($item['key'])) . '" alt="' . ($titles ? $e($label) : '') . '" loading="lazy" onerror="this.parentNode.style.display=\'none\'" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:.7rem;background:rgba(127,127,127,.18);display:block">'
                 . (isset($item['percent']) ? '<div style="height:4px;border-radius:4px;background:rgba(127,127,127,.3);margin-top:.35rem;overflow:hidden"><div style="height:100%;width:' . (int) $item['percent'] . '%;background:#db2777"></div></div>' : '')
-                . ($titles ? '<div style="font-size:.85rem;font-weight:600;margin-top:.35rem;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' . $e($label) . '</div>' : '');
+                . ($titles ? '<div style="font-size:.85rem;font-weight:600;margin-top:.35rem;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">' . $e($label) . '</div>' : '')
+                . ($titles && ($item['count'] ?? 0) > 1 ? '<div style="font-size:.78rem;opacity:.7">👀 ' . $e(self::t(':n watched it this week', ['n' => (int) $item['count']])) . '</div>' : '');
             $html .= '<' . ($url !== '' ? 'a href="' . $e($url) . '" target="_blank"' : 'div') . ' style="flex:0 0 8.5rem;scroll-snap-align:start">' . $card . '</' . ($url !== '' ? 'a' : 'div') . '>';
         }
 

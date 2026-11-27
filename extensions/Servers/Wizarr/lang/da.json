@@ -576,5 +576,19 @@
     "Most wanted": "Mest ønsket",
     "Requested by customers and on the way. The more who want it, the sooner we look at it.": "Ønsket af kunder og på vej. Jo flere der vil se den, jo før kigger vi på den.",
     "New price for :product from :date": "Ny pris på :product fra :date",
-    ":product will cost :new a period from :date (now :old). It applies to your renewals from that date; you don't need to do anything. If you would rather stop or change subscription, you can do that before then.": ":product koster :new pr. periode fra :date (nu :old). Det gælder dine fornyelser fra den dato; du skal ikke gøre noget. Vil du hellere stoppe eller skifte abonnement, kan du gøre det inden da."
+    ":product will cost :new a period from :date (now :old). It applies to your renewals from that date; you don't need to do anything. If you would rather stop or change subscription, you can do that before then.": ":product koster :new pr. periode fra :date (nu :old). Det gælder dine fornyelser fra den dato; du skal ikke gøre noget. Vil du hellere stoppe eller skifte abonnement, kan du gøre det inden da.",
+    "profile :name": "profil :name",
+    "profiles: :list": "profiler: :list",
+    "On the server": "På serveren",
+    "New device on your account": "Ny enhed på din konto",
+    "Your user on :server was just used on a new device: :device (:app), :time. Was that you? Then all is well. If not, stop it and choose a new password under My devices.": "Din bruger på :server blev lige brugt på en ny enhed: :device (:app), :time. Var det dig? Så er alt i orden. Hvis ikke, så stop den og vælg en ny adgangskode under Mine enheder.",
+    ":n watched it this week": ":n har set den denne uge",
+    ":n movies": ":n film",
+    ":n shows": ":n serier",
+    ":n in 4K": ":n i 4K",
+    "movies": "film",
+    "shows": "serier",
+    "episodes": "afsnit",
+    "in 4K": "i 4K",
+    "On the server: :line": "På serveren: :line"
 }

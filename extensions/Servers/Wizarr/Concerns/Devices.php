@@ -57,8 +57,11 @@ trait Devices
             $player = trim((string) ($row['player'] ?? ''));
             $key = strtolower($device . '|' . $player);
             $at = strtotime((string) ($row['started_at'] ?? '')) ?: 0;
-            $devices[$key] ??= ['device' => $device, 'player' => $player, 'platform' => (string) ($row['platform'] ?? ''), 'server' => ucfirst((string) ($row['server_type'] ?? '')), 'last' => 0, 'plays' => 0];
+            $devices[$key] ??= ['device' => $device, 'player' => $player, 'platform' => (string) ($row['platform'] ?? ''), 'server' => ucfirst((string) ($row['server_type'] ?? '')), 'last' => 0, 'plays' => 0, 'profiles' => []];
             $devices[$key]['plays']++;
+            if (trim((string) ($row['profile'] ?? '')) !== '') {
+                $devices[$key]['profiles'][trim((string) $row['profile'])] = true;
+            }
             $devices[$key]['last'] = max($devices[$key]['last'], $at);
         }
         usort($devices, fn ($a, $b) => $b['last'] <=> $a['last']);
@@ -136,7 +139,7 @@ trait Devices
         foreach ($streams as $s) {
             $title = trim((string) ($s['show_title'] ?? '')) !== '' ? $s['show_title'] . ' · ' . ($s['media_title'] ?? '') : (string) ($s['media_title'] ?? '');
             $now .= '<div style="' . $line . '"><div><div style="font-weight:600">' . $e($title) . '</div><div style="opacity:.7;font-size:.9rem">'
-                . $e(trim(($s['device'] ?? '') . ' · ' . ($s['player'] ?? ''), ' ·')) . ' · ' . $e(self::t('since :time', ['time' => date('H:i', strtotime((string) ($s['started_at'] ?? 'now')))])) . '</div></div>'
+                . $e(trim(($s['device'] ?? '') . ' · ' . ($s['player'] ?? ''), ' ·')) . (trim((string) ($s['profile'] ?? '')) !== '' ? ' · ' . $e(self::t('profile :name', ['name' => $s['profile']])) : '') . ' · ' . $e(self::t('since :time', ['time' => date('H:i', strtotime((string) ($s['started_at'] ?? 'now')))])) . '</div></div>'
                 . '<form method="post">' . csrf_field() . '<input type="hidden" name="stop" value="' . $e($s['id']) . '"><button type="submit" class="border border-neutral rounded-lg px-3 py-1">' . $e(self::t('Stop')) . '</button></form></div>';
         }
         $html = $card(self::t('Playing now'), $now !== '' ? $now . '<p style="opacity:.7;font-size:.85rem;margin-top:.6rem">' . $e(self::t('Something you don\'t recognise? Stop it and choose a new password below.')) . '</p>'
@@ -144,7 +147,8 @@ trait Devices
 
         $list = '';
         foreach (array_slice($devices, 0, 30) as $d) {
-            $list .= '<div style="' . $line . '"><div><div style="font-weight:600">' . $e($d['device']) . '</div><div style="opacity:.7;font-size:.9rem">' . $e(trim($d['player'] . ' · ' . $d['server'], ' ·')) . '</div></div>'
+            $list .= '<div style="' . $line . '"><div><div style="font-weight:600">' . $e($d['device']) . '</div><div style="opacity:.7;font-size:.9rem">' . $e(trim($d['player'] . ' · ' . $d['server'], ' ·'))
+                . (!empty($d['profiles']) ? ' · ' . $e(self::t('profiles: :list', ['list' => implode(', ', array_keys($d['profiles']))])) : '') . '</div></div>'
                 . '<div style="text-align:right;opacity:.8;font-size:.9rem">' . $e(date(self::t('M j, H:i'), $d['last'])) . '<br>' . $e($d['plays'] === 1 ? self::t('1 play') : self::t(':count plays', ['count' => $d['plays']])) . '</div></div>';
         }
         $html .= $card(self::t('Devices, last 30 days'), $list !== '' ? $list : '<p style="opacity:.8">' . $e(self::t('No plays in the last 30 days.')) . '</p>');
