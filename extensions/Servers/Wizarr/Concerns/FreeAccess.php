@@ -165,7 +165,7 @@ trait FreeAccess
                     $last[$key] = max($last[$key] ?? 0, strtotime((string) ($play['started_at'] ?? '')) ?: 0);
                 }
             }
-            foreach ($members as $member) {
+            foreach ($this->tracearrHasSilo() ? [] : $members as $member) {
                 foreach ($member['accounts'] as $account) {
                     if ($account['type'] !== 'silo' || !ctype_digit($account['id'])) {
                         continue;
@@ -193,7 +193,7 @@ trait FreeAccess
     {
         $best = null;
         foreach ($member['accounts'] as $account) {
-            $key = $account['type'] === 'silo' ? 'silo|' . $account['id'] : $account['type'] . '|' . strtolower($account['username']);
+            $key = $account['type'] === 'silo' && !$this->tracearrHasSilo() ? 'silo|' . $account['id'] : $account['type'] . '|' . strtolower($account['username']);
             if (isset($lastPlays[$key]) && $lastPlays[$key] > 0) {
                 $best = max($best ?? 0, $lastPlays[$key]);
             }

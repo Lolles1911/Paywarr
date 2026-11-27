@@ -3,6 +3,19 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.39.0 (2026-11-27)
+
+- **Silo through Tracearr:** Tracearr 3.3 watches Silo too. When your
+  Tracearr has a Silo server, Paywarr takes Silo's users, plays and streams from
+  Tracearr like the others', and stops asking Silo itself for them:
+  - stream limits, "Streams and sharing", My devices (with Stop) and At risk
+    now include Silo users;
+  - Continue watching, "Because you watched", challenges and free access use
+    Tracearr's Silo plays, with Silo's posters through Tracearr;
+  - service status takes Silo's up/down from Tracearr.
+  Without a Silo server in Tracearr, everything works as before (Silo is asked
+  directly). Paywarr Stats 1.12.0 does the same for its pages.
+
 ## 1.38.0 (2026-11-26)
 
 For customers:

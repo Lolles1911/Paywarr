@@ -3914,6 +3914,18 @@ test('backup: everything Paywarr keeps, without secrets; restoring keeps the key
     $W::forgetGlobalSettings();
 });
 
+test('silo through tracearr: silo users count once tracearr watches silo; posters and status follow', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $props = ['wizarr_users' => '7:Mette:silo,11:anna:jellyfin'];
+    same(['jellyfin|anna'], ext()->streamAccounts($props, false), 'without: Silo is asked itself, not through Tracearr');
+    same(['silo|mette', 'jellyfin|anna'], ext()->streamAccounts($props, true), 'with: Silo users like the others');
+    same(false, ext()->tracearrHasSilo(), 'no Tracearr: no');
+    $path = $W::addedPosterPath(['rating_key' => 'abc-123', 'server_id' => 'srv', 'server_type' => 'silo']);
+    ok(str_contains(urldecode((string) $path), 'url=/content/abc-123/poster'), 'a Silo poster through Tracearr');
+    $state = ext()->monitorStatus(1_800_000_000, [['server_name' => 'Silo', 'server_type' => 'silo', 'status' => 'up'], ['server_name' => 'Jelly', 'server_type' => 'jellyfin', 'status' => 'up']]);
+    ok(is_array($state), 'status with a Silo server in Tracearr: no second check of Silo');
+});
+
 test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {
     \Illuminate\Support\Facades\Mail::$sent = [];
     $service = wizarrService(60);

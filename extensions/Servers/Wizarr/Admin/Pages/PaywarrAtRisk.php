@@ -46,7 +46,7 @@ class PaywarrAtRisk extends Page implements HasTable
     {
         $stats = class_exists(\Paymenter\Extensions\Others\PaywarrStats\PaywarrStats::class);
 
-        return 'Paying customers who haven\'t watched for a while (from Tracearr, last 60 days; Silo users aren\'t counted), soonest renewal first. '
+        return 'Paying customers who haven\'t watched for a while (from Tracearr, last 60 days; Silo users too when Tracearr watches Silo, 3.3 or newer), soonest renewal first. '
             . ($stats ? 'The automatic mail is "Remind customers who watched nothing" in Paywarr Stats; it sends "Watched nothing for a while" under Mail → Automatic mails, with new titles.'
                 : 'With Paywarr Stats, "Remind customers who watched nothing" mails them by itself.');
     }

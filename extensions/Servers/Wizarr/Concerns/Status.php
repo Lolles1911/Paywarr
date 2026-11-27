@@ -115,6 +115,10 @@ trait Status
             }
             $seen['tracearr:' . $server['server_name']] = ['name' => (string) $server['server_name'], 'type' => strtolower((string) ($server['server_type'] ?? '')), 'up' => ($server['status'] ?? '') !== 'down', 'servers' => []];
         }
+        $tracearrSilo = array_filter($tracearrServers ?? [], fn ($s) => strtolower((string) ($s['server_type'] ?? '')) === 'silo');
+        if ($siloUp === null && $tracearrSilo) {
+            $siloUp = []; // Tracearr watches Silo: its word, not a second check
+        }
         if ($siloUp === null) {
             $siloUp = [];
             try {
