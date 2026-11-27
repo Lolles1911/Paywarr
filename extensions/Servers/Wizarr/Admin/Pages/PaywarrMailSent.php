@@ -55,14 +55,14 @@ class PaywarrMailSent extends Page implements HasTable
             TextEntry::make('month')->label('Last 30 days')->state((string) array_sum($month)),
         ];
         $kinds = [];
-        foreach (['essential', 'reminders', 'news', 'events', 'stats'] as $kind) {
+        foreach (['essential', 'reminders', 'news', 'events', 'stats', 'shows'] as $kind) {
             $kinds[] = TextEntry::make('k' . $kind)->label(PaywarrMails::kindLabel($kind))->state((string) ($month[$kind] ?? 0));
         }
 
         return $schema->components([
             \Filament\Schemas\Components\Grid::make(['default' => 1, 'lg' => 3])->schema([
                 Section::make('Sent')->columns(2)->schema($tiles)->columnSpan(1),
-                Section::make('Per kind, last 30 days')->columns(['default' => 2, 'lg' => 5])->schema($kinds)->columnSpan(['default' => 1, 'lg' => 2]),
+                Section::make('Per kind, last 30 days')->columns(['default' => 2, 'lg' => 6])->schema($kinds)->columnSpan(['default' => 1, 'lg' => 2]),
             ]),
             EmbeddedTable::make(),
         ]);

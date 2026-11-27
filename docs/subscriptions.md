@@ -44,7 +44,9 @@ one-time **code** instead of access:
   Paywarr subscriptions (not trials, top-ups or other gift cards).
 - The buyer gets the code by mail, and sees it on their subscription with
   whether it is used. **Send it to a friend** sends it by mail, with the
-  buyer's name and an optional greeting.
+  buyer's name and an optional greeting, now or on a day the buyer chooses
+  (a birthday, Christmas Eve): then it goes out at 8:00 that day. The buyer
+  sees the planned gift there and can cancel it.
 - The friend chooses a subscription and enters the code under "Coupon" in the
   cart.
 - Refunded or cancelled before it is used, the code stops working.

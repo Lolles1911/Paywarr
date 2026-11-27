@@ -3,6 +3,22 @@
 What changed in each version of Paywarr. Each section is also the text of its
 release on GitHub (`.github/release-notes.sh` puts it there).
 
+## 1.40.0 (2026-11-27)
+
+- **New episodes of your shows**: when a new episode of a show a customer
+  watched in the last 60 days arrives (Tracearr), they get a mail with the
+  shows and episodes. Once a day by default (after 17:00); Paywarr → Settings
+  → Reminders → **New episodes** chooses right away, weekly or off. A new
+  unsubscribe kind, "News from your shows", in the mail settings and under
+  Mail.
+- **Posters open the title**: on the My page, a poster opens the title itself
+  on Jellyfin and Silo (Plex and Emby open the server, as before).
+- **Gift card on a day you choose**: "Send it to a friend" takes a date; the
+  gift then goes out at 8:00 that day. The buyer sees the planned gift and can
+  cancel it.
+- Paywarr Stats 1.13.0: Wrapped can be saved and shared as an image (story
+  and square).
+
 ## 1.39.0 (2026-11-27)
 
 - **Silo through Tracearr:** Tracearr 3.3 watches Silo too. When your

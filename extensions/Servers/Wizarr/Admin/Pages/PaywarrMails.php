@@ -61,6 +61,7 @@ class PaywarrMails extends Page implements HasTable
             'events' => 'Movie nights and challenges',
             'reminders' => 'Reminders',
             'stats' => 'Stats and surveys',
+            'shows' => 'News from their shows',
             default => 'Always',
         };
     }
@@ -72,6 +73,7 @@ class PaywarrMails extends Page implements HasTable
             'events' => 'info',
             'reminders' => 'primary',
             'stats' => 'success',
+            'shows' => 'info',
             default => 'gray',
         };
     }

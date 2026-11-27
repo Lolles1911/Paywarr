@@ -15,8 +15,8 @@ use Throwable;
  * Gift cards: a product with "Gift card: months" is bought like any other,
  * and gives a one-time code (a Paymenter coupon) worth what was paid, spread
  * over that many billing periods of a Paywarr subscription. The buyer gets
- * the code, and can send it to a friend from their subscription. Part of
- * Wizarr (Paywarr).
+ * the code, and can send it to a friend from their subscription, now or on
+ * a day they choose (at 8:00 that day). Part of Wizarr (Paywarr).
  */
 trait Gifts
 {
@@ -108,6 +108,9 @@ trait Gifts
         if (($sent = (string) ($properties[self::PROP_GIFT_SENT_TO] ?? '')) !== '') {
             $actions[] = ['type' => 'text', 'label' => self::t('Sent to'), 'text' => $sent];
         }
+        if (($plan = self::giftPlan((int) $service->id)) !== null) {
+            $actions[] = ['type' => 'text', 'label' => self::t('Planned'), 'text' => self::t(':email on :date', ['email' => $plan['email'], 'date' => date(self::t('M j, Y'), strtotime($plan['on']))])];
+        }
         if (!$used && $service->status === 'active') {
             $actions[] = ['type' => 'button', 'label' => self::t('Send it to a friend'), 'url' => $this->giftPageUrl($service)];
         }
@@ -127,33 +130,47 @@ trait Gifts
         $error = '';
         if (request()->isMethod('post')) {
             try {
-                $this->sendGift($service, (string) request()->input('email'), (string) request()->input('name'), (string) request()->input('message'));
-                $notice = self::t('Sent! Your friend gets the code by email.');
+                if (request()->input('cancel_plan')) {
+                    self::dropGiftPlan((int) $service->id);
+                    $notice = self::t('The planned gift was cancelled.');
+                } elseif (($on = trim((string) request()->input('send_on'))) !== '' && $on > date('Y-m-d')) {
+                    $this->planGift($service, (string) request()->input('email'), (string) request()->input('name'), (string) request()->input('message'), $on);
+                    $notice = self::t('Planned! Your friend gets the code by email on :date at 8:00.', ['date' => date(self::t('M j, Y'), strtotime($on))]);
+                } else {
+                    $this->sendGift($service, (string) request()->input('email'), (string) request()->input('name'), (string) request()->input('message'));
+                    self::dropGiftPlan((int) $service->id);
+                    $notice = self::t('Sent! Your friend gets the code by email.');
+                }
                 $properties = ExtensionHelper::getServiceProperties($service->fresh() ?? $service);
             } catch (DisplayException $e) {
                 $error = $e->getMessage();
             }
         }
+        $plan = self::giftPlan((int) $service->id);
         $e = fn ($v) => e((string) $v);
         $code = (string) ($properties[self::PROP_GIFT_CODE] ?? '');
         $html = '<div class="container mt-14" style="max-width:40rem"><h1 style="font-size:1.8rem;font-weight:800;margin-bottom:.4rem">' . $e(self::t('Send it to a friend')) . '</h1>'
             . '<p style="opacity:.75;margin-bottom:1.4rem">' . $e(self::t('Your friend gets the code :code by email, with how to use it.', ['code' => $code])) . '</p>'
             . ($notice !== '' ? '<p style="padding:.8rem 1rem;border-radius:.7rem;background:rgba(34,197,94,.12);margin-bottom:1rem">' . $e($notice) . '</p>' : '')
             . ($error !== '' ? '<p style="padding:.8rem 1rem;border-radius:.7rem;background:rgba(239,68,68,.12);margin-bottom:1rem">' . $e($error) . '</p>' : '')
+            . ($plan !== null ? '<form method="post" class="bg-background-secondary" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;padding:.9rem 1.1rem;border-radius:.9rem;margin-bottom:1.2rem">' . csrf_field()
+                . '<div><div style="font-weight:700">🎁 ' . $e(self::t('Planned')) . '</div><div style="opacity:.8">' . $e(self::t(':email on :date', ['email' => $plan['email'], 'date' => date(self::t('M j, Y'), strtotime($plan['on']))])) . ' · 8:00</div></div>'
+                . '<button type="submit" name="cancel_plan" value="1" class="border border-neutral rounded-lg px-3 py-1">' . $e(self::t('Cancel')) . '</button></form>' : '')
             . '<form method="post" style="display:grid;gap:.9rem">' . csrf_field()
             . '<label style="display:grid;gap:.3rem"><span style="font-weight:600">' . $e(self::t('Their email')) . '</span><input type="email" name="email" required maxlength="190" class="bg-background-secondary border border-neutral rounded-lg px-3 py-2"></label>'
             . '<label style="display:grid;gap:.3rem"><span style="font-weight:600">' . $e(self::t('Their name (optional)')) . '</span><input type="text" name="name" maxlength="80" class="bg-background-secondary border border-neutral rounded-lg px-3 py-2"></label>'
             . '<label style="display:grid;gap:.3rem"><span style="font-weight:600">' . $e(self::t('A message from you (optional)')) . '</span><textarea name="message" rows="4" maxlength="500" class="bg-background-secondary border border-neutral rounded-lg px-3 py-2"></textarea></label>'
+            . '<label style="display:grid;gap:.3rem"><span style="font-weight:600">' . $e(self::t('Send it on (optional)')) . '</span><input type="date" name="send_on" min="' . date('Y-m-d') . '" max="' . date('Y-m-d', min(time() + 365 * 86400, (int) ($properties[self::PROP_GIFT_EXPIRES] ?? 0) ?: time() + 365 * 86400)) . '" class="bg-background-secondary border border-neutral rounded-lg px-3 py-2" style="max-width:14rem">'
+            . '<span style="opacity:.7;font-size:.85rem">' . $e(self::t('Empty: it goes now. A day ahead: we send it at 8:00 that day, for a birthday or Christmas.')) . '</span></label>'
             . '<button type="submit" class="bg-primary text-white font-semibold rounded-lg px-4 py-2" style="justify-self:start">' . $e(self::t('Send the gift')) . '</button></form></div>';
 
         return view('layouts.app', ['slot' => new HtmlString($html), 'title' => self::t('Send it to a friend')]);
     }
 
-    /** Mails the code to a friend: from whom, what it gives, how to use it. At most 5 an hour. */
-    public function sendGift(Service $service, string $email, string $name = '', string $message = ''): void
+    /** The checks before a gift is sent or planned; returns the code. At most 5 an hour when $limited. */
+    private function giftReady(Service $service, string $email, bool $limited = true): string
     {
-        $email = trim($email);
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        if (!filter_var(trim($email), FILTER_VALIDATE_EMAIL)) {
             throw new DisplayException(self::t('That email address doesn\'t look right.'));
         }
         $properties = ExtensionHelper::getServiceProperties($service);
@@ -162,12 +179,91 @@ trait Gifts
             throw new DisplayException(self::t('This gift code can\'t be sent any more.'));
         }
         $key = 'wizarr-gift:' . $service->id;
-        if (class_exists(RateLimiter::class) && RateLimiter::tooManyAttempts($key, 5)) {
-            throw new DisplayException(self::t('You have sent it a few times now. Please try again in an hour.'));
-        }
-        if (class_exists(RateLimiter::class)) {
+        if ($limited && class_exists(RateLimiter::class)) {
+            if (RateLimiter::tooManyAttempts($key, 5)) {
+                throw new DisplayException(self::t('You have sent it a few times now. Please try again in an hour.'));
+            }
             RateLimiter::hit($key, 3600);
         }
+
+        return $code;
+    }
+
+    /** The planned gift of a gift card: [email, name, message, on (Y-m-d)], or null. */
+    public static function giftPlan(int $serviceId): ?array
+    {
+        $plans = self::storeGet('gift_plans');
+
+        return is_array($plans[$serviceId] ?? null) ? $plans[$serviceId] : null;
+    }
+
+    private static function dropGiftPlan(int $serviceId): void
+    {
+        $plans = self::storeGet('gift_plans');
+        if (is_array($plans) && isset($plans[$serviceId])) {
+            unset($plans[$serviceId]);
+            self::storePut('gift_plans', $plans);
+        }
+    }
+
+    /** Sends the gift on a later day (at 8:00), until the code expires; one plan per gift card. */
+    public function planGift(Service $service, string $email, string $name, string $message, string $on): void
+    {
+        $day = \DateTime::createFromFormat('!Y-m-d', $on);
+        $expires = (int) (ExtensionHelper::getServiceProperties($service)[self::PROP_GIFT_EXPIRES] ?? 0);
+        if (!$day || $day->format('Y-m-d') !== $on || $on <= date('Y-m-d') || $day->getTimestamp() > time() + 366 * 86400 || ($expires && $day->getTimestamp() > $expires)) {
+            throw new DisplayException(self::t('Choose a day from tomorrow, before the code expires.'));
+        }
+        $this->giftReady($service, $email);
+        $plans = self::storeGet('gift_plans');
+        $plans = is_array($plans) ? $plans : [];
+        $plans[(int) $service->id] = ['email' => trim($email), 'name' => mb_substr(trim($name), 0, 80), 'message' => mb_substr(trim($message), 0, 500), 'on' => $on];
+        self::storePut('gift_plans', $plans);
+        self::logAdmin($service->user ?? null, (int) $service->id, 'Planned a gift for ' . $on, 'customer');
+    }
+
+    /** The hourly job: planned gifts whose day has come, from 8:00. A gift that can't go any more is dropped; a mail that fails is tried again. */
+    public function runPlannedGifts(?int $now = null): int
+    {
+        $now ??= time();
+        $plans = self::storeGet('gift_plans');
+        if (!is_array($plans) || !$plans || (int) date('G', $now) < 8) {
+            return 0;
+        }
+        $sent = 0;
+        foreach ($plans as $id => $plan) {
+            if (!is_array($plan) || ($plan['on'] ?? '9999') > date('Y-m-d', $now)) {
+                continue;
+            }
+            $service = Service::with(['product.settings', 'properties', 'user'])->find((int) $id);
+            try {
+                if (!$service) {
+                    throw new DisplayException('gone');
+                }
+                $this->sendGift($service, (string) $plan['email'], (string) ($plan['name'] ?? ''), (string) ($plan['message'] ?? ''), false);
+                $sent++;
+                unset($plans[$id]);
+            } catch (DisplayException $e) {
+                if (str_contains($e->getMessage(), self::t('The email couldn\'t be sent right now. Please try again shortly.'))) {
+                    continue; // next hour
+                }
+                Log::info('Wizarr: planned gift of service ' . $id . ' dropped: ' . $e->getMessage());
+                unset($plans[$id]);
+            } catch (Throwable $e) {
+                Log::warning('Wizarr: planned gift of service ' . $id . ' not sent yet: ' . $e->getMessage());
+            }
+        }
+        self::storePut('gift_plans', $plans);
+
+        return $sent;
+    }
+
+    /** Mails the code to a friend: from whom, what it gives, how to use it. At most 5 an hour from the page. */
+    public function sendGift(Service $service, string $email, string $name = '', string $message = '', bool $limited = true): void
+    {
+        $email = trim($email);
+        $code = $this->giftReady($service, $email, $limited);
+        $properties = ExtensionHelper::getServiceProperties($service);
         $from = trim(($service->user->first_name ?? '') . ' ' . ($service->user->last_name ?? '')) ?: (string) $service->user->email;
         $months = (int) (ExtensionHelper::settingsToArray($service->product->settings)['gift_months'] ?? 1);
         $title = self::t(':name gave you a gift', ['name' => $from]);

@@ -113,6 +113,27 @@ class TracearrClient
             ? ['body' => $response->body(), 'type' => $type] : null;
     }
 
+    /** Episodes added since $since (newest first, up to $max): title, server_type, grandparent_rating_key (the show), added_at. */
+    public function recentlyAddedEpisodes(int $since, int $max = 1000): array
+    {
+        $rows = [];
+        $cursor = null;
+        do {
+            $page = $this->call('get', '/api/v2/public/recently-added', array_filter(['pageSize' => 100, 'cursor' => $cursor]));
+            foreach ($page['data'] ?? [] as $row) {
+                if ((strtotime((string) ($row['added_at'] ?? '')) ?: 0) < $since) {
+                    return $rows;
+                }
+                if (empty($row['removed_at']) && ($row['media_type'] ?? '') === 'episode') {
+                    $rows[] = $row;
+                }
+            }
+            $cursor = $page['meta']['nextCursor'] ?? null;
+        } while ($cursor !== null && count($rows) < $max);
+
+        return $rows;
+    }
+
     /** Per library: server_type, item/movie/show/episode counts, total_file_size, resolutions (titles per resolution). */
     public function libraries(): array
     {

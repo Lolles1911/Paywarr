@@ -590,5 +590,18 @@
     "shows": "serier",
     "episodes": "afsnit",
     "in 4K": "i 4K",
-    "On the server: :line": "På serveren: :line"
+    "On the server: :line": "På serveren: :line",
+    "A new episode of your show": "Et nyt afsnit af din serie",
+    "New episodes of your shows": "Nye afsnit af dine serier",
+    "New on the server since last time:": "Nyt på serveren siden sidst:",
+    "news from your shows": "nyt fra dine serier",
+    ":n new episodes": ":n nye afsnit",
+    "Planned": "Planlagt",
+    ":email on :date": ":email den :date",
+    "The planned gift was cancelled.": "Den planlagte gave er annulleret.",
+    "Planned! Your friend gets the code by email on :date at 8:00.": "Planlagt! Din ven får koden på mail den :date kl. 8:00.",
+    "Cancel": "Annuller",
+    "Send it on (optional)": "Send den (valgfrit)",
+    "Empty: it goes now. A day ahead: we send it at 8:00 that day, for a birthday or Christmas.": "Tom: den sendes nu. En senere dag: vi sender den kl. 8:00 den dag, fx til en fødselsdag eller jul.",
+    "Choose a day from tomorrow, before the code expires.": "Vælg en dag fra i morgen, før koden udløber."
 }

@@ -3692,7 +3692,7 @@ test('mail center: every automatic mail in a list; your own words with {placehol
     $keep = \App\Models\Property::$rows;
     $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
     foreach ($W::mailCatalog() as $id => $entry) {
-        ok(in_array($entry['kind'], ['essential', 'news', 'events', 'reminders', 'stats'], true) && $entry['name'] !== '' && $entry['about'] !== '', $id . ': a name, a kind and when');
+        ok(in_array($entry['kind'], ['essential', 'news', 'events', 'reminders', 'stats', 'shows'], true) && $entry['name'] !== '' && $entry['about'] !== '', $id . ': a name, a kind and when');
         if (isset($entry['make'])) {
             [$title, $text] = $W::mailDefaultWords($id);
             foreach (array_keys($entry['vars']) as $var) {
@@ -3726,7 +3726,7 @@ test('mail center: every automatic mail in a list; your own words with {placehol
 
 test('capacity: seats per media server count users, unused invitations and unpaid orders; a full server sells out its products', function () {
     $now = 1_800_000_000;
-    $inventory = [['ok' => true, 'key' => 'w1', 'host' => 'http://wizarr', 'paymenter' => [5 => 'Wizarr'],
+    $inventory = [['ok' => true, 'kind' => 'wizarr', 'key' => 'w1', 'host' => 'http://wizarr', 'paymenter' => [5 => 'Wizarr'],
         'servers' => [['id' => 1, 'name' => 'Jelly', 'type' => 'jellyfin', 'users' => 8], ['id' => 2, 'name' => 'Plexy', 'type' => 'plex', 'users' => 3]],
         'invitations' => [
             ['used_by' => '', 'status' => 'pending', 'expires' => '', 'servers' => ['Jelly']],
@@ -3946,6 +3946,23 @@ test('tracearr extras: library numbers, and new devices per customer (once each)
     ok(isset($known[7]['iphone|app|']), 'and remembered');
 });
 
+test('new episodes of your shows: matched by the show on the server, to those who watch it; once a day at 17', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    $plays = [
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'anna'], 'media_type' => 'episode', 'show_title' => 'Severance', 'grandparent_rating_key' => 'sev'],
+        ['server_type' => 'jellyfin', 'user' => ['username' => 'bo'], 'media_type' => 'episode', 'show_title' => 'The Bear', 'grandparent_rating_key' => 'bear'],
+        ['server_type' => 'plex', 'user' => ['username' => 'anna'], 'media_type' => 'episode', 'show_title' => 'Severance', 'grandparent_rating_key' => '999'],
+    ];
+    $episodes = [['server_type' => 'jellyfin', 'grandparent_rating_key' => 'sev', 'title' => 'Cold Harbor'], ['server_type' => 'jellyfin', 'grandparent_rating_key' => 'sev', 'title' => 'Woe\'s Hollow'],
+        ['server_type' => 'jellyfin', 'grandparent_rating_key' => 'bear', 'title' => 'Forks'], ['server_type' => 'jellyfin', 'grandparent_rating_key' => 'other', 'title' => 'X']];
+    same([7 => ['Severance' => ['Cold Harbor', 'Woe\'s Hollow']]], $W::newEpisodesFor($episodes, $plays, ['jellyfin|anna' => 7]), 'her show only, matched on the same server');
+    same("• Severance: Cold Harbor, Woe's Hollow", $W::episodeLines(['Severance' => ['Cold Harbor', 'Woe\'s Hollow']]), 'as lines');
+    $day = strtotime('2026-11-26 17:30:00');
+    same([true, false, false, true], [$W::showAlertsDue('daily', $day - 86400, $day), $W::showAlertsDue('daily', $day - 600, $day), $W::showAlertsDue('daily', $day - 86400, strtotime('2026-11-26 12:00')), $W::showAlertsDue('instant', $day - 60, $day)],
+        'daily: once, after 17; instant: always');
+    same([false, true], [$W::showAlertsDue('weekly', $day - 86400 * 7, $day), $W::showAlertsDue('weekly', $day - 86400 * 7, strtotime('2026-11-29 17:10'))], 'weekly: Sundays');
+});
+
 test('welcome mail: link, steps, apps for the media server, Discord and your own words; Paymenter\'s mail stays for re-invites only when off', function () {
     \Illuminate\Support\Facades\Mail::$sent = [];
     $service = wizarrService(60);
@@ -3987,6 +4004,38 @@ test('gift card: a one-time code worth what was paid, the client area, sending i
     same('friend@example.com', $service->propertyArray()['gift_sent_to'] ?? null, 'noted');
     tellsCustomer(fn () => ext()->sendGift($service, 'not-an-email'), 'doesn\'t look right', 'a bad address');
     same(null, ext()->bannerState($service, $service->propertyArray()), 'no access box for a gift card');
+});
+
+test('gift card: sent on a day the buyer chooses, at 8:00; cancelled; dropped once used', function () {
+    \Illuminate\Support\Facades\Mail::$sent = [];
+    \App\Models\Property::$rows = [];
+    $service = wizarrService(63);
+    $service->product->settings = ['gift_months' => '1'];
+    \App\Models\Service::$all = [$service];
+    $code = ext()->createGift($service, $service->product->settings, fn () => 502)['gift_code'];
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    tellsCustomer(fn () => ext()->planGift($service, 'friend@example.com', '', '', date('Y-m-d')), 'from tomorrow', 'today is not later');
+    tellsCustomer(fn () => ext()->planGift($service, 'friend@example.com', '', '', '2026-02-31'), 'from tomorrow', 'not a day');
+    $on = date('Y-m-d', strtotime('+3 days'));
+    ext()->planGift($service, 'friend@example.com', 'Ole', 'Tillykke!', $on);
+    same(['friend@example.com', $on], [$W::giftPlan(63)['email'], $W::giftPlan(63)['on']], 'planned');
+    ok(in_array('text:Planned=friend@example.com on ' . date('M j, Y', strtotime($on)), labels(ext()->getActions($service, $service->product->settings, $service->propertyArray())), true), 'the client area shows it');
+    same(0, ext()->runPlannedGifts(strtotime($on . ' -1 day 12:00')), 'not the day before');
+    same(0, ext()->runPlannedGifts(strtotime($on . ' 07:30')), 'not before 8:00');
+    same([], mailsTo('friend@example.com'), 'nothing sent yet');
+    same(1, ext()->runPlannedGifts(strtotime($on . ' 08:10')), 'sent at 8');
+    [$friend] = mailsTo('friend@example.com');
+    ok(str_contains($friend['html'], $code) && str_contains($friend['html'], 'Tillykke!') && str_contains($friend['html'], 'Hi Ole,'), 'with code, greeting and name');
+    same(null, $W::giftPlan(63), 'done');
+    same(0, ext()->runPlannedGifts(strtotime($on . ' 09:10')), 'once');
+
+    ext()->planGift($service, 'other@example.com', '', '', $on);
+    $service->status = 'suspended';
+    same(0, ext()->runPlannedGifts(strtotime($on . ' 08:10')), 'a card that can\'t be sent any more: not sent');
+    same(null, $W::giftPlan(63), 'and dropped');
+    same([], mailsTo('other@example.com'), 'no mail');
+    \App\Models\Service::$all = [];
+    \App\Models\Property::$rows = [];
 });
 
 test('reminders: trial ending, unused link, renewal with an unpaid invoice; each once, by mail and Discord, only when switched on', function () {
@@ -4535,6 +4584,17 @@ test('posters: a path for each media server, popular by how many watched, contin
         ['key' => 'c', 'type' => 'show', 'title' => 'Lost', 'year' => 2004], ['key' => 'd', 'type' => 'movie', 'title' => 'Up', 'year' => 2009]];
     same(['a', 'c', 'd'], array_column($W::usablePosters($items, [], 10), 'key'), 'the same movie on two servers: once');
     same(['b', 'c'], array_column($W::usablePosters($items, ['a' => true], 2), 'key'), 'a poster without an image: the other server\'s copy instead');
+});
+
+test('posters open the title itself on Jellyfin and Silo, else the server', function () {
+    $W = \Paymenter\Extensions\Servers\Wizarr\Wizarr::class;
+    same('g1', $W::titleId(['media_type' => 'episode', 'rating_key' => 'e1', 'grandparent_rating_key' => 'g1']), 'an episode: its show');
+    same('m1', $W::titleId(['media_type' => 'movie', 'rating_key' => 'm1']), 'a movie: itself');
+    same('https://jf.example.com/web/index.html#/details?id=abc', $W::titleLink(['server_type' => 'jellyfin', 'id' => 'abc'], 'https://jf.example.com/web/index.html'), 'Jellyfin');
+    same('https://ex.com:8096/jf/web/index.html#/details?id=abc', $W::titleLink(['server_type' => 'jellyfin', 'id' => 'abc'], 'https://ex.com:8096/jf/'), 'Jellyfin under a path');
+    same('https://silo.example.com/item/42', $W::titleLink(['server_type' => 'silo', 'id' => '42'], 'https://silo.example.com/'), 'Silo');
+    same('https://app.plex.tv', $W::titleLink(['server_type' => 'plex', 'id' => '9'], 'https://app.plex.tv'), 'Plex: the server');
+    same('https://jf.example.com', $W::titleLink(['server_type' => 'jellyfin'], 'https://jf.example.com'), 'no ID: the server');
 });
 
 /* ---------- help, checklist, switching, unpaid orders, uptime, satisfaction, CSV ---------- */
