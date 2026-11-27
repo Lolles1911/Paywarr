@@ -70,6 +70,14 @@ trait Hub
                 . $e($service->status === 'suspended' ? self::t('Paused or suspended') : ($expires ? self::t('Renews :date', ['date' => date(self::t('M j, Y'), $expires)]) : self::t('Active'))) . '</span></a>';
         }
         $cards .= $this->hubCard('📦', self::t('Your subscriptions'), $rows !== '' ? $rows : '<p>' . $e(self::t('No subscription yet.')) . '</p>', [self::t('See all'), $this->routeOr('services', '/services')]);
+        try {
+            $libraryLine = ($libs = $this->trLibraries()) ? self::libraryLine(self::libraryTotals($libs)) : '';
+        } catch (Throwable $e) {
+            $libraryLine = '';
+        }
+        if ($libraryLine !== '') {
+            $cards .= $this->hubCard('📚', self::t('On the server'), '<p>' . $e($libraryLine) . '</p>', $this->comingSoonConfigured() ? [self::t('Coming soon'), $this->comingUrl()] : null);
+        }
         $best = 0;
         foreach ($this->yearlyChoices($user) as $choice) {
             $best = max($best, (int) ($choice['offer']['percent'] ?? 0));

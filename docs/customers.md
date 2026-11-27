@@ -297,6 +297,15 @@ Safari, "Install app" in Chrome) and opens as an app, full screen. Icon:
 Paymenter's favicon or logo, else the first letter of the site's name. No push
 messages.
 
+## The library in numbers, new devices
+
+- With Tracearr, the front page (with "Show the selection to visitors") shows
+  the number of movies, shows, episodes and titles in 4K; the My page and each
+  product's page show them too (a product: its media server types).
+- **New device on your account**: the first time a device plays on a
+  customer's user, they get a mail asking if it was them, with a link to My
+  devices. The first check only learns the devices already in use.
+
 ## Languages
 
 Customer texts follow the language Paymenter shows the visitor: the language

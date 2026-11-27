@@ -150,6 +150,13 @@ trait Health
             $problems[] = count($stuck) . ' paid subscription(s) have had no invitation for over 15 minutes (service ' . $this->serviceList($stuck)
                 . '). Is Paymenter\'s queue worker running? The reason is usually in Admin -> Other -> Failed Jobs, or in the log.';
         }
+        // Media servers down (Service status), with Tracearr's reason when it gives one.
+        foreach (self::storeGet('status_servers', []) as $server) {
+            if (empty($server['up'])) {
+                $problems[] = ($server['name'] ?? 'A server') . ' is down' . (!empty($server['since']) ? ' since ' . date('M j, H:i', (int) $server['since']) : '')
+                    . (($server['reason'] ?? '') !== '' ? ': ' . $this->shorten((string) $server['reason']) : '') . '.';
+            }
+        }
 
         return $problems;
     }

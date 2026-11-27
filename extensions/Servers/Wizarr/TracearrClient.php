@@ -113,6 +113,12 @@ class TracearrClient
             ? ['body' => $response->body(), 'type' => $type] : null;
     }
 
+    /** Per library: server_type, item/movie/show/episode counts, total_file_size, resolutions (titles per resolution). */
+    public function libraries(): array
+    {
+        return $this->call('get', '/api/v2/public/libraries')['data'] ?? [];
+    }
+
     private function call(string $method, string $path, array $data = []): array
     {
         $url = rtrim($this->baseUrl, '/') . $path;
